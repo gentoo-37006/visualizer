@@ -7,115 +7,236 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'Auton Path Planner',
+      home: const FieldPage(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class FieldPage extends StatefulWidget {
+  const FieldPage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<FieldPage> createState() => _FieldPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _FieldPageState extends State<FieldPage> {
+  // Normalized (0..1) position of the point on the field.
+  final ValueNotifier<Offset> _pointPosition = ValueNotifier<Offset>(
+    const Offset(0.5, 0.5),
+  );
+  static const double _pointDiameter = 16;
+  static const double _fieldSizeInches = 144;
+  static const double _borderWidth = 3;
+  bool _isDragging = false;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void dispose() {
+    _pointPosition.dispose();
+    super.dispose();
+  }
+
+  void _updatePoint(Offset localPosition, double fieldSize) {
+    if (fieldSize <= 0) {
+      return;
+    }
+    final radius = _pointDiameter / 2;
+    final offset = radius + _borderWidth;
+    final imageLocal = localPosition - Offset(offset, offset);
+    final clampedX = imageLocal.dx.clamp(0.0, fieldSize);
+    final clampedY = imageLocal.dy.clamp(0.0, fieldSize);
+    _pointPosition.value = Offset(clampedX / fieldSize, clampedY / fieldSize);
+  }
+
+  bool _isOnPoint(Offset localPosition, double fieldSize) {
+    final radius = _pointDiameter / 2;
+    final offset = radius + _borderWidth;
+    final pointCenter = Offset(
+      _pointPosition.value.dx * fieldSize + offset,
+      _pointPosition.value.dy * fieldSize + offset,
+    );
+    return (localPosition - pointCenter).distance <= radius;
+  }
+
+  Offset _toFieldCoords(Offset normalized) {
+    final x = (normalized.dx - 0.5) * _fieldSizeInches;
+    final y = (0.5 - normalized.dy) * _fieldSizeInches;
+    return Offset(x, y);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
+      backgroundColor: const Color(0xFF171717),
+      body: SafeArea(
+        child: Row(
           children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  // Scale the square to the available space while preserving aspect.
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final outerSize = constraints.biggest.shortestSide;
+                      final fieldSize = (outerSize - _pointDiameter).clamp(
+                        0.0,
+                        outerSize,
+                      );
+                      final innerFieldSize = (fieldSize - _borderWidth * 2)
+                          .clamp(0.0, fieldSize);
+                      if (innerFieldSize <= 0) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return SizedBox.square(
+                        dimension: outerSize,
+                        child: MouseRegion(
+                          cursor: _isDragging
+                              ? SystemMouseCursors.grabbing
+                              : SystemMouseCursors.basic,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onPanDown: (details) {
+                              if (_isOnPoint(
+                                details.localPosition,
+                                innerFieldSize,
+                              )) {
+                                setState(() {
+                                  _isDragging = true;
+                                });
+                                _updatePoint(
+                                  details.localPosition,
+                                  innerFieldSize,
+                                );
+                              }
+                            },
+                            onPanUpdate: (details) {
+                              if (_isDragging) {
+                                _updatePoint(
+                                  details.localPosition,
+                                  innerFieldSize,
+                                );
+                              }
+                            },
+                            onPanEnd: (_) => setState(() {
+                              _isDragging = false;
+                            }),
+                            onPanCancel: () => setState(() {
+                              _isDragging = false;
+                            }),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned(
+                                  left: _pointDiameter / 2,
+                                  top: _pointDiameter / 2,
+                                  width: fieldSize,
+                                  height: fieldSize,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Colors.white30,
+                                        width: _borderWidth,
+                                      ),
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: const RepaintBoundary(
+                                      child: Image(
+                                        image: AssetImage(
+                                          'web/fields/decode.webp',
+                                        ),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                ValueListenableBuilder<Offset>(
+                                  valueListenable: _pointPosition,
+                                  builder: (context, point, child) {
+                                    final pointRadius = _pointDiameter / 2;
+                                    final pointCenter = Offset(
+                                      point.dx * innerFieldSize +
+                                          pointRadius +
+                                          _borderWidth,
+                                      point.dy * innerFieldSize +
+                                          pointRadius +
+                                          _borderWidth,
+                                    );
+                                    final left = pointCenter.dx - pointRadius;
+                                    final top = pointCenter.dy - pointRadius;
+
+                                    return Positioned(
+                                      left: left,
+                                      top: top,
+                                      child: MouseRegion(
+                                        cursor: _isDragging
+                                            ? SystemMouseCursors.grabbing
+                                            : SystemMouseCursors.click,
+                                        child: Container(
+                                          width: _pointDiameter,
+                                          height: _pointDiameter,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.redAccent,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              width: 220,
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFF1E1E1E),
+              child: ValueListenableBuilder<Offset>(
+                valueListenable: _pointPosition,
+                builder: (context, point, child) {
+                  final field = _toFieldCoords(point);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Point Position',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'x: ${field.dx.toStringAsFixed(1)} in',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'y: ${field.dy.toStringAsFixed(1)} in',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }

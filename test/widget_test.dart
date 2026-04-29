@@ -11,20 +11,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auton_path_planner/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('Decode image renders in a scalable square',
+      (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    final imageFinder = find.byType(Image);
+    expect(imageFinder, findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    final imageWidget = tester.widget<Image>(imageFinder);
+    expect(imageWidget.image, isA<AssetImage>());
+    final asset = imageWidget.image as AssetImage;
+    expect(asset.assetName, 'web/fields/decode.webp');
   });
 }
