@@ -33,9 +33,8 @@ class _FieldPageState extends State<FieldPage> {
     const Offset(0.5, 0.5),
   ]);
   final ValueNotifier<int> _pointCount = ValueNotifier<int>(1);
-  final ValueNotifier<List<Color>> _pointColors = ValueNotifier<List<Color>>([
-    const Color(0xFFFF5252),
-  ]);
+  late final ValueNotifier<List<Color>> _pointColors =
+      ValueNotifier<List<Color>>([_randomColor()]);
   final Random _random = Random();
   final List<TextEditingController> _xControllers = [];
   final List<TextEditingController> _yControllers = [];
@@ -46,6 +45,7 @@ class _FieldPageState extends State<FieldPage> {
   static const double _borderWidth = 3;
   bool _isDragging = false;
   int _activeIndex = 0;
+  int _hoverIndex = -1;
 
   @override
   void initState() {
@@ -87,10 +87,16 @@ class _FieldPageState extends State<FieldPage> {
     }
     final field = _toFieldCoords(_points.value[index]);
     if (!_xFocusNodes[index].hasFocus) {
-      _xControllers[index].text = field.dx.toStringAsFixed(1);
+      final nextX = field.dx.toStringAsFixed(1);
+      if (_xControllers[index].text != nextX) {
+        _xControllers[index].text = nextX;
+      }
     }
     if (!_yFocusNodes[index].hasFocus) {
-      _yControllers[index].text = field.dy.toStringAsFixed(1);
+      final nextY = field.dy.toStringAsFixed(1);
+      if (_yControllers[index].text != nextY) {
+        _yControllers[index].text = nextY;
+      }
     }
   }
 
@@ -101,7 +107,9 @@ class _FieldPageState extends State<FieldPage> {
     final next = List<Offset>.from(_points.value);
     next[index] = value;
     _points.value = next;
-    _syncControllersForIndex(index);
+    if (_isDragging && index == _activeIndex) {
+      _syncControllersForIndex(index);
+    }
   }
 
   Color _randomColor() {
@@ -212,9 +220,47 @@ class _FieldPageState extends State<FieldPage> {
                           return SizedBox.square(
                             dimension: outerSize,
                             child: MouseRegion(
+                              opaque: true,
+                              onEnter: (event) {
+                                if (_isDragging) {
+                                  return;
+                                }
+                                final hitIndex = _hitTestPoint(
+                                  event.localPosition,
+                                  innerFieldSize,
+                                );
+                                if (hitIndex != _hoverIndex) {
+                                  setState(() {
+                                    _hoverIndex = hitIndex;
+                                  });
+                                }
+                              },
+                              onHover: (event) {
+                                if (_isDragging) {
+                                  return;
+                                }
+                                final hitIndex = _hitTestPoint(
+                                  event.localPosition,
+                                  innerFieldSize,
+                                );
+                                if (hitIndex != _hoverIndex) {
+                                  setState(() {
+                                    _hoverIndex = hitIndex;
+                                  });
+                                }
+                              },
+                              onExit: (_) {
+                                if (_hoverIndex != -1) {
+                                  setState(() {
+                                    _hoverIndex = -1;
+                                  });
+                                }
+                              },
                               cursor: _isDragging
                                   ? SystemMouseCursors.grabbing
-                                  : SystemMouseCursors.basic,
+                                  : (_hoverIndex >= 0
+                                        ? SystemMouseCursors.click
+                                        : SystemMouseCursors.basic),
                               child: GestureDetector(
                                 behavior: HitTestBehavior.translucent,
                                 onPanDown: (details) {
@@ -226,6 +272,7 @@ class _FieldPageState extends State<FieldPage> {
                                     setState(() {
                                       _isDragging = true;
                                       _activeIndex = hitIndex;
+                                      _hoverIndex = hitIndex;
                                     });
                                     _updatePoint(
                                       details.localPosition,
@@ -245,9 +292,13 @@ class _FieldPageState extends State<FieldPage> {
                                 },
                                 onPanEnd: (_) => setState(() {
                                   _isDragging = false;
+                                  _hoverIndex = -1;
+                                  _syncControllersForIndex(_activeIndex);
                                 }),
                                 onPanCancel: () => setState(() {
                                   _isDragging = false;
+                                  _hoverIndex = -1;
+                                  _syncControllersForIndex(_activeIndex);
                                 }),
                                 child: Stack(
                                   clipBehavior: Clip.none,
@@ -282,37 +333,19 @@ class _FieldPageState extends State<FieldPage> {
                                       valueListenable: _points,
                                       builder: (context, points, child) {
                                         return Positioned.fill(
-                                          child: CustomPaint(
-                                            painter: _PointPathPainter(
-                                              points: points,
-                                              colors: _pointColors.value,
-                                              fieldSize: innerFieldSize,
-                                              offset:
-                                                  _pointDiameter / 2 +
-                                                  _borderWidth,
+                                          child: RepaintBoundary(
+                                            child: CustomPaint(
+                                              painter: _FieldOverlayPainter(
+                                                points: points,
+                                                colors: _pointColors.value,
+                                                fieldSize: innerFieldSize,
+                                                offset:
+                                                    _pointDiameter / 2 +
+                                                    _borderWidth,
+                                                pointRadius: _pointDiameter / 2,
+                                              ),
                                             ),
                                           ),
-                                        );
-                                      },
-                                    ),
-                                    ValueListenableBuilder<List<Offset>>(
-                                      valueListenable: _points,
-                                      builder: (context, points, child) {
-                                        return Stack(
-                                          children: [
-                                            for (
-                                              var i = 0;
-                                              i < points.length;
-                                              i++
-                                            )
-                                              _PointMarker(
-                                                point: points[i],
-                                                fieldSize: innerFieldSize,
-                                                borderOffset: _borderWidth,
-                                                isDragging: _isDragging,
-                                                color: _pointColors.value[i],
-                                              ),
-                                          ],
                                         );
                                       },
                                     ),
@@ -351,59 +384,63 @@ class _FieldPageState extends State<FieldPage> {
                                   separatorBuilder: (context, index) =>
                                       const SizedBox(height: 12),
                                   itemBuilder: (context, index) {
-                                    return Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF262626),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: _pointColors.value[index],
+                                    return RepaintBoundary(
+                                      child: Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF262626),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: _pointColors.value[index],
+                                          ),
                                         ),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'Point ${index + 1}',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w600,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Point ${index + 1}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          _CoordField(
-                                            label: 'x',
-                                            controller: _xControllers[index],
-                                            focusNode: _xFocusNodes[index],
-                                            onChanged: (value) {
-                                              final x = _parseOrZero(value);
-                                              final y = _parseOrZero(
-                                                _yControllers[index].text,
-                                              );
-                                              _setPointAt(
-                                                index,
-                                                _toNormalizedCoords(x, y),
-                                              );
-                                            },
-                                          ),
-                                          const SizedBox(height: 8),
-                                          _CoordField(
-                                            label: 'y',
-                                            controller: _yControllers[index],
-                                            focusNode: _yFocusNodes[index],
-                                            onChanged: (value) {
-                                              final x = _parseOrZero(
-                                                _xControllers[index].text,
-                                              );
-                                              final y = _parseOrZero(value);
-                                              _setPointAt(
-                                                index,
-                                                _toNormalizedCoords(x, y),
-                                              );
-                                            },
-                                          ),
-                                        ],
+                                            const SizedBox(height: 8),
+                                            _CoordField(
+                                              label: 'x',
+                                              controller: _xControllers[index],
+                                              focusNode: _xFocusNodes[index],
+                                              onChanged: (value) {
+                                                final x = _parseOrZero(value);
+                                                final y = _parseOrZero(
+                                                  _yControllers[index].text,
+                                                );
+                                                _setPointAt(
+                                                  index,
+                                                  _toNormalizedCoords(x, y),
+                                                );
+                                              },
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _CoordField(
+                                              label: 'y',
+                                              controller: _yControllers[index],
+                                              focusNode: _yFocusNodes[index],
+                                              onChanged: (value) {
+                                                final x = _parseOrZero(
+                                                  _xControllers[index].text,
+                                                );
+                                                final y = _parseOrZero(value);
+                                                _setPointAt(
+                                                  index,
+                                                  _toNormalizedCoords(x, y),
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     );
                                   },
@@ -485,73 +522,34 @@ class _CoordField extends StatelessWidget {
   }
 }
 
-class _PointMarker extends StatelessWidget {
-  const _PointMarker({
-    required this.point,
-    required this.fieldSize,
-    required this.borderOffset,
-    required this.isDragging,
-    required this.color,
-  });
-
-  final Offset point;
-  final double fieldSize;
-  final double borderOffset;
-  final bool isDragging;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final pointRadius = _FieldPageState._pointDiameter / 2;
-    final pointCenter = Offset(
-      point.dx * fieldSize + pointRadius + borderOffset,
-      point.dy * fieldSize + pointRadius + borderOffset,
-    );
-    final left = pointCenter.dx - pointRadius;
-    final top = pointCenter.dy - pointRadius;
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: MouseRegion(
-        cursor: isDragging
-            ? SystemMouseCursors.grabbing
-            : SystemMouseCursors.click,
-        child: Container(
-          width: _FieldPageState._pointDiameter,
-          height: _FieldPageState._pointDiameter,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-      ),
-    );
-  }
-}
-
-class _PointPathPainter extends CustomPainter {
-  _PointPathPainter({
+class _FieldOverlayPainter extends CustomPainter {
+  _FieldOverlayPainter({
     required this.points,
     required this.colors,
     required this.fieldSize,
     required this.offset,
+    required this.pointRadius,
   });
 
   final List<Offset> points;
   final List<Color> colors;
   final double fieldSize;
   final double offset;
+  final double pointRadius;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (points.length < 2) {
+    if (points.isEmpty) {
       return;
     }
-    final paint = Paint()
+
+    final linePaint = Paint()
       ..strokeWidth = 4
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
     for (var i = 0; i < points.length - 1; i++) {
-      paint.color = colors.length > i + 1 ? colors[i + 1] : Colors.white70;
+      linePaint.color = colors.length > i + 1 ? colors[i + 1] : Colors.white70;
       final a = Offset(
         points[i].dx * fieldSize + offset,
         points[i].dy * fieldSize + offset,
@@ -560,15 +558,26 @@ class _PointPathPainter extends CustomPainter {
         points[i + 1].dx * fieldSize + offset,
         points[i + 1].dy * fieldSize + offset,
       );
-      canvas.drawLine(a, b, paint);
+      canvas.drawLine(a, b, linePaint);
+    }
+
+    for (var i = 0; i < points.length; i++) {
+      final center = Offset(
+        points[i].dx * fieldSize + offset,
+        points[i].dy * fieldSize + offset,
+      );
+      final paint = Paint()
+        ..color = colors.length > i ? colors[i] : Colors.white70;
+      canvas.drawCircle(center, pointRadius, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _PointPathPainter oldDelegate) {
+  bool shouldRepaint(covariant _FieldOverlayPainter oldDelegate) {
     return oldDelegate.points != points ||
         oldDelegate.colors != colors ||
         oldDelegate.fieldSize != fieldSize ||
-        oldDelegate.offset != offset;
+        oldDelegate.offset != offset ||
+        oldDelegate.pointRadius != pointRadius;
   }
 }
