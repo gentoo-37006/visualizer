@@ -85,7 +85,9 @@ class _FieldPageState extends State<FieldPage> {
   }
 
   void _addPoint() {
-    final seed = _points.isNotEmpty ? _points.last.value : const Offset(0.5, 0.5);
+    final seed = _points.isNotEmpty
+        ? _points.last.value
+        : const Offset(0.5, 0.5);
     _addPointSync(seed);
     _activeIndex.value = _points.length - 1;
   }
@@ -238,16 +240,15 @@ class _FieldPageState extends State<FieldPage> {
             valueListenable: _hoverIndex,
             builder: (context, hoverIndex, child) {
               return MouseRegion(
-                cursor:
-                    isDragging
-                        ? SystemMouseCursors.grabbing
-                        : (hoverIndex >= 0
-                            ? SystemMouseCursors.click
-                            : SystemMouseCursors.basic),
-                onEnter:
-                    (event) => _onMouseHover(event.localPosition, innerFieldSize),
-                onHover:
-                    (event) => _onMouseHover(event.localPosition, innerFieldSize),
+                cursor: isDragging
+                    ? SystemMouseCursors.grabbing
+                    : (hoverIndex >= 0
+                          ? SystemMouseCursors.click
+                          : SystemMouseCursors.basic),
+                onEnter: (event) =>
+                    _onMouseHover(event.localPosition, innerFieldSize),
+                onHover: (event) =>
+                    _onMouseHover(event.localPosition, innerFieldSize),
                 onExit: (_) => _hoverIndex.value = -1,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
@@ -320,7 +321,10 @@ class _FieldPageState extends State<FieldPage> {
               height: framedSize,
               child: Container(
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white30, width: _borderWidth),
+                  border: Border.all(
+                    color: Colors.white30,
+                    width: _borderWidth,
+                  ),
                   borderRadius: BorderRadius.circular(5),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -504,12 +508,11 @@ class _LinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint =
-        Paint()
-          ..color = color
-          ..strokeWidth = 4
-          ..style = PaintingStyle.stroke
-          ..strokeCap = StrokeCap.round;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
 
     canvas.drawLine(
       Offset(p1.dx * fieldSize + offset, p1.dy * fieldSize + offset),
@@ -566,17 +569,18 @@ class _PointMarker extends StatelessWidget {
             decoration: BoxDecoration(
               color: color,
               shape: BoxShape.circle,
-              border: isHovered ? Border.all(color: Colors.white, width: 2) : null,
-              boxShadow:
-                  isHovered
-                      ? [
-                        const BoxShadow(
-                          color: Colors.black45,
-                          blurRadius: 4,
-                          offset: Offset(0, 2),
-                        ),
-                      ]
-                      : null,
+              border: isHovered
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+              boxShadow: isHovered
+                  ? [
+                      const BoxShadow(
+                        color: Colors.black45,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ]
+                  : null,
             ),
           );
         },
