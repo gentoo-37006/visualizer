@@ -117,10 +117,12 @@ class _FieldPageState extends State<FieldPage> {
     }
   }
 
-  void _setPointAt(int index, Offset value) {
+  void _setPointAt(int index, Offset value, {bool syncControllers = true}) {
     if (index < 0 || index >= _points.length) return;
     _points[index].value = value;
-    _syncControllersForIndex(index);
+    if (syncControllers) {
+      _syncControllersForIndex(index);
+    }
   }
 
   Color _randomColor() {
@@ -153,7 +155,11 @@ class _FieldPageState extends State<FieldPage> {
     final imageLocal = localPosition - const Offset(offset, offset);
     final clampedX = imageLocal.dx.clamp(0.0, fieldSize);
     final clampedY = imageLocal.dy.clamp(0.0, fieldSize);
-    _setPointAt(index, Offset(clampedX / fieldSize, clampedY / fieldSize));
+    _setPointAt(
+      index,
+      Offset(clampedX / fieldSize, clampedY / fieldSize),
+      syncControllers: false,
+    );
   }
 
   Offset _toFieldCoords(Offset normalized) {
@@ -307,58 +313,58 @@ class _FieldPageState extends State<FieldPage> {
   Widget _buildFieldStack(double innerFieldSize, double framedSize) {
     final offset = _pointDiameter / 2 + _borderWidth;
 
-    return ValueListenableBuilder<int>(
-      valueListenable: _pointCount,
-      builder: (context, count, _) {
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // Background Image
-            Positioned(
-              left: _pointDiameter / 2,
-              top: _pointDiameter / 2,
-              width: framedSize,
-              height: framedSize,
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors.white30,
-                    width: _borderWidth,
-                  ),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: const RepaintBoundary(
-                  child: Image(
-                    image: AssetImage('web/fields/decode.webp'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // Background Image - Keep in its own layer
+        Positioned(
+          left: _pointDiameter / 2,
+          top: _pointDiameter / 2,
+          width: framedSize,
+          height: framedSize,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.white30,
+                width: _borderWidth,
+              ),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: const RepaintBoundary(
+              child: Image(
+                image: AssetImage('web/fields/decode.webp'),
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.medium,
               ),
             ),
-            // Line Segments
-            for (int i = 0; i < count - 1; i++)
-              _LineSegment(
-                p1: _points[i],
-                p2: _points[i + 1],
-                color: _pointColors[i + 1],
-                fieldSize: innerFieldSize,
-                offset: offset,
-              ),
-            // Points
-            for (int i = 0; i < count; i++)
-              _PointMarker(
-                index: i,
-                position: _points[i],
-                color: _pointColors[i],
-                hoverIndex: _hoverIndex,
-                fieldSize: innerFieldSize,
-                offset: offset,
-                radius: _pointDiameter / 2,
-              ),
-          ],
-        );
-      },
+          ),
+        ),
+        // All interactive elements (lines and points) in ONE layer
+        Positioned.fill(
+          child: RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: Listenable.merge([
+                ..._points,
+                _pointCount,
+                _hoverIndex,
+              ]),
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _FieldPainter(
+                    points: _points.map((e) => e.value).toList(),
+                    colors: _pointColors,
+                    hoverIndex: _hoverIndex.value,
+                    fieldSize: innerFieldSize,
+                    offset: offset,
+                    pointRadius: _pointDiameter / 2,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -385,7 +391,7 @@ class _FieldPageState extends State<FieldPage> {
                 Expanded(
                   child: ListView.separated(
                     itemCount: count,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) => _buildPointEditor(index),
                   ),
                 ),
@@ -453,140 +459,89 @@ class _FieldPageState extends State<FieldPage> {
   }
 }
 
-class _LineSegment extends StatelessWidget {
-  const _LineSegment({
-    required this.p1,
-    required this.p2,
-    required this.color,
-    required this.fieldSize,
-    required this.offset,
-  });
-
-  final ValueNotifier<Offset> p1;
-  final ValueNotifier<Offset> p2;
-  final Color color;
+class _FieldPainter extends CustomPainter {
+  final List<Offset> points;
+  final List<Color> colors;
+  final int hoverIndex;
   final double fieldSize;
   final double offset;
+  final double pointRadius;
 
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: RepaintBoundary(
-        child: AnimatedBuilder(
-          animation: Listenable.merge([p1, p2]),
-          builder: (context, _) {
-            return CustomPaint(
-              painter: _LinePainter(
-                p1: p1.value,
-                p2: p2.value,
-                color: color,
-                fieldSize: fieldSize,
-                offset: offset,
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _LinePainter extends CustomPainter {
-  _LinePainter({
-    required this.p1,
-    required this.p2,
-    required this.color,
-    required this.fieldSize,
-    required this.offset,
-  });
-
-  final Offset p1;
-  final Offset p2;
-  final Color color;
-  final double fieldSize;
-  final double offset;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(
-      Offset(p1.dx * fieldSize + offset, p1.dy * fieldSize + offset),
-      Offset(p2.dx * fieldSize + offset, p2.dy * fieldSize + offset),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_LinePainter old) =>
-      old.p1 != p1 ||
-      old.p2 != p2 ||
-      old.fieldSize != fieldSize ||
-      old.color != color;
-}
-
-class _PointMarker extends StatelessWidget {
-  const _PointMarker({
-    required this.index,
-    required this.position,
-    required this.color,
+  _FieldPainter({
+    required this.points,
+    required this.colors,
     required this.hoverIndex,
     required this.fieldSize,
     required this.offset,
-    required this.radius,
+    required this.pointRadius,
   });
 
-  final int index;
-  final ValueNotifier<Offset> position;
-  final Color color;
-  final ValueNotifier<int> hoverIndex;
-  final double fieldSize;
-  final double offset;
-  final double radius;
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+
+    final linePaint = Paint()
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final pointPaint = Paint()..style = PaintingStyle.fill;
+
+    final shadowPaint = Paint()
+      ..color = Colors.black45
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+
+    // 1. Draw Lines
+    for (int i = 0; i < points.length - 1; i++) {
+      linePaint.color = colors[i + 1];
+      canvas.drawLine(
+        Offset(
+          points[i].dx * fieldSize + offset,
+          points[i].dy * fieldSize + offset,
+        ),
+        Offset(
+          points[i + 1].dx * fieldSize + offset,
+          points[i + 1].dy * fieldSize + offset,
+        ),
+        linePaint,
+      );
+    }
+
+    // 2. Draw Points
+    for (int i = 0; i < points.length; i++) {
+      final center = Offset(
+        points[i].dx * fieldSize + offset,
+        points[i].dy * fieldSize + offset,
+      );
+
+      // Shadow if hovered
+      if (i == hoverIndex) {
+        canvas.drawCircle(center + const Offset(0, 2), pointRadius, shadowPaint);
+      }
+
+      // Point circle
+      pointPaint.color = colors[i];
+      canvas.drawCircle(center, pointRadius, pointPaint);
+
+      // Hover border
+      if (i == hoverIndex) {
+        canvas.drawCircle(
+          center,
+          pointRadius,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2,
+        );
+      }
+    }
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<Offset>(
-      valueListenable: position,
-      builder: (context, pos, child) {
-        return Positioned(
-          left: pos.dx * fieldSize + offset - radius,
-          top: pos.dy * fieldSize + offset - radius,
-          child: child!,
-        );
-      },
-      child: ValueListenableBuilder<int>(
-        valueListenable: hoverIndex,
-        builder: (context, hover, _) {
-          final isHovered = hover == index;
-          return Container(
-            width: radius * 2,
-            height: radius * 2,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: isHovered
-                  ? Border.all(color: Colors.white, width: 2)
-                  : null,
-              boxShadow: isHovered
-                  ? [
-                      const BoxShadow(
-                        color: Colors.black45,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ]
-                  : null,
-            ),
-          );
-        },
-      ),
-    );
-  }
+  bool shouldRepaint(_FieldPainter old) =>
+      old.points != points ||
+      old.hoverIndex != hoverIndex ||
+      old.fieldSize != fieldSize;
 }
 
 class _CoordField extends StatelessWidget {
