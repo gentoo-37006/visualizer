@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
 import { PointCard } from "./components/PointCard";
 import { serializePathPlannerKotlin, parsePathPlannerKotlin, sanitizeKotlinClassName } from "./kotlinAutonFile";
@@ -30,11 +30,21 @@ import {
 } from "./plannerUtils";
 import styles from "./page.module.css";
 
+const clonePoints = (source: Point[]) =>
+  source.map((point) => ({
+    ...point,
+    controlPoints: point.controlPoints?.map((controlPoint) => ({ ...controlPoint })),
+  }));
+
+const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
+
 export default function PathPlannerPage() {
   const [autonClassName, setAutonClassName] = useState("AutonPath");
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
   ]);
+  const [undoStack, setUndoStack] = useState<Point[][]>([]);
+  const [redoStack, setRedoStack] = useState<Point[][]>([]);
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -44,12 +54,138 @@ export default function PathPlannerPage() {
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const pointsRef = useRef<Point[]>(points);
+  const undoStackRef = useRef<Point[][]>([]);
+  const redoStackRef = useRef<Point[][]>([]);
+  const dragStartSnapshotRef = useRef<Point[] | null>(null);
+  const editStartSnapshotRef = useRef<Point[] | null>(null);
+  const nameEditStartSnapshotRef = useRef<Point[] | null>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
   const isPointVisible = (index: number) => {
     const previousSegmentVisible = index > 0 && !points[index].hidden;
     const nextSegmentVisible = index < points.length - 1 && !points[index + 1].hidden;
     return previousSegmentVisible || nextSegmentVisible || points.length === 1;
   };
+
+  const setPlannerPoints = (updater: Point[] | ((currentPoints: Point[]) => Point[])) => {
+    setPoints((currentPoints) => {
+      const nextPoints = typeof updater === "function" ? updater(currentPoints) : updater;
+      pointsRef.current = nextPoints;
+      return nextPoints;
+    });
+  };
+
+  const clearHistory = () => {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setUndoStack([]);
+    setRedoStack([]);
+    dragStartSnapshotRef.current = null;
+    editStartSnapshotRef.current = null;
+    nameEditStartSnapshotRef.current = null;
+  };
+
+  const pushUndoSnapshot = (snapshot: Point[] | null) => {
+    if (!snapshot || arePointSnapshotsEqual(snapshot, pointsRef.current)) return;
+
+    const nextUndoStack = [...undoStackRef.current, clonePoints(snapshot)];
+    undoStackRef.current = nextUndoStack;
+    redoStackRef.current = [];
+    setUndoStack(nextUndoStack);
+    setRedoStack([]);
+  };
+
+  const pushCurrentSnapshot = () => {
+    const currentSnapshot = clonePoints(pointsRef.current);
+    const nextUndoStack = [...undoStackRef.current, currentSnapshot];
+    undoStackRef.current = nextUndoStack;
+    redoStackRef.current = [];
+    setUndoStack(nextUndoStack);
+    setRedoStack([]);
+  };
+
+  const pushCurrentSnapshotIfChanged = (nextPoints: Point[]) => {
+    if (arePointSnapshotsEqual(pointsRef.current, nextPoints)) return;
+    pushCurrentSnapshot();
+  };
+
+  const beginPositionEdit = () => {
+    editStartSnapshotRef.current ??= clonePoints(pointsRef.current);
+  };
+
+  const commitPositionEdit = () => {
+    pushUndoSnapshot(editStartSnapshotRef.current);
+    editStartSnapshotRef.current = null;
+  };
+
+  const beginNameEdit = () => {
+    nameEditStartSnapshotRef.current ??= clonePoints(pointsRef.current);
+  };
+
+  const commitNameEdit = () => {
+    pushUndoSnapshot(nameEditStartSnapshotRef.current);
+    nameEditStartSnapshotRef.current = null;
+  };
+
+  const restorePointSnapshot = useCallback((snapshot: Point[]) => {
+    const restoredPoints = clonePoints(snapshot);
+    pointsRef.current = restoredPoints;
+    setPoints(restoredPoints);
+    setHoverTarget(null);
+    setActiveTarget(null);
+    setIsDragging(false);
+    dragStartSnapshotRef.current = null;
+    editStartSnapshotRef.current = null;
+    nameEditStartSnapshotRef.current = null;
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const previousSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
+    if (!previousSnapshot) return;
+
+    const nextRedoStack = [...redoStackRef.current, clonePoints(pointsRef.current)];
+    const nextUndoStack = undoStackRef.current.slice(0, -1);
+    undoStackRef.current = nextUndoStack;
+    redoStackRef.current = nextRedoStack;
+    setRedoStack(nextRedoStack);
+    setUndoStack(nextUndoStack);
+    restorePointSnapshot(previousSnapshot);
+  }, [restorePointSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    const nextSnapshot = redoStackRef.current[redoStackRef.current.length - 1];
+    if (!nextSnapshot) return;
+
+    const nextUndoStack = [...undoStackRef.current, clonePoints(pointsRef.current)];
+    const nextRedoStack = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = nextUndoStack;
+    redoStackRef.current = nextRedoStack;
+    setUndoStack(nextUndoStack);
+    setRedoStack(nextRedoStack);
+    restorePointSnapshot(nextSnapshot);
+  }, [restorePointSnapshot]);
+
+  useEffect(() => {
+    const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        handleUndo();
+      } else if (key === "y") {
+        event.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener("keydown", handleHistoryKeyDown);
+    return () => window.removeEventListener("keydown", handleHistoryKeyDown);
+  }, [handleUndo, handleRedo]);
+
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
 
   useEffect(() => {
     const field = fieldRef.current;
@@ -69,7 +205,7 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
-      setPoints((currentPoints) =>
+      setPlannerPoints((currentPoints) =>
         currentPoints.map((point) =>
           point.id === INITIAL_POINT_ID ? { ...point, color: randomColor() } : point
         )
@@ -100,8 +236,9 @@ export default function PathPlannerPage() {
   }, []);
 
   const handleAddPoint = () => {
+    pushCurrentSnapshot();
     const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
-    setPoints([
+    setPlannerPoints([
       ...points,
       {
         id: generateId(),
@@ -117,7 +254,8 @@ export default function PathPlannerPage() {
   };
 
   const handleRemovePoint = (index: number) => {
-    setPoints(points.filter((_, i) => i !== index));
+    pushCurrentSnapshot();
+    setPlannerPoints(points.filter((_, i) => i !== index));
     if (targetPathIndex(activeTarget) === index) setActiveTarget(null);
     if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
@@ -125,7 +263,8 @@ export default function PathPlannerPage() {
   const handleToggleLocked = (index: number) => {
     if (points[index].hidden) return;
 
-    setPoints((currentPoints) =>
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, locked: !point.locked } : point
       )
@@ -138,7 +277,8 @@ export default function PathPlannerPage() {
   };
 
   const handleToggleHidden = (index: number, hideOthers: boolean) => {
-    setPoints((currentPoints) =>
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => {
         if (i === 0) return point;
         if (hideOthers) {
@@ -158,19 +298,19 @@ export default function PathPlannerPage() {
   };
 
   const handleRenamePath = (index: number, name: string) => {
-    setPoints((currentPoints) =>
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => (i === index ? { ...point, name } : point))
     );
   };
 
   const updatePoint = (index: number, nx: number, ny: number) => {
-    const newPoints = [...points];
-    newPoints[index] = { ...newPoints[index], nx, ny };
-    setPoints(newPoints);
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, i) => (i === index ? { ...point, nx, ny } : point))
+    );
   };
 
   const updateControlPoint = (pathIndex: number, controlIndex: number, nx: number, ny: number) => {
-    setPoints((currentPoints) =>
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => {
         if (i !== pathIndex) return point;
         return {
@@ -192,7 +332,8 @@ export default function PathPlannerPage() {
   };
 
   const handleToggleControlsExpanded = (index: number) => {
-    setPoints((currentPoints) =>
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, controlsExpanded: !(point.controlsExpanded ?? true) } : point
       )
@@ -200,7 +341,8 @@ export default function PathPlannerPage() {
   };
 
   const handleAddControlPoint = (index: number) => {
-    setPoints((currentPoints) =>
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => {
         if (i !== index) return point;
         const controlPoints = point.controlPoints ?? [];
@@ -262,17 +404,26 @@ export default function PathPlannerPage() {
     const heading = parseFloat(value);
     if (isNaN(heading)) return;
 
-    setPoints((currentPoints) =>
+    const normalizedHeading = normalizeHeading(heading);
+    const nextPoints = pointsRef.current.map((point) =>
+      point.id === INITIAL_POINT_ID ? { ...point, heading: normalizedHeading } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point) =>
         point.id === INITIAL_POINT_ID
-          ? { ...point, heading: normalizeHeading(heading) }
+          ? { ...point, heading: normalizedHeading }
           : point
       )
     );
   };
 
   const handlePathInterpolationChange = (index: number, mode: HeadingInterpolation) => {
-    setPoints((currentPoints) =>
+    const nextPoints = pointsRef.current.map((point, i) =>
+      i === index ? { ...createDefaultHeadingValues(), ...point, headingMode: mode } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index
           ? { ...createDefaultHeadingValues(), ...point, headingMode: mode }
@@ -293,7 +444,11 @@ export default function PathPlannerPage() {
           ? "startHeading"
           : "endHeading";
 
-    setPoints((currentPoints) =>
+    const nextPoints = pointsRef.current.map((point, i) =>
+      i === index ? { ...point, [key]: normalizedHeading } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, [key]: normalizedHeading } : point
       )
@@ -332,7 +487,8 @@ export default function PathPlannerPage() {
       }
 
       setAutonClassName(importedAuton.className);
-      setPoints(importedAuton.points);
+      clearHistory();
+      setPlannerPoints(importedAuton.points);
       setHoverTarget(null);
       setActiveTarget(null);
       setIsDragging(false);
@@ -363,6 +519,7 @@ export default function PathPlannerPage() {
       !points[pathIndex].locked &&
       isPointVisible(pathIndex)
     ) {
+      dragStartSnapshotRef.current = clonePoints(pointsRef.current);
       setIsDragging(true);
       setActiveTarget(hoverTarget);
       svgRef.current?.setPointerCapture(e.pointerId);
@@ -412,6 +569,10 @@ export default function PathPlannerPage() {
   };
 
   const handlePointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (isDragging) {
+      pushUndoSnapshot(dragStartSnapshotRef.current);
+      dragStartSnapshotRef.current = null;
+    }
     setIsDragging(false);
     if (svgRef.current?.hasPointerCapture(e.pointerId)) {
       svgRef.current.releasePointerCapture(e.pointerId);
@@ -571,6 +732,30 @@ export default function PathPlannerPage() {
             <div className={styles.importExportActions}>
               <button
                 className={styles.secondaryIconButton}
+                onClick={handleUndo}
+                aria-disabled={undoStack.length === 0}
+                aria-label="Undo"
+                title="Undo"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7v6h6"></path>
+                  <path d="M21 17a9 9 0 0 0-15-6.7L3 13"></path>
+                </svg>
+              </button>
+              <button
+                className={styles.secondaryIconButton}
+                onClick={handleRedo}
+                aria-disabled={redoStack.length === 0}
+                aria-label="Redo"
+                title="Redo"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 7v6h-6"></path>
+                  <path d="M3 17a9 9 0 0 1 15-6.7L21 13"></path>
+                </svg>
+              </button>
+              <button
+                className={styles.secondaryIconButton}
                 onClick={handleImportKotlinClick}
                 aria-label="Import Kotlin"
                 title="Import Kotlin"
@@ -630,7 +815,11 @@ export default function PathPlannerPage() {
                 controlsExpanded={p.controlsExpanded ?? true}
                 isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
                 onChange={(axis, val) => handleCoordChange(i, axis, val)}
+                onPositionEditStart={beginPositionEdit}
+                onPositionEditCommit={commitPositionEdit}
                 onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
+                onNameEditStart={beginNameEdit}
+                onNameEditCommit={commitNameEdit}
                 onHeadingChange={i === 0 ? handleHeadingChange : undefined}
                 onInterpolationChange={
                   i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
@@ -649,6 +838,8 @@ export default function PathPlannerPage() {
                     ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
                     : undefined
                 }
+                onControlPointEditStart={beginPositionEdit}
+                onControlPointEditCommit={commitPositionEdit}
                 canDelete={isShiftPressed}
                 onDelete={() => handleRemovePoint(i)}
               />

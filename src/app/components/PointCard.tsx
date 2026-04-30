@@ -24,7 +24,11 @@ type PointCardProps = {
   controlsExpanded: boolean;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
+  onPositionEditStart: () => void;
+  onPositionEditCommit: () => void;
   onRename?: (name: string) => void;
+  onNameEditStart: () => void;
+  onNameEditCommit: () => void;
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
@@ -33,6 +37,8 @@ type PointCardProps = {
   onToggleControlsExpanded?: () => void;
   onAddControlPoint?: () => void;
   onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
+  onControlPointEditStart: () => void;
+  onControlPointEditCommit: () => void;
   canDelete: boolean;
   onDelete: () => void;
 };
@@ -55,7 +61,11 @@ export function PointCard({
   controlsExpanded,
   isActive,
   onChange,
+  onPositionEditStart,
+  onPositionEditCommit,
   onRename,
+  onNameEditStart,
+  onNameEditCommit,
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
@@ -64,6 +74,8 @@ export function PointCard({
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlPointChange,
+  onControlPointEditStart,
+  onControlPointEditCommit,
   canDelete,
   onDelete,
 }: PointCardProps) {
@@ -78,8 +90,10 @@ export function PointCard({
   const startEditing = (axis: "x" | "y" | "heading" | PathHeadingField) => {
     setEditingAxis(axis);
     if (axis === "x") {
+      onPositionEditStart();
       setDraftX(x.toFixed(1));
     } else if (axis === "y") {
+      onPositionEditStart();
       setDraftY(y.toFixed(1));
     } else if (axis === "heading") {
       setDraftHeading((heading ?? 0).toFixed(1));
@@ -101,6 +115,7 @@ export function PointCard({
       onPathHeadingChange?.(axis, val);
     } else {
       onChange(axis, val);
+      onPositionEditCommit();
     }
     setEditingAxis(null);
   };
@@ -138,6 +153,7 @@ export function PointCard({
   };
 
   const handleNameFocus = () => {
+    onNameEditStart();
     setIsEditingName(true);
     setDraftName(name);
   };
@@ -145,6 +161,7 @@ export function PointCard({
   const handleNameBlur = () => {
     const trimmedName = draftName.trim();
     onRename?.(trimmedName || `path${index}`);
+    onNameEditCommit();
     setIsEditingName(false);
   };
 
@@ -393,6 +410,8 @@ export function PointCard({
                   x={controlPoint.x}
                   y={controlPoint.y}
                   onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
+                  onEditStart={onControlPointEditStart}
+                  onEditCommit={onControlPointEditCommit}
                 />
               ))}
             </div>

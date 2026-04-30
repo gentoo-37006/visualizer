@@ -9,15 +9,25 @@ type ControlPointCardProps = {
   x: number;
   y: number;
   onChange: (axis: "x" | "y", val: string) => void;
+  onEditStart: () => void;
+  onEditCommit: () => void;
 };
 
-export function ControlPointCard({ index, x, y, onChange }: ControlPointCardProps) {
+export function ControlPointCard({
+  index,
+  x,
+  y,
+  onChange,
+  onEditStart,
+  onEditCommit,
+}: ControlPointCardProps) {
   const [editingAxis, setEditingAxis] = useState<"x" | "y" | null>(null);
   const [draftX, setDraftX] = useState("");
   const [draftY, setDraftY] = useState("");
 
   const startEditing = (axis: "x" | "y") => {
     setEditingAxis(axis);
+    onEditStart();
     if (axis === "x") {
       setDraftX(x.toFixed(1));
     } else {
@@ -38,6 +48,7 @@ export function ControlPointCard({ index, x, y, onChange }: ControlPointCardProp
 
   const commitEdit = (axis: "x" | "y", val: string) => {
     onChange(axis, val);
+    onEditCommit();
     setEditingAxis(null);
   };
 
