@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
 import { PointCard } from "./components/PointCard";
-import { serializePathPlannerKotlin, parsePathPlannerKotlin } from "./kotlinAutonFile";
+import { serializePathPlannerKotlin, parsePathPlannerKotlin, sanitizeKotlinClassName } from "./kotlinAutonFile";
 import {
   CONTROL_POINT_RADIUS,
   FIELD_BORDER_WIDTH,
@@ -22,6 +22,7 @@ import {
   mainPointHitRadius,
   normalizeHeading,
   randomColor,
+  isKotlinIdentifierDraft,
   targetPathIndex,
   toFieldCoords,
   toNormalizedCoords,
@@ -30,6 +31,7 @@ import {
 import styles from "./page.module.css";
 
 export default function PathPlannerPage() {
+  const [autonClassName, setAutonClassName] = useState("AutonPath");
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
   ]);
@@ -299,12 +301,13 @@ export default function PathPlannerPage() {
   };
 
   const handleExportKotlin = () => {
-    const contents = serializePathPlannerKotlin(points);
+    const className = sanitizeKotlinClassName(autonClassName);
+    const contents = serializePathPlannerKotlin(points, className);
     const blob = new Blob([contents], { type: "text/x-kotlin;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "AutonPath.kt";
+    link.download = `${className}.kt`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -322,13 +325,14 @@ export default function PathPlannerPage() {
 
     try {
       const contents = await file.text();
-      const importedPoints = parsePathPlannerKotlin(contents);
-      if (!importedPoints || importedPoints.length === 0) {
+      const importedAuton = parsePathPlannerKotlin(contents);
+      if (!importedAuton || importedAuton.points.length === 0) {
         window.alert("This Kotlin file does not contain an Auton Path Planner export.");
         return;
       }
 
-      setPoints(importedPoints);
+      setAutonClassName(importedAuton.className);
+      setPoints(importedAuton.points);
       setHoverTarget(null);
       setActiveTarget(null);
       setIsDragging(false);
@@ -553,7 +557,17 @@ export default function PathPlannerPage() {
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarTitleRow}>
-            <h1 className={styles.sidebarTitle}>Path Planner</h1>
+            <input
+              className={styles.autonClassNameInput}
+              value={autonClassName}
+              maxLength={32}
+              onChange={(event) => {
+                if (!isKotlinIdentifierDraft(event.target.value)) return;
+                setAutonClassName(event.target.value);
+              }}
+              onBlur={() => setAutonClassName((className) => sanitizeKotlinClassName(className))}
+              aria-label="Auton class name"
+            />
             <div className={styles.importExportActions}>
               <button
                 className={styles.secondaryIconButton}

@@ -2,6 +2,7 @@ import { INITIAL_POINT_ID } from "./plannerConstants";
 import type { HeadingInterpolation, Point } from "./plannerTypes";
 import {
   generateId,
+  isKotlinIdentifierDraft,
   normalizeHeading,
   randomColor,
   toFieldCoords,
@@ -9,6 +10,12 @@ import {
 } from "./plannerUtils";
 
 const formatKotlinNumber = (value: number) => value.toFixed(1);
+const DEFAULT_AUTON_CLASS_NAME = "AutonPath";
+
+export type ParsedKotlinAuton = {
+  className: string;
+  points: Point[];
+};
 
 const formatKotlinPose = (point: { nx: number; ny: number }) => {
   const coords = toFieldCoords(point.nx, point.ny);
@@ -48,8 +55,13 @@ const createUniquePathNames = (points: Point[]) => {
   });
 };
 
-export const serializePathPlannerKotlin = (points: Point[]) => {
-  const className = "GeneratedAutonPath";
+export const sanitizeKotlinClassName = (name: string) => {
+  const trimmedName = name.trim();
+  return isKotlinIdentifierDraft(trimmedName) && trimmedName ? trimmedName : DEFAULT_AUTON_CLASS_NAME;
+};
+
+export const serializePathPlannerKotlin = (points: Point[], requestedClassName = DEFAULT_AUTON_CLASS_NAME) => {
+  const className = sanitizeKotlinClassName(requestedClassName);
   const pathPoints = points.slice(1);
   const pathNames = createUniquePathNames(points);
   const pathDeclarations = pathPoints
@@ -135,7 +147,7 @@ const parseKotlinPose = (arg: string) => {
   return toNormalizedCoords(Number(match[1]), Number(match[2]));
 };
 
-export const parsePathPlannerKotlin = (contents: string): Point[] | null => {
+export const parsePathPlannerKotlin = (contents: string): ParsedKotlinAuton | null => {
   type ParsedPath = {
     name: string;
     args: string[];
@@ -146,6 +158,9 @@ export const parsePathPlannerKotlin = (contents: string): Point[] | null => {
   };
 
   const pathDefinitions = new Map<string, ParsedPath>();
+  const className = sanitizeKotlinClassName(
+    contents.match(/\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1] ?? DEFAULT_AUTON_CLASS_NAME
+  );
   const pathRegex = /val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Path\s*\(/g;
   let pathMatch: RegExpExecArray | null;
 
@@ -233,5 +248,5 @@ export const parsePathPlannerKotlin = (contents: string): Point[] | null => {
     });
   });
 
-  return importedPoints.length > 1 ? importedPoints : null;
+  return importedPoints.length > 1 ? { className, points: importedPoints } : null;
 };

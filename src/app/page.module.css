@@ -75,6 +75,27 @@
   margin: 0;
 }
 
+.autonClassNameInput {
+  min-width: 0;
+  flex: 1;
+  max-width: 32ch;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 1.125rem;
+  font-weight: 600;
+  padding: 0;
+}
+
+.autonClassNameInput:focus {
+  background: var(--background);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  margin-left: -0.25rem;
+  padding: 0.25rem;
+}
+
 .sidebarTitleRow {
   display: flex;
   align-items: center;
@@ -149,9 +170,9 @@
 }
 
 .pathNameInput {
-  width: 16ch;
-  max-width: 16ch;
-  flex: 0 0 16ch;
+  width: 32ch;
+  max-width: 32ch;
+  flex: 0 1 32ch;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;

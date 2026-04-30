@@ -159,7 +159,7 @@ export function PointCard({
         ) : (
           <input
             className={styles.pathNameInput}
-            maxLength={16}
+            maxLength={32}
             value={isEditingName ? draftName : name}
             onFocus={handleNameFocus}
             onChange={(e) => {
