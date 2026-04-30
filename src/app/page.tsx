@@ -13,8 +13,14 @@ type Point = {
 };
 
 const FIELD_SIZE_INCHES = 144;
-const POINT_DIAMETER = 16;
-const BORDER_WIDTH = 3;
+const POINT_DIAMETER = 20;
+const POINT_RADIUS = POINT_DIAMETER / 2;
+const FIELD_BORDER_WIDTH = 3;
+
+type FieldSize = {
+  width: number;
+  height: number;
+};
 
 // --- Helper Functions ---
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -43,15 +49,39 @@ const toNormalizedCoords = (x: number, y: number) => {
   return { nx, ny };
 };
 
+const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
+  x: POINT_RADIUS + FIELD_BORDER_WIDTH + nx * (fieldSize.width - FIELD_BORDER_WIDTH * 2),
+  y: POINT_RADIUS + FIELD_BORDER_WIDTH + ny * (fieldSize.height - FIELD_BORDER_WIDTH * 2),
+});
+
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
-    { id: "init-point", nx: 0.5, ny: 0.5, color: "rgb(59, 130, 246)" },
+    { id: "init-point", nx: 0.5, ny: 0.5, color: randomColor() },
   ]);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
 
+  const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
+
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setFieldSize((current) => {
+        if (current.width === width && current.height === height) return current;
+        return { width, height };
+      });
+    });
+
+    observer.observe(field);
+    return () => observer.disconnect();
+  }, []);
 
   // --- Handlers ---
   const handleAddPoint = () => {
@@ -94,17 +124,10 @@ export default function PathPlannerPage() {
   const getPointerNormalized = (e: React.PointerEvent<SVGSVGElement> | PointerEvent) => {
     if (!svgRef.current) return { nx: 0, ny: 0 };
     const rect = svgRef.current.getBoundingClientRect();
-    
-    // Calculate the inner field size (subtracting padding)
-    const paddingOffset = POINT_DIAMETER / 2 + BORDER_WIDTH;
-    const innerSize = rect.width - paddingOffset * 2;
-    
-    // Pointer relative to the inner field
-    const localX = e.clientX - rect.left - paddingOffset;
-    const localY = e.clientY - rect.top - paddingOffset;
-    
-    let nx = localX / innerSize;
-    let ny = localY / innerSize;
+    const fieldWidth = rect.width - POINT_DIAMETER - FIELD_BORDER_WIDTH * 2;
+    const fieldHeight = rect.height - POINT_DIAMETER - FIELD_BORDER_WIDTH * 2;
+    let nx = (e.clientX - rect.left - POINT_RADIUS - FIELD_BORDER_WIDTH) / fieldWidth;
+    let ny = (e.clientY - rect.top - POINT_RADIUS - FIELD_BORDER_WIDTH) / fieldHeight;
     
     nx = Math.max(0, Math.min(1, nx));
     ny = Math.max(0, Math.min(1, ny));
@@ -131,10 +154,12 @@ export default function PathPlannerPage() {
       // Hit testing for hover
       if (!svgRef.current) return;
       const { nx, ny } = getPointerNormalized(e);
-      
-      const paddingOffset = POINT_DIAMETER / 2 + BORDER_WIDTH;
-      const innerSize = svgRef.current.getBoundingClientRect().width - paddingOffset * 2;
-      const hitRadiusNormalized = (POINT_DIAMETER / 2) / innerSize;
+      const minFieldSize = Math.min(
+        fieldSize.width - FIELD_BORDER_WIDTH * 2,
+        fieldSize.height - FIELD_BORDER_WIDTH * 2
+      );
+      if (minFieldSize <= 0) return;
+      const hitRadiusNormalized = POINT_RADIUS / minFieldSize;
 
       let hit = null;
       for (let i = points.length - 1; i >= 0; i--) {
@@ -159,7 +184,7 @@ export default function PathPlannerPage() {
   return (
     <main className={styles.container}>
       <div className={styles.fieldWrapper}>
-        <div className={styles.fieldContainer}>
+        <div className={styles.fieldContainer} ref={fieldRef}>
           <Image
             src="/fields/decode.webp"
             alt="Field Map"
@@ -177,50 +202,50 @@ export default function PathPlannerPage() {
             onPointerCancel={handlePointerUp}
             onPointerLeave={() => { if (!isDragging) setHoverIndex(null); }}
             style={{ 
-              cursor: isDragging ? 'grabbing' : (hoverIndex !== null ? 'pointer' : 'crosshair') 
+              cursor: isDragging ? 'grabbing' : (hoverIndex !== null ? 'pointer' : 'default') 
             }}
+            viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
           >
             {/* Draw Lines */}
-            {points.map((p, i) => {
+            {hasMeasuredField && points.map((p, i) => {
               if (i === points.length - 1) return null;
               const nextP = points[i + 1];
-              // Map normalized to SVG viewbox percentages (using calc to handle padding)
-              const padding = `${POINT_DIAMETER / 2 + BORDER_WIDTH}px`;
+              const start = toSvgPixelCoords(p.nx, p.ny, fieldSize);
+              const end = toSvgPixelCoords(nextP.nx, nextP.ny, fieldSize);
               return (
                 <line
                   key={`line-${p.id}`}
-                  x1={`calc(${padding} + ${p.nx * 100}% - ${p.nx} * ${padding} * 2)`}
-                  y1={`calc(${padding} + ${p.ny * 100}% - ${p.ny} * ${padding} * 2)`}
-                  x2={`calc(${padding} + ${nextP.nx * 100}% - ${nextP.nx} * ${padding} * 2)`}
-                  y2={`calc(${padding} + ${nextP.ny * 100}% - ${nextP.ny} * ${padding} * 2)`}
+                  x1={start.x}
+                  y1={start.y}
+                  x2={end.x}
+                  y2={end.y}
                   stroke={nextP.color}
-                  strokeWidth="3"
+                  strokeWidth="6"
                   strokeLinecap="round"
                 />
               );
             })}
 
             {/* Draw Points */}
-            {points.map((p, i) => {
-              const padding = `${POINT_DIAMETER / 2 + BORDER_WIDTH}px`;
-              const cx = `calc(${padding} + ${p.nx * 100}% - ${p.nx} * ${padding} * 2)`;
-              const cy = `calc(${padding} + ${p.ny * 100}% - ${p.ny} * ${padding} * 2)`;
+            {hasMeasuredField && points.map((p, i) => {
+              const { x, y } = toSvgPixelCoords(p.nx, p.ny, fieldSize);
               const isHovered = hoverIndex === i;
 
               return (
                 <g key={`point-${p.id}`}>
                   {isHovered && (
                     <circle
-                      cx={cx}
-                      cy={`calc(${cy} + 2px)`}
+                      cx={x}
+                      cy={y}
                       r={POINT_DIAMETER / 2}
                       fill="rgba(0,0,0,0.45)"
                       filter="blur(4px)"
+                      transform="translate(0 2)"
                     />
                   )}
                   <circle
-                    cx={cx}
-                    cy={cy}
+                    cx={x}
+                    cy={y}
                     r={POINT_DIAMETER / 2}
                     fill={p.color}
                     stroke={isHovered ? "white" : "transparent"}
@@ -262,7 +287,7 @@ export default function PathPlannerPage() {
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
-            Add Point
+            Add Path
           </button>
         </div>
       </aside>
@@ -289,25 +314,27 @@ function PointCard({
   onChange: (axis: "x" | "y", val: string) => void;
   onDelete: () => void;
 }) {
-  // Using local state for inputs so typing isn't completely broken by external updates
-  // but we sync with props when they change
-  const [localX, setLocalX] = useState(x.toFixed(1));
-  const [localY, setLocalY] = useState(y.toFixed(1));
+  const [editingAxis, setEditingAxis] = useState<"x" | "y" | null>(null);
+  const [draftX, setDraftX] = useState("");
+  const [draftY, setDraftY] = useState("");
 
-  useEffect(() => {
-    // Only update local state if the user is NOT actively typing
-    // Actually, simple sync:
-    setLocalX(x.toFixed(1));
-    setLocalY(y.toFixed(1));
-  }, [x, y]);
+  const startEditing = (axis: "x" | "y") => {
+    setEditingAxis(axis);
+    if (axis === "x") {
+      setDraftX(x.toFixed(1));
+    } else {
+      setDraftY(y.toFixed(1));
+    }
+  };
 
-  const handleBlur = (axis: "x" | "y", val: string) => {
+  const commitEdit = (axis: "x" | "y", val: string) => {
     onChange(axis, val);
+    setEditingAxis(null);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y", val: string) => {
     if (e.key === "Enter") {
-      onChange(axis, val);
+      commitEdit(axis, val);
       (e.target as HTMLInputElement).blur();
     }
   };
@@ -318,9 +345,9 @@ function PointCard({
       style={{ '--point-color': color } as React.CSSProperties}
     >
       <div className={styles.pointCardHeader}>
-        <span className={styles.pointTitle}>Point {index + 1}</span>
+        <span className={styles.pointTitle}>{index === 0 ? "Start Pose" : `Path ${index}`}</span>
         {index > 0 && (
-          <button className={styles.deleteButton} onClick={onDelete} aria-label="Delete point">
+          <button className={styles.deleteButton} onClick={onDelete} aria-label="Delete path">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -336,9 +363,10 @@ function PointCard({
           <input
             type="text"
             className={styles.inputField}
-            value={localX}
-            onChange={(e) => setLocalX(e.target.value)}
-            onBlur={(e) => handleBlur("x", e.target.value)}
+            value={editingAxis === "x" ? draftX : x.toFixed(1)}
+            onFocus={() => startEditing("x")}
+            onChange={(e) => setDraftX(e.target.value)}
+            onBlur={(e) => commitEdit("x", e.target.value)}
             onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
           />
         </div>
@@ -347,9 +375,10 @@ function PointCard({
           <input
             type="text"
             className={styles.inputField}
-            value={localY}
-            onChange={(e) => setLocalY(e.target.value)}
-            onBlur={(e) => handleBlur("y", e.target.value)}
+            value={editingAxis === "y" ? draftY : y.toFixed(1)}
+            onFocus={() => startEditing("y")}
+            onChange={(e) => setDraftY(e.target.value)}
+            onBlur={(e) => commitEdit("y", e.target.value)}
             onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
           />
         </div>
