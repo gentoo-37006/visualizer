@@ -31,7 +31,7 @@ import styles from "./page.module.css";
 
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
-    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: false, heading: 0 },
+    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
   ]);
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
@@ -135,11 +135,18 @@ export default function PathPlannerPage() {
     if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
 
-  const handleToggleHidden = (index: number) => {
+  const handleToggleHidden = (index: number, hideOthers: boolean) => {
     setPoints((currentPoints) =>
-      currentPoints.map((point, i) =>
-        i === index ? { ...point, hidden: !point.hidden } : point
-      )
+      currentPoints.map((point, i) => {
+        if (i === 0) return point;
+        if (hideOthers) {
+          const allOtherPathsHidden = currentPoints.every((otherPoint, otherIndex) =>
+            otherIndex === 0 || otherIndex === index || otherPoint.hidden
+          );
+          return { ...point, hidden: allOtherPathsHidden ? false : i !== index };
+        }
+        return i === index ? { ...point, hidden: !point.hidden } : point;
+      })
     );
     if (targetPathIndex(activeTarget) === index) {
       setActiveTarget(null);
@@ -618,7 +625,7 @@ export default function PathPlannerPage() {
                   i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
                 }
                 onToggleLocked={() => handleToggleLocked(i)}
-                onToggleHidden={() => handleToggleHidden(i)}
+                onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
                 onToggleControlsExpanded={
                   i > 0 ? () => handleToggleControlsExpanded(i) : undefined
                 }

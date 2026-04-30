@@ -202,7 +202,7 @@ export const parsePathPlannerKotlin = (contents: string): Point[] | null => {
       nx: firstStart?.nx ?? 0.5,
       ny: firstStart?.ny ?? 0.5,
       color: randomColor(),
-      locked: false,
+      locked: true,
       heading: 0,
     },
   ];

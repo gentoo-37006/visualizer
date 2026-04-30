@@ -29,7 +29,7 @@ type PointCardProps = {
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
   onToggleLocked: () => void;
-  onToggleHidden: () => void;
+  onToggleHidden: (hideOthers: boolean) => void;
   onToggleControlsExpanded?: () => void;
   onAddControlPoint?: () => void;
   onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
@@ -133,6 +133,10 @@ export function PointCard({
     onDelete();
   };
 
+  const handleVisibilityClick = (event: MouseEvent<HTMLButtonElement>) => {
+    onToggleHidden(event.shiftKey);
+  };
+
   const handleNameFocus = () => {
     setIsEditingName(true);
     setDraftName(name);
@@ -169,11 +173,12 @@ export function PointCard({
         )}
         <div className={styles.cardActions}>
           {index > 0 && (
+            <span className={styles.visibilityAction}>
             <button
               className={`${styles.iconButton} ${styles.visibilityButton} ${hidden ? styles.hiddenButton : ""}`}
-              onClick={onToggleHidden}
+              onClick={handleVisibilityClick}
               aria-label={hidden ? "Show path" : "Hide path"}
-              title={hidden ? "Show path" : "Hide path"}
+              aria-describedby={canDelete ? `hide-tooltip-${index}` : undefined}
             >
               {hidden ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -189,6 +194,12 @@ export function PointCard({
                 </svg>
               )}
             </button>
+            {canDelete && (
+              <span id={`hide-tooltip-${index}`} className={styles.visibilityTooltip} role="tooltip">
+                Hide other paths
+              </span>
+            )}
+            </span>
           )}
           <button
             className={`${styles.iconButton} ${styles.lockButton} ${locked ? styles.lockedButton : ""}`}
