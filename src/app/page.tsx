@@ -16,6 +16,8 @@ const FIELD_SIZE_INCHES = 144;
 const POINT_DIAMETER = 20;
 const POINT_RADIUS = POINT_DIAMETER / 2;
 const FIELD_BORDER_WIDTH = 3;
+const INITIAL_POINT_ID = "init-point";
+const INITIAL_POINT_COLOR = "rgb(59, 130, 246)";
 
 type FieldSize = {
   width: number;
@@ -56,7 +58,7 @@ const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
 
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
-    { id: "init-point", nx: 0.5, ny: 0.5, color: randomColor() },
+    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR },
   ]);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -81,6 +83,18 @@ export default function PathPlannerPage() {
 
     observer.observe(field);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setPoints((currentPoints) =>
+        currentPoints.map((point) =>
+          point.id === INITIAL_POINT_ID ? { ...point, color: randomColor() } : point
+        )
+      );
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   // --- Handlers ---
