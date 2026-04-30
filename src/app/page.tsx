@@ -10,6 +10,7 @@ type Point = {
   nx: number; // Normalized x (0 to 1)
   ny: number; // Normalized y (0 to 1)
   color: string;
+  heading?: number;
 };
 
 const FIELD_SIZE_INCHES = 144;
@@ -51,6 +52,11 @@ const toNormalizedCoords = (x: number, y: number) => {
   return { nx, ny };
 };
 
+const normalizeHeading = (degrees: number) => {
+  const normalized = ((((degrees + 180) % 360) + 360) % 360) - 180;
+  return normalized === -180 && degrees > 0 ? 180 : normalized;
+};
+
 const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
   x: POINT_RADIUS + FIELD_BORDER_WIDTH + nx * (fieldSize.width - FIELD_BORDER_WIDTH * 2),
   y: POINT_RADIUS + FIELD_BORDER_WIDTH + ny * (fieldSize.height - FIELD_BORDER_WIDTH * 2),
@@ -58,7 +64,7 @@ const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
 
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
-    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR },
+    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, heading: 0 },
   ]);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -132,6 +138,19 @@ export default function PathPlannerPage() {
 
     const { nx, ny } = toNormalizedCoords(newX, newY);
     updatePoint(index, nx, ny);
+  };
+
+  const handleHeadingChange = (value: string) => {
+    const heading = parseFloat(value);
+    if (isNaN(heading)) return;
+
+    setPoints((currentPoints) =>
+      currentPoints.map((point) =>
+        point.id === INITIAL_POINT_ID
+          ? { ...point, heading: normalizeHeading(heading) }
+          : point
+      )
+    );
   };
 
   // --- Pointer Events for SVG ---
@@ -287,8 +306,10 @@ export default function PathPlannerPage() {
                 color={p.color}
                 x={coords.x}
                 y={coords.y}
+                heading={p.heading}
                 isActive={hoverIndex === i || activeIndex === i}
                 onChange={(axis, val) => handleCoordChange(i, axis, val)}
+                onHeadingChange={i === 0 ? handleHeadingChange : undefined}
                 onDelete={() => handleRemovePoint(i)}
               />
             );
@@ -316,37 +337,58 @@ function PointCard({
   color,
   x,
   y,
+  heading,
   isActive,
   onChange,
+  onHeadingChange,
   onDelete
 }: {
   index: number;
   color: string;
   x: number;
   y: number;
+  heading?: number;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
+  onHeadingChange?: (val: string) => void;
   onDelete: () => void;
 }) {
-  const [editingAxis, setEditingAxis] = useState<"x" | "y" | null>(null);
+  const [editingAxis, setEditingAxis] = useState<"x" | "y" | "heading" | null>(null);
   const [draftX, setDraftX] = useState("");
   const [draftY, setDraftY] = useState("");
+  const [draftHeading, setDraftHeading] = useState("");
 
-  const startEditing = (axis: "x" | "y") => {
+  const startEditing = (axis: "x" | "y" | "heading") => {
     setEditingAxis(axis);
     if (axis === "x") {
       setDraftX(x.toFixed(1));
-    } else {
+    } else if (axis === "y") {
       setDraftY(y.toFixed(1));
+    } else {
+      setDraftHeading((heading ?? 0).toFixed(1));
     }
   };
 
-  const commitEdit = (axis: "x" | "y", val: string) => {
-    onChange(axis, val);
+  const commitEdit = (axis: "x" | "y" | "heading", val: string) => {
+    if (axis === "heading") {
+      onHeadingChange?.(val);
+    } else {
+      onChange(axis, val);
+    }
     setEditingAxis(null);
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y", val: string) => {
+  const updateCoordinateDraft = (axis: "x" | "y", val: string) => {
+    if (axis === "x") {
+      setDraftX(val);
+    } else {
+      setDraftY(val);
+    }
+
+    onChange(axis, val);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y" | "heading", val: string) => {
     if (e.key === "Enter") {
       commitEdit(axis, val);
       (e.target as HTMLInputElement).blur();
@@ -379,7 +421,7 @@ function PointCard({
             className={styles.inputField}
             value={editingAxis === "x" ? draftX : x.toFixed(1)}
             onFocus={() => startEditing("x")}
-            onChange={(e) => setDraftX(e.target.value)}
+            onChange={(e) => updateCoordinateDraft("x", e.target.value)}
             onBlur={(e) => commitEdit("x", e.target.value)}
             onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
           />
@@ -391,11 +433,25 @@ function PointCard({
             className={styles.inputField}
             value={editingAxis === "y" ? draftY : y.toFixed(1)}
             onFocus={() => startEditing("y")}
-            onChange={(e) => setDraftY(e.target.value)}
+            onChange={(e) => updateCoordinateDraft("y", e.target.value)}
             onBlur={(e) => commitEdit("y", e.target.value)}
             onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
           />
         </div>
+        {index === 0 && (
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Heading (deg)</label>
+            <input
+              type="text"
+              className={styles.inputField}
+              value={editingAxis === "heading" ? draftHeading : (heading ?? 0).toFixed(1)}
+              onFocus={() => startEditing("heading")}
+              onChange={(e) => setDraftHeading(e.target.value)}
+              onBlur={(e) => commitEdit("heading", e.target.value)}
+              onKeyDown={(e) => handleKeyDown(e, "heading", e.currentTarget.value)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
