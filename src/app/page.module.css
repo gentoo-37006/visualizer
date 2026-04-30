@@ -1,0 +1,205 @@
+.container {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  padding: 1rem;
+  gap: 1.5rem;
+  overflow: hidden;
+}
+
+.fieldWrapper {
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fieldContainer {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fieldImage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--border-radius);
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  user-select: none;
+}
+
+.svgOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  border-radius: var(--border-radius);
+  /* The points have 16px diameter (8px radius) plus 3px border = 11px padding offset from flutter code */
+  /* In Flutter: offset = _pointDiameter / 2 + _borderWidth = 8 + 3 = 11 */
+  /* We will handle the padding conceptually in JS by scaling inner field */
+  touch-action: none; /* Prevent scroll on drag */
+}
+
+/* Sidebar Styles */
+.sidebar {
+  flex: 1;
+  min-width: 320px;
+  background-color: var(--surface);
+  border-radius: var(--border-radius);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.sidebarHeader {
+  padding: 1.25rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebarTitle {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.pointsList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pointCard {
+  background-color: #262626;
+  border-radius: var(--border-radius);
+  padding: 1rem;
+  border-left: 4px solid var(--point-color, var(--primary));
+  transition: var(--transition);
+}
+
+.pointCard:hover, .pointCard.active {
+  background-color: var(--surface-hover);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.pointCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.pointTitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.deleteButton {
+  color: var(--text-secondary);
+  background: transparent;
+  padding: 0.25rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.deleteButton:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.coordRow {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.inputLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
+.inputField {
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  transition: var(--transition);
+  width: 100%;
+}
+
+.inputField:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.sidebarFooter {
+  padding: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.addButton {
+  width: 100%;
+  background-color: var(--primary);
+  color: white;
+  padding: 0.75rem;
+  border-radius: var(--border-radius);
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: var(--transition);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.addButton:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.addButton:active {
+  transform: translateY(0);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .container {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    width: 100%;
+    height: 300px;
+    flex-shrink: 0;
+  }
+}
