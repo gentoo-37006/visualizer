@@ -16,14 +16,27 @@ type Point = {
   constantHeading?: number;
   startHeading?: number;
   endHeading?: number;
+  controlPoints?: ControlPoint[];
+  controlsExpanded?: boolean;
+};
+
+type ControlPoint = {
+  id: string;
+  nx: number;
+  ny: number;
 };
 
 type HeadingInterpolation = "constant" | "linear" | "tangential";
 type PathHeadingField = "constant" | "start" | "end";
+type DragTarget =
+  | { kind: "point"; index: number }
+  | { kind: "control"; pathIndex: number; controlIndex: number };
 
 const FIELD_SIZE_INCHES = 144;
 const POINT_DIAMETER = 20;
+const CONTROL_POINT_DIAMETER = 14;
 const POINT_RADIUS = POINT_DIAMETER / 2;
+const CONTROL_POINT_RADIUS = CONTROL_POINT_DIAMETER / 2;
 const FIELD_BORDER_WIDTH = 3;
 const INITIAL_POINT_ID = "init-point";
 const INITIAL_POINT_COLOR = "rgb(59, 130, 246)";
@@ -70,6 +83,8 @@ const createDefaultHeadingValues = () => ({
   constantHeading: 0,
   startHeading: 0,
   endHeading: 0,
+  controlPoints: [] as ControlPoint[],
+  controlsExpanded: true,
 });
 
 const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
@@ -77,12 +92,26 @@ const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
   y: POINT_RADIUS + FIELD_BORDER_WIDTH + ny * (fieldSize.height - FIELD_BORDER_WIDTH * 2),
 });
 
+const isSameTarget = (a: DragTarget | null, b: DragTarget | null) => {
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === "point" && b.kind === "point") return a.index === b.index;
+  if (a.kind === "control" && b.kind === "control") {
+    return a.pathIndex === b.pathIndex && a.controlIndex === b.controlIndex;
+  }
+  return false;
+};
+
+const targetPathIndex = (target: DragTarget | null) => {
+  if (!target) return null;
+  return target.kind === "point" ? target.index : target.pathIndex;
+};
+
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: false, heading: 0 },
   ]);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
+  const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
@@ -157,8 +186,8 @@ export default function PathPlannerPage() {
 
   const handleRemovePoint = (index: number) => {
     setPoints(points.filter((_, i) => i !== index));
-    if (activeIndex === index) setActiveIndex(null);
-    if (hoverIndex === index) setHoverIndex(null);
+    if (targetPathIndex(activeTarget) === index) setActiveTarget(null);
+    if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
 
   const handleToggleLocked = (index: number) => {
@@ -167,17 +196,90 @@ export default function PathPlannerPage() {
         i === index ? { ...point, locked: !point.locked } : point
       )
     );
-    if (activeIndex === index) {
-      setActiveIndex(null);
+    if (targetPathIndex(activeTarget) === index) {
+      setActiveTarget(null);
       setIsDragging(false);
     }
-    if (hoverIndex === index) setHoverIndex(null);
+    if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
 
   const updatePoint = (index: number, nx: number, ny: number) => {
     const newPoints = [...points];
     newPoints[index] = { ...newPoints[index], nx, ny };
     setPoints(newPoints);
+  };
+
+  const updateControlPoint = (pathIndex: number, controlIndex: number, nx: number, ny: number) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) => {
+        if (i !== pathIndex) return point;
+        return {
+          ...point,
+          controlPoints: (point.controlPoints ?? []).map((controlPoint, j) =>
+            j === controlIndex ? { ...controlPoint, nx, ny } : controlPoint
+          ),
+        };
+      })
+    );
+  };
+
+  const updateTargetPosition = (target: DragTarget, nx: number, ny: number) => {
+    if (target.kind === "point") {
+      updatePoint(target.index, nx, ny);
+    } else {
+      updateControlPoint(target.pathIndex, target.controlIndex, nx, ny);
+    }
+  };
+
+  const handleToggleControlsExpanded = (index: number) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, controlsExpanded: !(point.controlsExpanded ?? true) } : point
+      )
+    );
+  };
+
+  const handleAddControlPoint = (index: number) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) => {
+        if (i !== index) return point;
+        const controlPoints = point.controlPoints ?? [];
+        const previousPoint = currentPoints[index - 1];
+        const seed = controlPoints[controlPoints.length - 1] ?? {
+          nx: previousPoint ? (previousPoint.nx + point.nx) / 2 : point.nx,
+          ny: previousPoint ? (previousPoint.ny + point.ny) / 2 : point.ny,
+        };
+
+        return {
+          ...point,
+          controlPoints: [...controlPoints, { id: generateId(), nx: seed.nx, ny: seed.ny }],
+          controlsExpanded: true,
+        };
+      })
+    );
+  };
+
+  const handleControlCoordChange = (
+    pathIndex: number,
+    controlIndex: number,
+    axis: "x" | "y",
+    value: string
+  ) => {
+    const controlPoint = points[pathIndex].controlPoints?.[controlIndex];
+    if (!controlPoint) return;
+
+    const currentField = toFieldCoords(controlPoint.nx, controlPoint.ny);
+    const num = parseFloat(value);
+    if (isNaN(num)) return;
+
+    let newX = currentField.x;
+    let newY = currentField.y;
+
+    if (axis === "x") newX = num;
+    if (axis === "y") newY = num;
+
+    const { nx, ny } = toNormalizedCoords(newX, newY);
+    updateControlPoint(pathIndex, controlIndex, nx, ny);
   };
 
   const handleCoordChange = (index: number, axis: "x" | "y", value: string) => {
@@ -257,9 +359,9 @@ export default function PathPlannerPage() {
   };
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (hoverIndex !== null && !points[hoverIndex].locked) {
+    if (hoverTarget !== null && !points[targetPathIndex(hoverTarget) ?? 0].locked) {
       setIsDragging(true);
-      setActiveIndex(hoverIndex);
+      setActiveTarget(hoverTarget);
       // Optional: allow set pointer capture for better dragging outside
       if (svgRef.current) {
         svgRef.current.setPointerCapture(e.pointerId);
@@ -268,9 +370,9 @@ export default function PathPlannerPage() {
   };
 
   const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (isDragging && activeIndex !== null) {
+    if (isDragging && activeTarget !== null) {
       const { nx, ny } = getPointerNormalized(e);
-      updatePoint(activeIndex, nx, ny);
+      updateTargetPosition(activeTarget, nx, ny);
     } else {
       // Hit testing for hover
       if (!svgRef.current) return;
@@ -281,18 +383,29 @@ export default function PathPlannerPage() {
       );
       if (minFieldSize <= 0) return;
       const hitRadiusNormalized = POINT_RADIUS / minFieldSize;
+      const controlHitRadiusNormalized = CONTROL_POINT_RADIUS / minFieldSize;
 
-      let hit = null;
+      let hit: DragTarget | null = null;
       for (let i = points.length - 1; i >= 0; i--) {
         if (points[i].locked) continue;
+        const controlPoints = points[i].controlPoints ?? [];
+        for (let j = controlPoints.length - 1; j >= 0; j--) {
+          const dx = controlPoints[j].nx - nx;
+          const dy = controlPoints[j].ny - ny;
+          if (Math.sqrt(dx * dx + dy * dy) <= controlHitRadiusNormalized) {
+            hit = { kind: "control", pathIndex: i, controlIndex: j };
+            break;
+          }
+        }
+        if (hit) break;
         const dx = points[i].nx - nx;
         const dy = points[i].ny - ny;
         if (Math.sqrt(dx * dx + dy * dy) <= hitRadiusNormalized) {
-          hit = i;
+          hit = { kind: "point", index: i };
           break;
         }
       }
-      setHoverIndex(hit);
+      setHoverTarget(hit);
     }
   };
 
@@ -322,9 +435,9 @@ export default function PathPlannerPage() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
-            onPointerLeave={() => { if (!isDragging) setHoverIndex(null); }}
+            onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
             style={{ 
-              cursor: isDragging ? 'grabbing' : (hoverIndex !== null ? 'pointer' : 'default') 
+              cursor: isDragging ? 'grabbing' : (hoverTarget !== null ? 'pointer' : 'default') 
             }}
             viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
           >
@@ -351,7 +464,7 @@ export default function PathPlannerPage() {
             {/* Draw Points */}
             {hasMeasuredField && points.map((p, i) => {
               const { x, y } = toSvgPixelCoords(p.nx, p.ny, fieldSize);
-              const isHovered = hoverIndex === i && !p.locked;
+              const isHovered = isSameTarget(hoverTarget, { kind: "point", index: i }) && !p.locked;
 
               return (
                 <g key={`point-${p.id}`}>
@@ -376,6 +489,50 @@ export default function PathPlannerPage() {
                 </g>
               );
             })}
+
+            {/* Draw Control Points */}
+            {hasMeasuredField && points.map((p, i) =>
+              (p.controlPoints ?? []).map((controlPoint, j) => {
+                const { x, y } = toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize);
+                const isHovered =
+                  isSameTarget(hoverTarget, { kind: "control", pathIndex: i, controlIndex: j }) && !p.locked;
+
+                return (
+                  <g key={`control-${controlPoint.id}`}>
+                    {isHovered && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={CONTROL_POINT_RADIUS}
+                        fill="rgba(0,0,0,0.45)"
+                        filter="blur(4px)"
+                        transform="translate(0 2)"
+                      />
+                    )}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={CONTROL_POINT_RADIUS}
+                      fill={p.color}
+                      stroke={isHovered ? "white" : "rgba(255,255,255,0.65)"}
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={x}
+                      y={y}
+                      fill="#111827"
+                      fontSize="9"
+                      fontWeight="700"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      pointerEvents="none"
+                    >
+                      {j + 1}
+                    </text>
+                  </g>
+                );
+              })
+            )}
           </svg>
         </div>
       </div>
@@ -401,7 +558,13 @@ export default function PathPlannerPage() {
                 constantHeading={p.constantHeading ?? 0}
                 startHeading={p.startHeading ?? 0}
                 endHeading={p.endHeading ?? 0}
-                isActive={hoverIndex === i || activeIndex === i}
+                controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
+                  id: controlPoint.id,
+                  ...toFieldCoords(controlPoint.nx, controlPoint.ny),
+                }))}
+                controlPointCount={(p.controlPoints ?? []).length}
+                controlsExpanded={p.controlsExpanded ?? true}
+                isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
                 onChange={(axis, val) => handleCoordChange(i, axis, val)}
                 onHeadingChange={i === 0 ? handleHeadingChange : undefined}
                 onInterpolationChange={
@@ -411,6 +574,15 @@ export default function PathPlannerPage() {
                   i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
                 }
                 onToggleLocked={() => handleToggleLocked(i)}
+                onToggleControlsExpanded={
+                  i > 0 ? () => handleToggleControlsExpanded(i) : undefined
+                }
+                onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
+                onControlPointChange={
+                  i > 0
+                    ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
+                    : undefined
+                }
                 canDelete={isShiftPressed}
                 onDelete={() => handleRemovePoint(i)}
               />
@@ -445,12 +617,18 @@ function PointCard({
   constantHeading,
   startHeading,
   endHeading,
+  controlPoints,
+  controlPointCount,
+  controlsExpanded,
   isActive,
   onChange,
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
   onToggleLocked,
+  onToggleControlsExpanded,
+  onAddControlPoint,
+  onControlPointChange,
   canDelete,
   onDelete
 }: {
@@ -464,12 +642,18 @@ function PointCard({
   constantHeading: number;
   startHeading: number;
   endHeading: number;
+  controlPoints: Array<{ id: string; x: number; y: number }>;
+  controlPointCount: number;
+  controlsExpanded: boolean;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
   onToggleLocked: () => void;
+  onToggleControlsExpanded?: () => void;
+  onAddControlPoint?: () => void;
+  onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
   canDelete: boolean;
   onDelete: () => void;
 }) {
@@ -546,10 +730,10 @@ function PointCard({
           <button
             className={`${styles.iconButton} ${styles.lockButton} ${locked ? styles.lockedButton : ""}`}
             onClick={onToggleLocked}
-            aria-label={locked ? "Unlock" : "Lock"}
-            title={locked ? "Unlock" : "Lock"}
+            aria-label={locked ? "Locked" : "Unlocked"}
+            title={locked ? "Locked" : "Unlocked"}
           >
-            {locked ? (
+            {!locked ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="11" width="18" height="10" rx="2" ry="2"></rect>
                 <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
@@ -682,6 +866,129 @@ function PointCard({
           )}
           </>
         )}
+      </div>
+      {index > 0 && (
+        <div className={styles.controlPointsPanel}>
+          <div className={styles.controlPointsHeader}>
+            <button
+              className={styles.controlPointsToggle}
+              onClick={onToggleControlsExpanded}
+              aria-expanded={controlsExpanded}
+            >
+              <svg
+                className={`${styles.chevronIcon} ${controlsExpanded ? styles.chevronOpen : ""}`}
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+              <span>Control Points ({controlPointCount})</span>
+            </button>
+            <button className={styles.addControlPointButton} onClick={onAddControlPoint}>
+              <span aria-hidden="true">+</span>
+              Add
+            </button>
+          </div>
+          {controlsExpanded && controlPoints.length > 0 && (
+            <div className={styles.controlPointsBody}>
+              {controlPoints.map((controlPoint, controlIndex) => (
+                <ControlPointCard
+                  key={controlPoint.id}
+                  index={controlIndex}
+                  x={controlPoint.x}
+                  y={controlPoint.y}
+                  onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlPointCard({
+  index,
+  x,
+  y,
+  onChange,
+}: {
+  index: number;
+  x: number;
+  y: number;
+  onChange: (axis: "x" | "y", val: string) => void;
+}) {
+  const [editingAxis, setEditingAxis] = useState<"x" | "y" | null>(null);
+  const [draftX, setDraftX] = useState("");
+  const [draftY, setDraftY] = useState("");
+
+  const startEditing = (axis: "x" | "y") => {
+    setEditingAxis(axis);
+    if (axis === "x") {
+      setDraftX(x.toFixed(1));
+    } else {
+      setDraftY(y.toFixed(1));
+    }
+  };
+
+  const updateDraft = (axis: "x" | "y", val: string) => {
+    if (axis === "x") {
+      setDraftX(val);
+    } else {
+      setDraftY(val);
+    }
+    onChange(axis, val);
+  };
+
+  const commitEdit = (axis: "x" | "y", val: string) => {
+    onChange(axis, val);
+    setEditingAxis(null);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y", val: string) => {
+    if (e.key === "Enter") {
+      commitEdit(axis, val);
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  return (
+    <div className={styles.controlPointCard}>
+      <div className={styles.controlPointTitleRow}>
+        <span className={styles.controlPointTitle}>Control Point {index + 1}</span>
+      </div>
+      <div className={styles.controlPointInputs}>
+        <div className={styles.inputGroup}>
+          <label className={styles.inputLabel}>X (in)</label>
+          <input
+            type="text"
+            className={styles.inputField}
+            value={editingAxis === "x" ? draftX : x.toFixed(1)}
+            onFocus={() => startEditing("x")}
+            onChange={(e) => updateDraft("x", e.target.value)}
+            onBlur={(e) => commitEdit("x", e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
+          />
+        </div>
+        <div className={styles.inputGroup}>
+          <label className={styles.inputLabel}>Y (in)</label>
+          <input
+            type="text"
+            className={styles.inputField}
+            value={editingAxis === "y" ? draftY : y.toFixed(1)}
+            onFocus={() => startEditing("y")}
+            onChange={(e) => updateDraft("y", e.target.value)}
+            onBlur={(e) => commitEdit("y", e.target.value)}
+            onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
+          />
+        </div>
       </div>
     </div>
   );
