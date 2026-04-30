@@ -75,6 +75,42 @@
   margin: 0;
 }
 
+.sidebarTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.importExportActions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-left: auto;
+}
+
+.secondaryIconButton {
+  width: 2rem;
+  height: 2rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.secondaryIconButton:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
 .pointsList {
   flex: 1;
   overflow-y: auto;
@@ -105,15 +141,39 @@
 }
 
 .pointTitle {
+  flex: 1;
+  min-width: 0;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.pathNameInput {
+  width: 16ch;
+  max-width: 16ch;
+  flex: 0 0 16ch;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0;
+}
+
+.pathNameInput:focus {
+  background: var(--background);
+  border-color: var(--primary);
+  padding: 0.25rem;
+  margin-left: -0.25rem;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
 
 .cardActions {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  flex-shrink: 0;
 }
 
 .iconButton {

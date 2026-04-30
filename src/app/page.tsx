@@ -7,6 +7,7 @@ import styles from "./page.module.css";
 // --- Types & Constants ---
 type Point = {
   id: string;
+  name?: string;
   nx: number; // Normalized x (0 to 1)
   ny: number; // Normalized y (0 to 1)
   color: string;
@@ -34,7 +35,7 @@ type DragTarget =
 
 const FIELD_SIZE_INCHES = 144;
 const POINT_DIAMETER = 20;
-const CONTROL_POINT_DIAMETER = 14;
+const CONTROL_POINT_DIAMETER = POINT_DIAMETER;
 const POINT_RADIUS = POINT_DIAMETER / 2;
 const CONTROL_POINT_RADIUS = CONTROL_POINT_DIAMETER / 2;
 const FIELD_BORDER_WIDTH = 3;
@@ -78,6 +79,9 @@ const normalizeHeading = (degrees: number) => {
   return normalized === -180 && degrees > 0 ? 180 : normalized;
 };
 
+const isNumericDraft = (value: string) => /^-?(?:\d+)?(?:\.\d*)?$/.test(value);
+const isKotlinIdentifierDraft = (value: string) => value === "" || /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+
 const createDefaultHeadingValues = () => ({
   headingMode: "constant" as HeadingInterpolation,
   constantHeading: 0,
@@ -91,6 +95,35 @@ const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
   x: POINT_RADIUS + FIELD_BORDER_WIDTH + nx * (fieldSize.width - FIELD_BORDER_WIDTH * 2),
   y: POINT_RADIUS + FIELD_BORDER_WIDTH + ny * (fieldSize.height - FIELD_BORDER_WIDTH * 2),
 });
+
+const interpolateBezierPoint = (points: Array<{ x: number; y: number }>, t: number) => {
+  let workingPoints = points.map((point) => ({ ...point }));
+
+  while (workingPoints.length > 1) {
+    workingPoints = workingPoints.slice(0, -1).map((point, index) => ({
+      x: point.x + (workingPoints[index + 1].x - point.x) * t,
+      y: point.y + (workingPoints[index + 1].y - point.y) * t,
+    }));
+  }
+
+  return workingPoints[0];
+};
+
+const createSplinePath = (
+  start: { x: number; y: number },
+  controls: Array<{ x: number; y: number }>,
+  end: { x: number; y: number }
+) => {
+  const bezierPoints = [start, ...controls, end];
+  const sampleCount = Math.max(24, controls.length * 16);
+  const samples = Array.from({ length: sampleCount + 1 }, (_, index) =>
+    interpolateBezierPoint(bezierPoints, index / sampleCount)
+  );
+
+  return samples
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ");
+};
 
 const isSameTarget = (a: DragTarget | null, b: DragTarget | null) => {
   if (!a || !b || a.kind !== b.kind) return false;
@@ -106,6 +139,234 @@ const targetPathIndex = (target: DragTarget | null) => {
   return target.kind === "point" ? target.index : target.pathIndex;
 };
 
+const formatKotlinNumber = (value: number) => value.toFixed(1);
+
+const formatKotlinPose = (point: { nx: number; ny: number }) => {
+  const coords = toFieldCoords(point.nx, point.ny);
+  return `Pose(${formatKotlinNumber(coords.x)}, ${formatKotlinNumber(coords.y)})`;
+};
+
+const toKotlinVariableName = (name: string, fallback: string) => {
+  const trimmedName = name.trim();
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmedName)) return trimmedName;
+
+  const words = trimmedName.match(/[A-Za-z0-9]+/g) ?? [];
+  const camelName = words
+    .map((word, index) => {
+      const normalized = word.toLowerCase();
+      if (index === 0) return normalized;
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    })
+    .join("");
+  const variableName = camelName || fallback;
+  return /^[A-Za-z_]/.test(variableName) ? variableName : `${fallback}${variableName}`;
+};
+
+const createUniquePathNames = (points: Point[]) => {
+  const usedNames = new Set<string>();
+  return points.slice(1).map((point, pathIndex) => {
+    const baseName = toKotlinVariableName(point.name?.trim() || "", `path${pathIndex + 1}`);
+    let name = baseName;
+    let suffix = 2;
+
+    while (usedNames.has(name)) {
+      name = `${baseName}${suffix}`;
+      suffix++;
+    }
+
+    usedNames.add(name);
+    return name;
+  });
+};
+
+const serializePathPlannerKotlin = (points: Point[]) => {
+  const className = "GeneratedAutonPath";
+  const pathPoints = points.slice(1);
+  const pathNames = createUniquePathNames(points);
+  const pathDeclarations = pathPoints
+    .map((point, pathIndex) => {
+      const previousPoint = points[pathIndex];
+      const pathName = pathNames[pathIndex];
+      const poses = [
+        formatKotlinPose(previousPoint),
+        ...(point.controlPoints ?? []).map(formatKotlinPose),
+        formatKotlinPose(point),
+      ];
+      const headingMode = point.headingMode ?? "constant";
+      const headingCall =
+        headingMode === "linear"
+          ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)})`
+          : headingMode === "tangential"
+            ? "tangentHeading()"
+            : `constantHeading(${formatKotlinNumber(point.constantHeading ?? 0)})`;
+
+      return `        val ${pathName} = Path(
+${poses.map((pose) => `            ${pose},`).join("\n")}
+        ).${headingCall}`;
+    })
+    .join("\n\n");
+
+  const followPaths = pathPoints
+    .map((_, pathIndex) => `            .followPath(${pathNames[pathIndex]})`)
+    .join("\n");
+
+  return `package org.firstinspires.ftc.teamcode.opmodes.auto
+
+import gentoo.myrelib.Alliance
+import gentoo.myrelib.math.Pose
+import gentoo.myrelib.pathing.Path
+import org.firstinspires.ftc.teamcode.util.AutonSequence
+
+class ${className} : Auto(Alliance.BLUE) {
+    override fun defineAutonSequence(builder: AutonSequence.Builder): AutonSequence.Builder {
+${pathDeclarations || "        // Add paths in the editor before exporting."}
+
+        return builder${followPaths ? `\n${followPaths}` : ""}
+    }
+}
+`;
+};
+
+const findMatchingParen = (contents: string, openParenIndex: number) => {
+  let depth = 0;
+  for (let i = openParenIndex; i < contents.length; i++) {
+    const char = contents[i];
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if (depth === 0) return i;
+  }
+  return -1;
+};
+
+const splitTopLevelArgs = (contents: string) => {
+  const args: string[] = [];
+  let depth = 0;
+  let start = 0;
+
+  for (let i = 0; i < contents.length; i++) {
+    const char = contents[i];
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if (char === "," && depth === 0) {
+      const arg = contents.slice(start, i).trim();
+      if (arg) args.push(arg);
+      start = i + 1;
+    }
+  }
+
+  const finalArg = contents.slice(start).trim();
+  if (finalArg) args.push(finalArg);
+  return args;
+};
+
+const parseKotlinPose = (arg: string) => {
+  const match = arg.match(/Pose\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+
+  return toNormalizedCoords(Number(match[1]), Number(match[2]));
+};
+
+const parsePathPlannerKotlin = (contents: string): Point[] | null => {
+  type ParsedPath = {
+    name: string;
+    args: string[];
+    headingMode: HeadingInterpolation;
+    constantHeading: number;
+    startHeading: number;
+    endHeading: number;
+  };
+
+  const pathDefinitions = new Map<string, ParsedPath>();
+  const pathRegex = /val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Path\s*\(/g;
+  let pathMatch: RegExpExecArray | null;
+
+  while ((pathMatch = pathRegex.exec(contents)) !== null) {
+    const name = pathMatch[1];
+    const openParenIndex = contents.indexOf("(", pathMatch.index);
+    const closeParenIndex = findMatchingParen(contents, openParenIndex);
+    if (closeParenIndex < 0) continue;
+
+    const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex));
+    const afterPath = contents.slice(closeParenIndex + 1, closeParenIndex + 160);
+    const headingMatch = afterPath.match(
+      /^\s*\.\s*(constantHeading|linearHeading|tangentHeading)\s*\(([^)]*)\)/
+    );
+
+    let headingMode: HeadingInterpolation = "constant";
+    let constantHeading = 0;
+    let startHeading = 0;
+    let endHeading = 0;
+
+    if (headingMatch?.[1] === "linearHeading") {
+      headingMode = "linear";
+      const values = headingMatch[2]
+        .split(",")
+        .map((value) => parseFloat(value.trim()))
+        .filter((value) => !Number.isNaN(value));
+      startHeading = normalizeHeading(values[0] ?? 0);
+      endHeading = normalizeHeading(values[1] ?? 0);
+    } else if (headingMatch?.[1] === "tangentHeading") {
+      headingMode = "tangential";
+    } else if (headingMatch?.[1] === "constantHeading") {
+      const value = parseFloat(headingMatch[2].trim());
+      constantHeading = normalizeHeading(Number.isNaN(value) ? 0 : value);
+    }
+
+    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading });
+    pathRegex.lastIndex = closeParenIndex + 1;
+  }
+
+  const followOrder = [...contents.matchAll(/\.followPath\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g)].map(
+    (match) => match[1]
+  );
+  const orderedPaths =
+    followOrder.length > 0
+      ? followOrder.map((name) => pathDefinitions.get(name)).filter((path): path is ParsedPath => Boolean(path))
+      : [...pathDefinitions.values()];
+
+  if (orderedPaths.length === 0) return null;
+
+  const firstStart = parseKotlinPose(orderedPaths[0].args[0] ?? "");
+  const importedPoints: Point[] = [
+    {
+      id: INITIAL_POINT_ID,
+      nx: firstStart?.nx ?? 0.5,
+      ny: firstStart?.ny ?? 0.5,
+      color: randomColor(),
+      locked: false,
+      heading: 0,
+    },
+  ];
+
+  orderedPaths.forEach((path) => {
+    const parsedArgs = path.args.map((arg) => parseKotlinPose(arg));
+    const endPose = [...parsedArgs].reverse().find((pose) => pose !== null);
+    if (!endPose) return;
+
+    const firstArgIsPose = parsedArgs[0] !== null;
+    const controlPoses = parsedArgs
+      .slice(firstArgIsPose ? 1 : 0, -1)
+      .filter((pose): pose is { nx: number; ny: number } => pose !== null);
+
+    importedPoints.push({
+      id: generateId(),
+      name: path.name,
+      nx: endPose.nx,
+      ny: endPose.ny,
+      color: randomColor(),
+      locked: false,
+      headingMode: path.headingMode,
+      constantHeading: path.constantHeading,
+      startHeading: path.startHeading,
+      endHeading: path.endHeading,
+      controlPoints: controlPoses.map((pose) => ({ id: generateId(), nx: pose.nx, ny: pose.ny })),
+      controlsExpanded: controlPoses.length > 0,
+    });
+  });
+
+  return importedPoints.length > 1 ? importedPoints : null;
+};
+
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: false, heading: 0 },
@@ -118,6 +379,7 @@ export default function PathPlannerPage() {
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
 
   useEffect(() => {
@@ -175,6 +437,7 @@ export default function PathPlannerPage() {
       ...points,
       {
         id: generateId(),
+        name: `path${points.length}`,
         nx: seed.nx,
         ny: seed.ny,
         color: randomColor(),
@@ -201,6 +464,12 @@ export default function PathPlannerPage() {
       setIsDragging(false);
     }
     if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
+  };
+
+  const handleRenamePath = (index: number, name: string) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) => (i === index ? { ...point, name } : point))
+    );
   };
 
   const updatePoint = (index: number, nx: number, ny: number) => {
@@ -343,6 +612,45 @@ export default function PathPlannerPage() {
     );
   };
 
+  const handleExportKotlin = () => {
+    const contents = serializePathPlannerKotlin(points);
+    const blob = new Blob([contents], { type: "text/x-kotlin;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "AutonPath.kt";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportKotlinClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportKotlin = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const contents = await file.text();
+      const importedPoints = parsePathPlannerKotlin(contents);
+      if (!importedPoints || importedPoints.length === 0) {
+        window.alert("This Kotlin file does not contain an Auton Path Planner export.");
+        return;
+      }
+
+      setPoints(importedPoints);
+      setHoverTarget(null);
+      setActiveTarget(null);
+      setIsDragging(false);
+    } catch {
+      window.alert("Unable to import this Kotlin file.");
+    }
+  };
+
   // --- Pointer Events for SVG ---
   const getPointerNormalized = (e: React.PointerEvent<SVGSVGElement> | PointerEvent) => {
     if (!svgRef.current) return { nx: 0, ny: 0 };
@@ -447,6 +755,23 @@ export default function PathPlannerPage() {
               const nextP = points[i + 1];
               const start = toSvgPixelCoords(p.nx, p.ny, fieldSize);
               const end = toSvgPixelCoords(nextP.nx, nextP.ny, fieldSize);
+              const controlPoints = (nextP.controlPoints ?? []).map((controlPoint) =>
+                toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize)
+              );
+              if (controlPoints.length > 0) {
+                return (
+                  <path
+                    key={`line-${p.id}`}
+                    d={createSplinePath(start, controlPoints, end)}
+                    fill="none"
+                    stroke={nextP.color}
+                    strokeWidth="6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                );
+              }
+
               return (
                 <line
                   key={`line-${p.id}`}
@@ -514,14 +839,14 @@ export default function PathPlannerPage() {
                       cy={y}
                       r={CONTROL_POINT_RADIUS}
                       fill={p.color}
-                      stroke={isHovered ? "white" : "rgba(255,255,255,0.65)"}
+                      stroke={isHovered ? "white" : "transparent"}
                       strokeWidth="1.5"
                     />
                     <text
                       x={x}
                       y={y}
                       fill="#111827"
-                      fontSize="9"
+                      fontSize="12"
                       fontWeight="700"
                       textAnchor="middle"
                       dominantBaseline="central"
@@ -539,7 +864,42 @@ export default function PathPlannerPage() {
 
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
-          <h1 className={styles.sidebarTitle}>Path Planner</h1>
+          <div className={styles.sidebarTitleRow}>
+            <h1 className={styles.sidebarTitle}>Path Planner</h1>
+            <div className={styles.importExportActions}>
+              <button
+                className={styles.secondaryIconButton}
+                onClick={handleImportKotlinClick}
+                aria-label="Import Kotlin"
+                title="Import Kotlin"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </button>
+              <button
+                className={styles.secondaryIconButton}
+                onClick={handleExportKotlin}
+                aria-label="Export Kotlin"
+                title="Export Kotlin"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+              </button>
+              <input
+                ref={importInputRef}
+                className={styles.hiddenFileInput}
+                type="file"
+                accept=".kt,text/x-kotlin,text/plain"
+                onChange={handleImportKotlin}
+              />
+            </div>
+          </div>
         </div>
         
         <div className={styles.pointsList}>
@@ -549,6 +909,7 @@ export default function PathPlannerPage() {
               <PointCard
                 key={p.id}
                 index={i}
+                name={p.name ?? `Path ${i}`}
                 color={p.color}
                 locked={p.locked}
                 x={coords.x}
@@ -566,6 +927,7 @@ export default function PathPlannerPage() {
                 controlsExpanded={p.controlsExpanded ?? true}
                 isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
                 onChange={(axis, val) => handleCoordChange(i, axis, val)}
+                onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
                 onHeadingChange={i === 0 ? handleHeadingChange : undefined}
                 onInterpolationChange={
                   i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
@@ -608,6 +970,7 @@ export default function PathPlannerPage() {
 
 function PointCard({
   index,
+  name,
   color,
   locked,
   x,
@@ -622,6 +985,7 @@ function PointCard({
   controlsExpanded,
   isActive,
   onChange,
+  onRename,
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
@@ -633,6 +997,7 @@ function PointCard({
   onDelete
 }: {
   index: number;
+  name: string;
   color: string;
   locked: boolean;
   x: number;
@@ -647,6 +1012,7 @@ function PointCard({
   controlsExpanded: boolean;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
+  onRename?: (name: string) => void;
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
@@ -662,6 +1028,8 @@ function PointCard({
   const [draftY, setDraftY] = useState("");
   const [draftHeading, setDraftHeading] = useState("");
   const [draftPathHeading, setDraftPathHeading] = useState("");
+  const [draftName, setDraftName] = useState("");
+  const [isEditingName, setIsEditingName] = useState(false);
 
   const startEditing = (axis: "x" | "y" | "heading" | PathHeadingField) => {
     setEditingAxis(axis);
@@ -694,6 +1062,8 @@ function PointCard({
   };
 
   const updateCoordinateDraft = (axis: "x" | "y", val: string) => {
+    if (!isNumericDraft(val)) return;
+
     if (axis === "x") {
       setDraftX(val);
     } else {
@@ -719,13 +1089,40 @@ function PointCard({
     onDelete();
   };
 
+  const handleNameFocus = () => {
+    setIsEditingName(true);
+    setDraftName(name);
+  };
+
+  const handleNameBlur = () => {
+    const trimmedName = draftName.trim();
+    onRename?.(trimmedName || `path${index}`);
+    setIsEditingName(false);
+  };
+
   return (
     <div 
       className={`${styles.pointCard} ${isActive ? styles.active : ''}`}
       style={{ '--point-color': color } as React.CSSProperties}
     >
       <div className={styles.pointCardHeader}>
-        <span className={styles.pointTitle}>{index === 0 ? "Start Pose" : `Path ${index}`}</span>
+        {index === 0 ? (
+          <span className={styles.pointTitle}>Start Pose</span>
+        ) : (
+          <input
+            className={styles.pathNameInput}
+            maxLength={16}
+            value={isEditingName ? draftName : name}
+            onFocus={handleNameFocus}
+            onChange={(e) => {
+              if (!isKotlinIdentifierDraft(e.target.value)) return;
+              setDraftName(e.target.value);
+              onRename?.(e.target.value);
+            }}
+            onBlur={handleNameBlur}
+            aria-label={`Rename path ${index}`}
+          />
+        )}
         <div className={styles.cardActions}>
           <button
             className={`${styles.iconButton} ${styles.lockButton} ${locked ? styles.lockedButton : ""}`}
@@ -774,6 +1171,7 @@ function PointCard({
           <label className={styles.inputLabel}>X (in)</label>
           <input
             type="text"
+            inputMode="decimal"
             className={styles.inputField}
             value={editingAxis === "x" ? draftX : x.toFixed(1)}
             onFocus={() => startEditing("x")}
@@ -786,6 +1184,7 @@ function PointCard({
           <label className={styles.inputLabel}>Y (in)</label>
           <input
             type="text"
+            inputMode="decimal"
             className={styles.inputField}
             value={editingAxis === "y" ? draftY : y.toFixed(1)}
             onFocus={() => startEditing("y")}
@@ -799,10 +1198,13 @@ function PointCard({
             <label className={styles.inputLabel}>Heading (deg)</label>
             <input
               type="text"
+              inputMode="decimal"
               className={styles.inputField}
               value={editingAxis === "heading" ? draftHeading : (heading ?? 0).toFixed(1)}
               onFocus={() => startEditing("heading")}
-              onChange={(e) => setDraftHeading(e.target.value)}
+              onChange={(e) => {
+                if (isNumericDraft(e.target.value)) setDraftHeading(e.target.value);
+              }}
               onBlur={(e) => commitEdit("heading", e.target.value)}
               onKeyDown={(e) => handleKeyDown(e, "heading", e.currentTarget.value)}
             />
@@ -827,10 +1229,13 @@ function PointCard({
               <label className={styles.inputLabel}>Value</label>
               <input
                 type="text"
+                inputMode="decimal"
                 className={styles.inputField}
                 value={editingAxis === "constant" ? draftPathHeading : constantHeading.toFixed(1)}
                 onFocus={() => startEditing("constant")}
-                onChange={(e) => setDraftPathHeading(e.target.value)}
+                onChange={(e) => {
+                  if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                }}
                 onBlur={(e) => commitEdit("constant", e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, "constant", e.currentTarget.value)}
               />
@@ -842,10 +1247,13 @@ function PointCard({
                 <label className={styles.inputLabel}>Start</label>
                 <input
                   type="text"
+                  inputMode="decimal"
                   className={styles.inputField}
                   value={editingAxis === "start" ? draftPathHeading : startHeading.toFixed(1)}
                   onFocus={() => startEditing("start")}
-                  onChange={(e) => setDraftPathHeading(e.target.value)}
+                  onChange={(e) => {
+                    if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                  }}
                   onBlur={(e) => commitEdit("start", e.target.value)}
                   onKeyDown={(e) => handleKeyDown(e, "start", e.currentTarget.value)}
                 />
@@ -854,10 +1262,13 @@ function PointCard({
                 <label className={styles.inputLabel}>End</label>
                 <input
                   type="text"
+                  inputMode="decimal"
                   className={styles.inputField}
                   value={editingAxis === "end" ? draftPathHeading : endHeading.toFixed(1)}
                   onFocus={() => startEditing("end")}
-                  onChange={(e) => setDraftPathHeading(e.target.value)}
+                  onChange={(e) => {
+                    if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                  }}
                   onBlur={(e) => commitEdit("end", e.target.value)}
                   onKeyDown={(e) => handleKeyDown(e, "end", e.currentTarget.value)}
                 />
@@ -939,6 +1350,8 @@ function ControlPointCard({
   };
 
   const updateDraft = (axis: "x" | "y", val: string) => {
+    if (!isNumericDraft(val)) return;
+
     if (axis === "x") {
       setDraftX(val);
     } else {
@@ -969,6 +1382,7 @@ function ControlPointCard({
           <label className={styles.inputLabel}>X (in)</label>
           <input
             type="text"
+            inputMode="decimal"
             className={styles.inputField}
             value={editingAxis === "x" ? draftX : x.toFixed(1)}
             onFocus={() => startEditing("x")}
@@ -981,6 +1395,7 @@ function ControlPointCard({
           <label className={styles.inputLabel}>Y (in)</label>
           <input
             type="text"
+            inputMode="decimal"
             className={styles.inputField}
             value={editingAxis === "y" ? draftY : y.toFixed(1)}
             onFocus={() => startEditing("y")}
