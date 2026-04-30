@@ -11,6 +11,7 @@ type PointCardProps = {
   name: string;
   color: string;
   locked: boolean;
+  hidden: boolean;
   x: number;
   y: number;
   heading?: number;
@@ -28,6 +29,7 @@ type PointCardProps = {
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
   onToggleLocked: () => void;
+  onToggleHidden: () => void;
   onToggleControlsExpanded?: () => void;
   onAddControlPoint?: () => void;
   onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
@@ -40,6 +42,7 @@ export function PointCard({
   name,
   color,
   locked,
+  hidden,
   x,
   y,
   heading,
@@ -57,6 +60,7 @@ export function PointCard({
   onInterpolationChange,
   onPathHeadingChange,
   onToggleLocked,
+  onToggleHidden,
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlPointChange,
@@ -164,11 +168,34 @@ export function PointCard({
           />
         )}
         <div className={styles.cardActions}>
+          {index > 0 && (
+            <button
+              className={`${styles.iconButton} ${styles.visibilityButton} ${hidden ? styles.hiddenButton : ""}`}
+              onClick={onToggleHidden}
+              aria-label={hidden ? "Show path" : "Hide path"}
+              title={hidden ? "Show path" : "Hide path"}
+            >
+              {hidden ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C7 20 2.73 16.89 1 12a20.29 20.29 0 0 1 4.23-5.94"></path>
+                  <path d="M9.9 4.24A10.45 10.45 0 0 1 12 4c5 0 9.27 3.11 11 8a20.77 20.77 0 0 1-2.24 3.64"></path>
+                  <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              )}
+            </button>
+          )}
           <button
             className={`${styles.iconButton} ${styles.lockButton} ${locked ? styles.lockedButton : ""}`}
             onClick={onToggleLocked}
+            disabled={hidden}
             aria-label={locked ? "Locked" : "Unlocked"}
-            title={locked ? "Locked" : "Unlocked"}
+            title={hidden ? "Show path before changing lock" : locked ? "Locked" : "Unlocked"}
           >
             {!locked ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

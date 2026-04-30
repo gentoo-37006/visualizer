@@ -43,6 +43,11 @@ export default function PathPlannerPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
+  const isPointVisible = (index: number) => {
+    const previousSegmentVisible = index > 0 && !points[index].hidden;
+    const nextSegmentVisible = index < points.length - 1 && !points[index + 1].hidden;
+    return previousSegmentVisible || nextSegmentVisible || points.length === 1;
+  };
 
   useEffect(() => {
     const field = fieldRef.current;
@@ -103,6 +108,7 @@ export default function PathPlannerPage() {
         ny: seed.ny,
         color: randomColor(),
         locked: false,
+        hidden: false,
         ...createDefaultHeadingValues(),
       },
     ]);
@@ -115,9 +121,24 @@ export default function PathPlannerPage() {
   };
 
   const handleToggleLocked = (index: number) => {
+    if (points[index].hidden) return;
+
     setPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, locked: !point.locked } : point
+      )
+    );
+    if (targetPathIndex(activeTarget) === index) {
+      setActiveTarget(null);
+      setIsDragging(false);
+    }
+    if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
+  };
+
+  const handleToggleHidden = (index: number) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, hidden: !point.hidden } : point
       )
     );
     if (targetPathIndex(activeTarget) === index) {
@@ -324,7 +345,13 @@ export default function PathPlannerPage() {
   };
 
   const handlePointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (hoverTarget !== null && !points[targetPathIndex(hoverTarget) ?? 0].locked) {
+    const pathIndex = targetPathIndex(hoverTarget);
+    if (
+      hoverTarget !== null &&
+      pathIndex !== null &&
+      !points[pathIndex].locked &&
+      isPointVisible(pathIndex)
+    ) {
       setIsDragging(true);
       setActiveTarget(hoverTarget);
       svgRef.current?.setPointerCapture(e.pointerId);
@@ -350,15 +377,18 @@ export default function PathPlannerPage() {
     for (let i = points.length - 1; i >= 0; i--) {
       if (points[i].locked) continue;
       const controlPoints = points[i].controlPoints ?? [];
-      for (let j = controlPoints.length - 1; j >= 0; j--) {
-        const dx = controlPoints[j].nx - nx;
-        const dy = controlPoints[j].ny - ny;
-        if (Math.sqrt(dx * dx + dy * dy) <= controlPointHitRadius(minFieldSize)) {
-          hit = { kind: "control", pathIndex: i, controlIndex: j };
-          break;
+      if (!points[i].hidden) {
+        for (let j = controlPoints.length - 1; j >= 0; j--) {
+          const dx = controlPoints[j].nx - nx;
+          const dy = controlPoints[j].ny - ny;
+          if (Math.sqrt(dx * dx + dy * dy) <= controlPointHitRadius(minFieldSize)) {
+            hit = { kind: "control", pathIndex: i, controlIndex: j };
+            break;
+          }
         }
       }
       if (hit) break;
+      if (!isPointVisible(i)) continue;
 
       const dx = points[i].nx - nx;
       const dy = points[i].ny - ny;
@@ -403,6 +433,7 @@ export default function PathPlannerPage() {
             {hasMeasuredField && points.map((p, i) => {
               if (i === points.length - 1) return null;
               const nextP = points[i + 1];
+              if (nextP.hidden) return null;
               const start = toSvgPixelCoords(p.nx, p.ny, fieldSize);
               const end = toSvgPixelCoords(nextP.nx, nextP.ny, fieldSize);
               const controlPoints = (nextP.controlPoints ?? []).map((controlPoint) =>
@@ -438,6 +469,7 @@ export default function PathPlannerPage() {
             })}
 
             {hasMeasuredField && points.map((p, i) => {
+              if (!isPointVisible(i)) return null;
               const { x, y } = toSvgPixelCoords(p.nx, p.ny, fieldSize);
               const isHovered = isSameTarget(hoverTarget, { kind: "point", index: i }) && !p.locked;
 
@@ -466,7 +498,7 @@ export default function PathPlannerPage() {
             })}
 
             {hasMeasuredField && points.map((p, i) =>
-              (p.controlPoints ?? []).map((controlPoint, j) => {
+              p.hidden ? null : (p.controlPoints ?? []).map((controlPoint, j) => {
                 const { x, y } = toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize);
                 const isHovered =
                   isSameTarget(hoverTarget, { kind: "control", pathIndex: i, controlIndex: j }) && !p.locked;
@@ -561,6 +593,7 @@ export default function PathPlannerPage() {
                 name={p.name ?? `path${i}`}
                 color={p.color}
                 locked={p.locked}
+                hidden={Boolean(p.hidden)}
                 x={coords.x}
                 y={coords.y}
                 heading={p.heading}
@@ -585,6 +618,7 @@ export default function PathPlannerPage() {
                   i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
                 }
                 onToggleLocked={() => handleToggleLocked(i)}
+                onToggleHidden={() => handleToggleHidden(i)}
                 onToggleControlsExpanded={
                   i > 0 ? () => handleToggleControlsExpanded(i) : undefined
                 }

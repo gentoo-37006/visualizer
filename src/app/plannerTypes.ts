@@ -14,6 +14,7 @@ export type Point = {
   ny: number;
   color: string;
   locked: boolean;
+  hidden?: boolean;
   heading?: number;
   headingMode?: HeadingInterpolation;
   constantHeading?: number;
