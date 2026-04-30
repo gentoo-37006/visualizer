@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, KeyboardEvent } from "react";
+import { useState, useRef, useEffect, KeyboardEvent, MouseEvent } from "react";
 import Image from "next/image";
 import styles from "./page.module.css";
 
@@ -10,8 +10,16 @@ type Point = {
   nx: number; // Normalized x (0 to 1)
   ny: number; // Normalized y (0 to 1)
   color: string;
+  locked: boolean;
   heading?: number;
+  headingMode?: HeadingInterpolation;
+  constantHeading?: number;
+  startHeading?: number;
+  endHeading?: number;
 };
+
+type HeadingInterpolation = "constant" | "linear" | "tangential";
+type PathHeadingField = "constant" | "start" | "end";
 
 const FIELD_SIZE_INCHES = 144;
 const POINT_DIAMETER = 20;
@@ -57,6 +65,13 @@ const normalizeHeading = (degrees: number) => {
   return normalized === -180 && degrees > 0 ? 180 : normalized;
 };
 
+const createDefaultHeadingValues = () => ({
+  headingMode: "constant" as HeadingInterpolation,
+  constantHeading: 0,
+  startHeading: 0,
+  endHeading: 0,
+});
+
 const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
   x: POINT_RADIUS + FIELD_BORDER_WIDTH + nx * (fieldSize.width - FIELD_BORDER_WIDTH * 2),
   y: POINT_RADIUS + FIELD_BORDER_WIDTH + ny * (fieldSize.height - FIELD_BORDER_WIDTH * 2),
@@ -64,11 +79,12 @@ const toSvgPixelCoords = (nx: number, ny: number, fieldSize: FieldSize) => ({
 
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
-    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, heading: 0 },
+    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: false, heading: 0 },
   ]);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
 
   const fieldRef = useRef<HTMLDivElement>(null);
@@ -103,15 +119,58 @@ export default function PathPlannerPage() {
     return () => cancelAnimationFrame(frame);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Shift") setIsShiftPressed(true);
+    };
+    const handleKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Shift") setIsShiftPressed(false);
+    };
+    const handleBlur = () => setIsShiftPressed(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
+
   // --- Handlers ---
   const handleAddPoint = () => {
     const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
-    setPoints([...points, { id: generateId(), nx: seed.nx, ny: seed.ny, color: randomColor() }]);
+    setPoints([
+      ...points,
+      {
+        id: generateId(),
+        nx: seed.nx,
+        ny: seed.ny,
+        color: randomColor(),
+        locked: false,
+        ...createDefaultHeadingValues(),
+      },
+    ]);
   };
 
   const handleRemovePoint = (index: number) => {
     setPoints(points.filter((_, i) => i !== index));
     if (activeIndex === index) setActiveIndex(null);
+    if (hoverIndex === index) setHoverIndex(null);
+  };
+
+  const handleToggleLocked = (index: number) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, locked: !point.locked } : point
+      )
+    );
+    if (activeIndex === index) {
+      setActiveIndex(null);
+      setIsDragging(false);
+    }
     if (hoverIndex === index) setHoverIndex(null);
   };
 
@@ -153,6 +212,35 @@ export default function PathPlannerPage() {
     );
   };
 
+  const handlePathInterpolationChange = (index: number, mode: HeadingInterpolation) => {
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index
+          ? { ...createDefaultHeadingValues(), ...point, headingMode: mode }
+          : point
+      )
+    );
+  };
+
+  const handlePathHeadingChange = (index: number, field: PathHeadingField, value: string) => {
+    const heading = parseFloat(value);
+    if (isNaN(heading)) return;
+
+    const normalizedHeading = normalizeHeading(heading);
+    const key =
+      field === "constant"
+        ? "constantHeading"
+        : field === "start"
+          ? "startHeading"
+          : "endHeading";
+
+    setPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, [key]: normalizedHeading } : point
+      )
+    );
+  };
+
   // --- Pointer Events for SVG ---
   const getPointerNormalized = (e: React.PointerEvent<SVGSVGElement> | PointerEvent) => {
     if (!svgRef.current) return { nx: 0, ny: 0 };
@@ -169,7 +257,7 @@ export default function PathPlannerPage() {
   };
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (hoverIndex !== null) {
+    if (hoverIndex !== null && !points[hoverIndex].locked) {
       setIsDragging(true);
       setActiveIndex(hoverIndex);
       // Optional: allow set pointer capture for better dragging outside
@@ -196,6 +284,7 @@ export default function PathPlannerPage() {
 
       let hit = null;
       for (let i = points.length - 1; i >= 0; i--) {
+        if (points[i].locked) continue;
         const dx = points[i].nx - nx;
         const dy = points[i].ny - ny;
         if (Math.sqrt(dx * dx + dy * dy) <= hitRadiusNormalized) {
@@ -262,7 +351,7 @@ export default function PathPlannerPage() {
             {/* Draw Points */}
             {hasMeasuredField && points.map((p, i) => {
               const { x, y } = toSvgPixelCoords(p.nx, p.ny, fieldSize);
-              const isHovered = hoverIndex === i;
+              const isHovered = hoverIndex === i && !p.locked;
 
               return (
                 <g key={`point-${p.id}`}>
@@ -304,12 +393,25 @@ export default function PathPlannerPage() {
                 key={p.id}
                 index={i}
                 color={p.color}
+                locked={p.locked}
                 x={coords.x}
                 y={coords.y}
                 heading={p.heading}
+                headingMode={p.headingMode ?? "constant"}
+                constantHeading={p.constantHeading ?? 0}
+                startHeading={p.startHeading ?? 0}
+                endHeading={p.endHeading ?? 0}
                 isActive={hoverIndex === i || activeIndex === i}
                 onChange={(axis, val) => handleCoordChange(i, axis, val)}
                 onHeadingChange={i === 0 ? handleHeadingChange : undefined}
+                onInterpolationChange={
+                  i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
+                }
+                onPathHeadingChange={
+                  i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
+                }
+                onToggleLocked={() => handleToggleLocked(i)}
+                canDelete={isShiftPressed}
                 onDelete={() => handleRemovePoint(i)}
               />
             );
@@ -335,43 +437,72 @@ export default function PathPlannerPage() {
 function PointCard({
   index,
   color,
+  locked,
   x,
   y,
   heading,
+  headingMode,
+  constantHeading,
+  startHeading,
+  endHeading,
   isActive,
   onChange,
   onHeadingChange,
+  onInterpolationChange,
+  onPathHeadingChange,
+  onToggleLocked,
+  canDelete,
   onDelete
 }: {
   index: number;
   color: string;
+  locked: boolean;
   x: number;
   y: number;
   heading?: number;
+  headingMode: HeadingInterpolation;
+  constantHeading: number;
+  startHeading: number;
+  endHeading: number;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
   onHeadingChange?: (val: string) => void;
+  onInterpolationChange?: (mode: HeadingInterpolation) => void;
+  onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
+  onToggleLocked: () => void;
+  canDelete: boolean;
   onDelete: () => void;
 }) {
-  const [editingAxis, setEditingAxis] = useState<"x" | "y" | "heading" | null>(null);
+  const [editingAxis, setEditingAxis] = useState<"x" | "y" | "heading" | PathHeadingField | null>(null);
   const [draftX, setDraftX] = useState("");
   const [draftY, setDraftY] = useState("");
   const [draftHeading, setDraftHeading] = useState("");
+  const [draftPathHeading, setDraftPathHeading] = useState("");
 
-  const startEditing = (axis: "x" | "y" | "heading") => {
+  const startEditing = (axis: "x" | "y" | "heading" | PathHeadingField) => {
     setEditingAxis(axis);
     if (axis === "x") {
       setDraftX(x.toFixed(1));
     } else if (axis === "y") {
       setDraftY(y.toFixed(1));
-    } else {
+    } else if (axis === "heading") {
       setDraftHeading((heading ?? 0).toFixed(1));
+    } else {
+      const value =
+        axis === "constant"
+          ? constantHeading
+          : axis === "start"
+            ? startHeading
+            : endHeading;
+      setDraftPathHeading(value.toFixed(1));
     }
   };
 
-  const commitEdit = (axis: "x" | "y" | "heading", val: string) => {
+  const commitEdit = (axis: "x" | "y" | "heading" | PathHeadingField, val: string) => {
     if (axis === "heading") {
       onHeadingChange?.(val);
+    } else if (axis === "constant" || axis === "start" || axis === "end") {
+      onPathHeadingChange?.(axis, val);
     } else {
       onChange(axis, val);
     }
@@ -388,11 +519,20 @@ function PointCard({
     onChange(axis, val);
   };
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y" | "heading", val: string) => {
+  const handleKeyDown = (
+    e: KeyboardEvent<HTMLInputElement>,
+    axis: "x" | "y" | "heading" | PathHeadingField,
+    val: string
+  ) => {
     if (e.key === "Enter") {
       commitEdit(axis, val);
       (e.target as HTMLInputElement).blur();
     }
+  };
+
+  const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!event.shiftKey) return;
+    onDelete();
   };
 
   return (
@@ -402,16 +542,48 @@ function PointCard({
     >
       <div className={styles.pointCardHeader}>
         <span className={styles.pointTitle}>{index === 0 ? "Start Pose" : `Path ${index}`}</span>
-        {index > 0 && (
-          <button className={styles.deleteButton} onClick={onDelete} aria-label="Delete path">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
+        <div className={styles.cardActions}>
+          <button
+            className={`${styles.iconButton} ${styles.lockButton} ${locked ? styles.lockedButton : ""}`}
+            onClick={onToggleLocked}
+            aria-label={locked ? "Unlock" : "Lock"}
+            title={locked ? "Unlock" : "Lock"}
+          >
+            {locked ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="10" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="10" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+            )}
           </button>
-        )}
+          {index > 0 && (
+            <span className={styles.deleteAction}>
+              <button
+                className={`${styles.iconButton} ${styles.deleteButton} ${canDelete ? styles.deleteArmed : ""}`}
+                onClick={handleDeleteClick}
+                aria-label="Delete path"
+                aria-describedby={!canDelete ? `delete-tooltip-${index}` : undefined}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+              {!canDelete && (
+                <span id={`delete-tooltip-${index}`} className={styles.deleteTooltip} role="tooltip">
+                  Hold Shift to delete
+                </span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
       <div className={styles.coordRow}>
         <div className={styles.inputGroup}>
@@ -451,6 +623,64 @@ function PointCard({
               onKeyDown={(e) => handleKeyDown(e, "heading", e.currentTarget.value)}
             />
           </div>
+        )}
+        {index > 0 && (
+          <>
+          <div className={styles.selectGroup}>
+            <label className={styles.inputLabel}>Heading</label>
+            <select
+              className={styles.selectField}
+              value={headingMode}
+              onChange={(e) => onInterpolationChange?.(e.target.value as HeadingInterpolation)}
+            >
+              <option value="constant">Constant</option>
+              <option value="linear">Linear</option>
+              <option value="tangential">Tangential</option>
+            </select>
+          </div>
+          {headingMode === "constant" && (
+            <div className={styles.inputGroup}>
+              <label className={styles.inputLabel}>Value</label>
+              <input
+                type="text"
+                className={styles.inputField}
+                value={editingAxis === "constant" ? draftPathHeading : constantHeading.toFixed(1)}
+                onFocus={() => startEditing("constant")}
+                onChange={(e) => setDraftPathHeading(e.target.value)}
+                onBlur={(e) => commitEdit("constant", e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, "constant", e.currentTarget.value)}
+              />
+            </div>
+          )}
+          {headingMode === "linear" && (
+            <>
+              <div className={styles.inputGroup}>
+                <label className={styles.inputLabel}>Start</label>
+                <input
+                  type="text"
+                  className={styles.inputField}
+                  value={editingAxis === "start" ? draftPathHeading : startHeading.toFixed(1)}
+                  onFocus={() => startEditing("start")}
+                  onChange={(e) => setDraftPathHeading(e.target.value)}
+                  onBlur={(e) => commitEdit("start", e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(e, "start", e.currentTarget.value)}
+                />
+              </div>
+              <div className={styles.inputGroup}>
+                <label className={styles.inputLabel}>End</label>
+                <input
+                  type="text"
+                  className={styles.inputField}
+                  value={editingAxis === "end" ? draftPathHeading : endHeading.toFixed(1)}
+                  onFocus={() => startEditing("end")}
+                  onChange={(e) => setDraftPathHeading(e.target.value)}
+                  onBlur={(e) => commitEdit("end", e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(e, "end", e.currentTarget.value)}
+                />
+              </div>
+            </>
+          )}
+          </>
         )}
       </div>
     </div>
