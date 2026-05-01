@@ -3,9 +3,18 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
 import { PointCard } from "./components/PointCard";
-import { serializePathPlannerKotlin, parsePathPlannerKotlin, sanitizeKotlinClassName } from "./kotlinAutonFile";
 import {
-  CONTROL_POINT_RADIUS,
+  serializePathPlannerKotlin,
+  serializeSavedPosesKotlin,
+  parsePathPlannerKotlin,
+  parseRobotConstantsKotlin,
+  parseSavedPosesKotlin,
+  sanitizeKotlinClassName,
+  DEFAULT_ROBOT_CONSTANTS,
+  type RobotConstants,
+  type SavedPose,
+} from "./kotlinAutonFile";
+import {
   FIELD_BORDER_WIDTH,
   INITIAL_POINT_COLOR,
   INITIAL_POINT_ID,
@@ -30,6 +39,58 @@ import {
 } from "./plannerUtils";
 import styles from "./page.module.css";
 
+const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
+const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
+
+const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
+  Array.isArray(value) &&
+  value.every(
+    (pose) =>
+      typeof pose?.name === "string" &&
+      typeof pose?.x === "number" &&
+      typeof pose?.y === "number"
+  );
+
+const loadSavedPoses = () => {
+  if (typeof window === "undefined") return [];
+
+  const storedSavedPoses = window.localStorage.getItem(SAVED_POSES_STORAGE_KEY);
+  if (!storedSavedPoses) return [];
+
+  try {
+    const parsedSavedPoses: unknown = JSON.parse(storedSavedPoses);
+    return isSavedPoseArray(parsedSavedPoses) ? parsedSavedPoses : [];
+  } catch {
+    window.localStorage.removeItem(SAVED_POSES_STORAGE_KEY);
+    return [];
+  }
+};
+
+const isRobotConstants = (value: unknown): value is RobotConstants =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as RobotConstants).width === "number" &&
+  typeof (value as RobotConstants).length === "number" &&
+  typeof (value as RobotConstants).forwardBrakeStrength === "number" &&
+  typeof (value as RobotConstants).lateralBrakeStrength === "number" &&
+  typeof (value as RobotConstants).maxForwardVelocity === "number" &&
+  typeof (value as RobotConstants).maxLateralVelocity === "number";
+
+const loadRobotConstants = () => {
+  if (typeof window === "undefined") return DEFAULT_ROBOT_CONSTANTS;
+
+  const storedRobotConstants = window.localStorage.getItem(ROBOT_CONSTANTS_STORAGE_KEY);
+  if (!storedRobotConstants) return DEFAULT_ROBOT_CONSTANTS;
+
+  try {
+    const parsedRobotConstants: unknown = JSON.parse(storedRobotConstants);
+    return isRobotConstants(parsedRobotConstants) ? parsedRobotConstants : DEFAULT_ROBOT_CONSTANTS;
+  } catch {
+    window.localStorage.removeItem(ROBOT_CONSTANTS_STORAGE_KEY);
+    return DEFAULT_ROBOT_CONSTANTS;
+  }
+};
+
 const clonePoints = (source: Point[]) =>
   source.map((point) => ({
     ...point,
@@ -37,6 +98,7 @@ const clonePoints = (source: Point[]) =>
   }));
 
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
+type SidebarPage = "auton" | "poses" | "constants";
 
 export default function PathPlannerPage() {
   const [autonClassName, setAutonClassName] = useState("AutonPath");
@@ -50,12 +112,17 @@ export default function PathPlannerPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
-  const [kotlinExport, setKotlinExport] = useState<{ className: string; contents: string } | null>(null);
+  const [kotlinExport, setKotlinExport] = useState<{ fileName: string; subtitle: string; contents: string } | null>(null);
   const [didCopyExport, setDidCopyExport] = useState(false);
+  const [savedPoses, setSavedPoses] = useState<SavedPose[]>(loadSavedPoses);
+  const [robotConstants, setRobotConstants] = useState<RobotConstants>(loadRobotConstants);
+  const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const posesInputRef = useRef<HTMLInputElement>(null);
+  const constantsInputRef = useRef<HTMLInputElement>(null);
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsRef = useRef<Point[]>(points);
   const undoStackRef = useRef<Point[][]>([]);
@@ -333,7 +400,9 @@ export default function PathPlannerPage() {
 
   const updatePoint = (index: number, nx: number, ny: number) => {
     setPlannerPoints((currentPoints) =>
-      currentPoints.map((point, i) => (i === index ? { ...point, nx, ny } : point))
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, nx, ny, poseName: index === 0 ? undefined : point.poseName } : point
+      )
     );
   };
 
@@ -425,7 +494,38 @@ export default function PathPlannerPage() {
     if (axis === "y") newY = num;
 
     const { nx, ny } = toNormalizedCoords(newX, newY);
+    if (index === 0) {
+      setPlannerPoints((currentPoints) =>
+        currentPoints.map((point, pointIndex) =>
+          pointIndex === index ? { ...point, nx, ny, poseName: undefined } : point
+        )
+      );
+      return;
+    }
+
     updatePoint(index, nx, ny);
+  };
+
+  const handleStartPoseSelect = (poseName: string) => {
+    if (!poseName) {
+      pushCurrentSnapshot();
+      setPlannerPoints((currentPoints) =>
+        currentPoints.map((point, index) =>
+          index === 0 ? { ...point, poseName: undefined } : point
+        )
+      );
+      return;
+    }
+
+    const savedPose = savedPoses.find((pose) => pose.name === poseName);
+    if (!savedPose) return;
+
+    const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
+    const nextPoints = pointsRef.current.map((point, index) =>
+      index === 0 ? { ...point, nx, ny, poseName: savedPose.name } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
   };
 
   const handleHeadingChange = (value: string) => {
@@ -484,11 +584,26 @@ export default function PathPlannerPage() {
   };
 
   const handleExportKotlin = () => {
+    if (sidebarPage === "poses") {
+      const contents = serializeSavedPosesKotlin(savedPoses, robotConstants);
+      setDidCopyExport(false);
+      setKotlinExport({
+        fileName: "Poses.kt",
+        subtitle: "Start pose declarations",
+        contents,
+      });
+      return;
+    }
+
     const className = sanitizeKotlinClassName(autonClassName);
-    const contents = serializePathPlannerKotlin(points, className);
+    const contents = serializePathPlannerKotlin(points, className, savedPoses);
     setAutonClassName(className);
     setDidCopyExport(false);
-    setKotlinExport({ className, contents });
+    setKotlinExport({
+      fileName: `${className}.kt`,
+      subtitle: "Generated Kotlin class",
+      contents,
+    });
   };
 
   const handleCopyKotlinExport = async () => {
@@ -503,31 +618,103 @@ export default function PathPlannerPage() {
     }
   };
 
-  const handleImportKotlinClick = () => {
+  const handleSelectAutonClick = () => {
+    if (sidebarPage !== "auton") {
+      setSidebarPage("auton");
+      return;
+    }
+
     importInputRef.current?.click();
   };
 
+  const handleImportPosesClick = () => {
+    if (sidebarPage !== "poses") {
+      setSidebarPage("poses");
+      return;
+    }
+
+    posesInputRef.current?.click();
+  };
+
+  const handleImportConstantsClick = () => {
+    if (sidebarPage !== "constants") {
+      setSidebarPage("constants");
+      return;
+    }
+
+    constantsInputRef.current?.click();
+  };
+
+  const importKotlinContents = (contents: string) => {
+    const importedAuton = parsePathPlannerKotlin(contents, savedPoses);
+    if (!importedAuton || importedAuton.points.length === 0) {
+      window.alert("This Kotlin file does not contain an Auton Path Planner export.");
+      return;
+    }
+
+    setAutonClassName(importedAuton.className);
+    clearHistory();
+    setPlannerPoints(importedAuton.points);
+    setHoverTarget(null);
+    setActiveTarget(null);
+    setIsDragging(false);
+    setSidebarPage("auton");
+  };
+
+  const importKotlinFile = async (file: File) => {
+    try {
+      const contents = await file.text();
+      importKotlinContents(contents);
+    } catch {
+      window.alert("Unable to import this Kotlin file.");
+    }
+  };
+
   const handleImportKotlin = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) await importKotlinFile(file);
+  };
+
+  const handleImportPoses = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
 
     try {
       const contents = await file.text();
-      const importedAuton = parsePathPlannerKotlin(contents);
-      if (!importedAuton || importedAuton.points.length === 0) {
-        window.alert("This Kotlin file does not contain an Auton Path Planner export.");
+      const importedSavedPoses = parseSavedPosesKotlin(contents, robotConstants);
+      if (importedSavedPoses.length === 0) {
+        window.alert("This poses file does not contain any START poses.");
         return;
       }
 
-      setAutonClassName(importedAuton.className);
-      clearHistory();
-      setPlannerPoints(importedAuton.points);
-      setHoverTarget(null);
-      setActiveTarget(null);
-      setIsDragging(false);
+      setSavedPoses(importedSavedPoses);
+      window.localStorage.setItem(SAVED_POSES_STORAGE_KEY, JSON.stringify(importedSavedPoses));
+      setSidebarPage("poses");
     } catch {
-      window.alert("Unable to import this Kotlin file.");
+      window.alert("Unable to import this poses file.");
+    }
+  };
+
+  const handleImportConstants = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const contents = await file.text();
+      const importedRobotConstants = parseRobotConstantsKotlin(contents);
+      if (!importedRobotConstants) {
+        window.alert("This constants file does not contain the required robot constants.");
+        return;
+      }
+
+      setRobotConstants(importedRobotConstants);
+      window.localStorage.setItem(ROBOT_CONSTANTS_STORAGE_KEY, JSON.stringify(importedRobotConstants));
+      setSidebarPage("constants");
+    } catch {
+      window.alert("Unable to import this constants file.");
     }
   };
 
@@ -715,7 +902,7 @@ export default function PathPlannerPage() {
                       <circle
                         cx={x}
                         cy={y}
-                        r={CONTROL_POINT_RADIUS}
+                        r={POINT_DIAMETER / 2}
                         fill="rgba(0,0,0,0.45)"
                         filter="blur(4px)"
                         transform="translate(0 2)"
@@ -724,10 +911,10 @@ export default function PathPlannerPage() {
                     <circle
                       cx={x}
                       cy={y}
-                      r={CONTROL_POINT_RADIUS}
+                      r={POINT_DIAMETER / 2}
                       fill={p.color}
                       stroke={isHovered ? "white" : "transparent"}
-                      strokeWidth="1.5"
+                      strokeWidth="2"
                     />
                     <text
                       x={x}
@@ -752,17 +939,23 @@ export default function PathPlannerPage() {
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarTitleRow}>
-            <input
-              className={styles.autonClassNameInput}
-              value={autonClassName}
-              maxLength={32}
-              onChange={(event) => {
-                if (!isKotlinIdentifierDraft(event.target.value)) return;
-                setAutonClassName(event.target.value);
-              }}
-              onBlur={() => setAutonClassName((className) => sanitizeKotlinClassName(className))}
-              aria-label="Auton class name"
-            />
+            {sidebarPage === "auton" ? (
+              <input
+                className={styles.autonClassNameInput}
+                value={autonClassName}
+                maxLength={32}
+                onChange={(event) => {
+                  if (!isKotlinIdentifierDraft(event.target.value)) return;
+                  setAutonClassName(event.target.value);
+                }}
+                onBlur={() => setAutonClassName((className) => sanitizeKotlinClassName(className))}
+                aria-label="Auton class name"
+              />
+            ) : sidebarPage === "poses" ? (
+              <h2 className={styles.sidebarTitle}>Saved Poses</h2>
+            ) : (
+              <h2 className={styles.sidebarTitle}>Robot Constants</h2>
+            )}
             <div className={styles.importExportActions}>
               <button
                 className={styles.secondaryIconButton}
@@ -789,22 +982,59 @@ export default function PathPlannerPage() {
                 </svg>
               </button>
               <button
-                className={styles.secondaryIconButton}
-                onClick={handleImportKotlinClick}
-                aria-label="Import Kotlin"
-                title="Import Kotlin"
+                className={`${styles.secondaryIconButton} ${sidebarPage === "constants" ? styles.activeIconButton : ""}`}
+                onClick={handleImportConstantsClick}
+                aria-label="Import Robot Constants"
+                title={
+                  sidebarPage === "constants"
+                    ? "Import Robot Constants"
+                    : `Robot Constants (${robotConstants.width.toFixed(1)} x ${robotConstants.length.toFixed(1)})`
+                }
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                  <path d="M12 2v20"></path>
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path>
+                  <path d="M19 12h3"></path>
+                  <path d="M2 12h3"></path>
+                </svg>
+              </button>
+              <button
+                className={`${styles.secondaryIconButton} ${sidebarPage === "poses" ? styles.activeIconButton : ""}`}
+                onClick={handleImportPosesClick}
+                aria-label="Import Poses"
+                title={sidebarPage === "poses" ? "Import Poses" : "Saved Poses"}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="6" cy="18" r="2"></circle>
+                  <circle cx="18" cy="6" r="2"></circle>
+                  <path d="M8 18c4 0 4-12 8-12"></path>
+                  <path d="M12 10h.01"></path>
+                </svg>
+              </button>
+              <button
+                className={`${styles.secondaryIconButton} ${sidebarPage === "auton" ? styles.activeIconButton : ""}`}
+                onClick={handleSelectAutonClick}
+                aria-label="Select Auton"
+                title={sidebarPage === "auton" ? "Select Auton" : "Auton Paths"}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>
+                  <path d="M14 2v6h6"></path>
+                  <path d="m9 15 2 2 4-4"></path>
                 </svg>
               </button>
               <button
                 className={styles.secondaryIconButton}
                 onClick={handleExportKotlin}
-                aria-label="Export Kotlin"
-                title="Export Kotlin"
+                disabled={sidebarPage === "constants"}
+                aria-label={sidebarPage === "poses" ? "Export Poses" : "Export Kotlin"}
+                title={
+                  sidebarPage === "constants"
+                    ? "Export unavailable for robot constants"
+                    : sidebarPage === "poses"
+                      ? "Export Poses"
+                      : "Export Kotlin"
+                }
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -819,77 +1049,138 @@ export default function PathPlannerPage() {
                 accept=".kt,text/x-kotlin,text/plain"
                 onChange={handleImportKotlin}
               />
+              <input
+                ref={posesInputRef}
+                className={styles.hiddenFileInput}
+                type="file"
+                accept=".kt,text/x-kotlin,text/plain"
+                onChange={handleImportPoses}
+              />
+              <input
+                ref={constantsInputRef}
+                className={styles.hiddenFileInput}
+                type="file"
+                accept=".kt,text/x-kotlin,text/plain"
+                onChange={handleImportConstants}
+              />
             </div>
           </div>
         </div>
 
-        <div className={styles.pointsList}>
-          {points.map((p, i) => {
-            const coords = toFieldCoords(p.nx, p.ny);
-            return (
-              <PointCard
-                key={p.id}
-                index={i}
-                name={p.name ?? `path${i}`}
-                color={p.color}
-                locked={p.locked}
-                hidden={Boolean(p.hidden)}
-                x={coords.x}
-                y={coords.y}
-                heading={p.heading}
-                headingMode={p.headingMode ?? "constant"}
-                constantHeading={p.constantHeading ?? 0}
-                startHeading={p.startHeading ?? 0}
-                endHeading={p.endHeading ?? 0}
-                controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
-                  id: controlPoint.id,
-                  ...toFieldCoords(controlPoint.nx, controlPoint.ny),
-                }))}
-                controlPointCount={(p.controlPoints ?? []).length}
-                controlsExpanded={p.controlsExpanded ?? true}
-                isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
-                onChange={(axis, val) => handleCoordChange(i, axis, val)}
-                onPositionEditStart={beginPositionEdit}
-                onPositionEditCommit={commitPositionEdit}
-                onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
-                onNameEditStart={beginNameEdit}
-                onNameEditCommit={commitNameEdit}
-                onHeadingChange={i === 0 ? handleHeadingChange : undefined}
-                onInterpolationChange={
-                  i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
-                }
-                onPathHeadingChange={
-                  i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
-                }
-                onToggleLocked={() => handleToggleLocked(i)}
-                onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
-                onToggleControlsExpanded={
-                  i > 0 ? () => handleToggleControlsExpanded(i) : undefined
-                }
-                onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
-                onControlPointChange={
-                  i > 0
-                    ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
-                    : undefined
-                }
-                onControlPointEditStart={beginPositionEdit}
-                onControlPointEditCommit={commitPositionEdit}
-                canDelete={isShiftPressed}
-                onDelete={() => handleRemovePoint(i)}
-              />
-            );
-          })}
-        </div>
+        {sidebarPage === "auton" ? (
+          <>
+            <div className={styles.pointsList}>
+              {points.map((p, i) => {
+                const coords = toFieldCoords(p.nx, p.ny);
+                return (
+                  <PointCard
+                    key={p.id}
+                    index={i}
+                    name={p.name ?? `path${i}`}
+                    poseName={p.poseName}
+                    color={p.color}
+                    locked={p.locked}
+                    hidden={Boolean(p.hidden)}
+                    x={coords.x}
+                    y={coords.y}
+                    heading={p.heading}
+                    headingMode={p.headingMode ?? "constant"}
+                    constantHeading={p.constantHeading ?? 0}
+                    startHeading={p.startHeading ?? 0}
+                    endHeading={p.endHeading ?? 0}
+                    controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
+                      id: controlPoint.id,
+                      ...toFieldCoords(controlPoint.nx, controlPoint.ny),
+                    }))}
+                    controlPointCount={(p.controlPoints ?? []).length}
+                    controlsExpanded={p.controlsExpanded ?? true}
+                    isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
+                    onChange={(axis, val) => handleCoordChange(i, axis, val)}
+                    startPoseOptions={i === 0 ? savedPoses.filter((pose) => pose.name.startsWith("START")) : undefined}
+                    onStartPoseSelect={i === 0 ? handleStartPoseSelect : undefined}
+                    onPositionEditStart={beginPositionEdit}
+                    onPositionEditCommit={commitPositionEdit}
+                    onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
+                    onNameEditStart={beginNameEdit}
+                    onNameEditCommit={commitNameEdit}
+                    onHeadingChange={i === 0 ? handleHeadingChange : undefined}
+                    onInterpolationChange={
+                      i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
+                    }
+                    onPathHeadingChange={
+                      i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
+                    }
+                    onToggleLocked={() => handleToggleLocked(i)}
+                    onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
+                    onToggleControlsExpanded={
+                      i > 0 ? () => handleToggleControlsExpanded(i) : undefined
+                    }
+                    onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
+                    onControlPointChange={
+                      i > 0
+                        ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
+                        : undefined
+                    }
+                    onControlPointEditStart={beginPositionEdit}
+                    onControlPointEditCommit={commitPositionEdit}
+                    canDelete={isShiftPressed}
+                    onDelete={() => handleRemovePoint(i)}
+                  />
+                );
+              })}
+            </div>
 
-        <div className={styles.sidebarFooter}>
-          <button className={styles.addButton} onClick={handleAddPoint}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            Add Path
-          </button>
-        </div>
+            <div className={styles.sidebarFooter}>
+              <button className={styles.addButton} onClick={handleAddPoint}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Path
+              </button>
+            </div>
+          </>
+        ) : sidebarPage === "poses" ? (
+          <div className={styles.pointsList}>
+            {savedPoses.length > 0 ? (
+              savedPoses.map((pose) => (
+                <div className={styles.poseCard} key={pose.name}>
+                  <div className={styles.poseName}>{pose.name}</div>
+                  <div className={styles.poseCoordRow}>
+                    <span className={styles.poseCoord}>X {pose.x.toFixed(1)}</span>
+                    <span className={styles.poseCoord}>Y {pose.y.toFixed(1)}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className={styles.emptyState}>No START poses saved.</div>
+            )}
+          </div>
+        ) : (
+          <div className={styles.pointsList}>
+            <div className={styles.poseCard}>
+              <div className={styles.poseName}>Robot Dimensions</div>
+              <div className={styles.poseCoordRow}>
+                <span className={styles.poseCoord}>Width {robotConstants.width.toFixed(2)}</span>
+                <span className={styles.poseCoord}>Length {robotConstants.length.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className={styles.poseCard}>
+              <div className={styles.poseName}>Brake Strength</div>
+              <div className={styles.poseCoordRow}>
+                <span className={styles.poseCoord}>Forward {robotConstants.forwardBrakeStrength.toFixed(5)}</span>
+                <span className={styles.poseCoord}>Lateral {robotConstants.lateralBrakeStrength.toFixed(5)}</span>
+              </div>
+            </div>
+            <div className={styles.poseCard}>
+              <div className={styles.poseName}>Max Velocity</div>
+              <div className={styles.poseCoordRow}>
+                <span className={styles.poseCoord}>Forward {robotConstants.maxForwardVelocity.toFixed(5)}</span>
+                <span className={styles.poseCoord}>Lateral {robotConstants.maxLateralVelocity.toFixed(5)}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {kotlinExport && (
@@ -909,9 +1200,9 @@ export default function PathPlannerPage() {
             <div className={styles.exportModalHeader}>
               <div>
                 <h2 id="export-modal-title" className={styles.exportModalTitle}>
-                  {kotlinExport.className}.kt
+                  {kotlinExport.fileName}
                 </h2>
-                <p className={styles.exportModalSubtitle}>Generated Kotlin class</p>
+                <p className={styles.exportModalSubtitle}>{kotlinExport.subtitle}</p>
               </div>
               <button
                 className={styles.secondaryIconButton}

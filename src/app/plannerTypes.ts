@@ -2,6 +2,7 @@ export type ControlPoint = {
   id: string;
   nx: number;
   ny: number;
+  poseName?: string;
 };
 
 export type HeadingInterpolation = "constant" | "linear" | "tangential";
@@ -22,6 +23,7 @@ export type Point = {
   endHeading?: number;
   controlPoints?: ControlPoint[];
   controlsExpanded?: boolean;
+  poseName?: string;
 };
 
 export type DragTarget =

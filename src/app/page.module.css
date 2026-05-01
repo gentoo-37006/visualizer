@@ -128,6 +128,12 @@
   color: var(--primary);
 }
 
+.activeIconButton {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(59, 130, 246, 0.12);
+}
+
 .secondaryIconButton:disabled,
 .secondaryIconButton[aria-disabled="true"] {
   cursor: default;
@@ -164,6 +170,43 @@
 .pointCard:hover, .pointCard.active {
   background-color: var(--surface-hover);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.poseCard {
+  background-color: #262626;
+  border-left: 4px solid #22c55e;
+  border-radius: var(--border-radius);
+  padding: 1rem;
+}
+
+.poseName {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.poseCoordRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.poseCoord {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  padding: 0.5rem;
+  min-width: 5.25rem;
+}
+
+.emptyState {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  padding: 1rem 0;
 }
 
 .pointCardHeader {

@@ -9,6 +9,7 @@ import { ControlPointCard } from "./ControlPointCard";
 type PointCardProps = {
   index: number;
   name: string;
+  poseName?: string;
   color: string;
   locked: boolean;
   hidden: boolean;
@@ -24,6 +25,8 @@ type PointCardProps = {
   controlsExpanded: boolean;
   isActive: boolean;
   onChange: (axis: "x" | "y", val: string) => void;
+  startPoseOptions?: Array<{ name: string }>;
+  onStartPoseSelect?: (name: string) => void;
   onPositionEditStart: () => void;
   onPositionEditCommit: () => void;
   onRename?: (name: string) => void;
@@ -46,6 +49,7 @@ type PointCardProps = {
 export function PointCard({
   index,
   name,
+  poseName,
   color,
   locked,
   hidden,
@@ -61,6 +65,8 @@ export function PointCard({
   controlsExpanded,
   isActive,
   onChange,
+  startPoseOptions = [],
+  onStartPoseSelect,
   onPositionEditStart,
   onPositionEditCommit,
   onRename,
@@ -262,6 +268,23 @@ export function PointCard({
         </div>
       </div>
       <div className={styles.coordRow}>
+        {index === 0 && (
+          <div className={styles.selectGroup}>
+            <label className={styles.inputLabel}>Saved Pose</label>
+            <select
+              className={styles.selectField}
+              value={poseName ?? ""}
+              onChange={(e) => onStartPoseSelect?.(e.target.value)}
+            >
+              <option value="">Manual</option>
+              {startPoseOptions.map((startPose) => (
+                <option key={startPose.name} value={startPose.name}>
+                  {startPose.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className={styles.inputGroup}>
           <label className={styles.inputLabel}>X (in)</label>
           <input
