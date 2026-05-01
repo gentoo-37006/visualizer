@@ -7,6 +7,7 @@ export type ControlPoint = {
 
 export type HeadingInterpolation = "constant" | "linear" | "tangential";
 export type PathHeadingField = "constant" | "start" | "end";
+export type AutonActionMode = "start" | "run" | "stop";
 
 export type Point = {
   id: string;
@@ -25,6 +26,22 @@ export type Point = {
   controlsExpanded?: boolean;
   poseName?: string;
 };
+
+export type AutonActionItem = {
+  id: string;
+  kind: "action";
+  name: string;
+  mode: AutonActionMode;
+  timeout: number;
+};
+
+export type AutonPathItem = {
+  id: string;
+  kind: "path";
+  pointId: string;
+};
+
+export type AutonSequenceItem = AutonActionItem | AutonPathItem;
 
 export type DragTarget =
   | { kind: "point"; index: number }

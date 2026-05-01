@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import Image from "next/image";
+import { ActionCard } from "./components/ActionCard";
 import { PointCard } from "./components/PointCard";
 import {
   serializePathPlannerKotlin,
@@ -17,6 +18,7 @@ import {
   parsePathPlannerKotlin,
   parseRobotConstantsKotlin,
   parseSavedPosesKotlin,
+  stripStartPosePrefix,
   DEFAULT_ROBOT_CONSTANTS,
   type RobotConstants,
   type SavedPose,
@@ -28,7 +30,15 @@ import {
   POINT_DIAMETER,
   POINT_RADIUS,
 } from "./plannerConstants";
-import type { DragTarget, FieldSize, HeadingInterpolation, PathHeadingField, Point } from "./plannerTypes";
+import type {
+  AutonActionMode,
+  AutonSequenceItem,
+  DragTarget,
+  FieldSize,
+  HeadingInterpolation,
+  PathHeadingField,
+  Point,
+} from "./plannerTypes";
 import {
   controlPointHitRadius,
   createDefaultHeadingValues,
@@ -65,7 +75,9 @@ const loadSavedPoses = () => {
 
   try {
     const parsedSavedPoses: unknown = JSON.parse(storedSavedPoses);
-    return isSavedPoseArray(parsedSavedPoses) ? parsedSavedPoses : [];
+    return isSavedPoseArray(parsedSavedPoses)
+      ? parsedSavedPoses.map((pose) => ({ ...pose, name: stripStartPosePrefix(pose.name) }))
+      : [];
   } catch {
     window.localStorage.removeItem(SAVED_POSES_STORAGE_KEY);
     return [];
@@ -104,6 +116,11 @@ const clonePoints = (source: Point[]) =>
   }));
 
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
+const cloneSequenceItems = (source: AutonSequenceItem[]) => source.map((item) => ({ ...item }));
+type PlannerSnapshot = {
+  points: Point[];
+  sequenceItems: AutonSequenceItem[];
+};
 type SidebarPage = "auton" | "poses" | "constants";
 const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
@@ -112,8 +129,9 @@ export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
   ]);
-  const [undoStack, setUndoStack] = useState<Point[][]>([]);
-  const [redoStack, setRedoStack] = useState<Point[][]>([]);
+  const [sequenceItems, setSequenceItems] = useState<AutonSequenceItem[]>([]);
+  const [undoStack, setUndoStack] = useState<PlannerSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<PlannerSnapshot[]>([]);
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -135,11 +153,12 @@ export default function PathPlannerPage() {
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsListRef = useRef<HTMLDivElement>(null);
   const pointsRef = useRef<Point[]>(points);
-  const undoStackRef = useRef<Point[][]>([]);
-  const redoStackRef = useRef<Point[][]>([]);
-  const dragStartSnapshotRef = useRef<Point[] | null>(null);
-  const editStartSnapshotRef = useRef<Point[] | null>(null);
-  const nameEditStartSnapshotRef = useRef<Point[] | null>(null);
+  const sequenceItemsRef = useRef<AutonSequenceItem[]>(sequenceItems);
+  const undoStackRef = useRef<PlannerSnapshot[]>([]);
+  const redoStackRef = useRef<PlannerSnapshot[]>([]);
+  const dragStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
+  const editStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
+  const nameEditStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
   const cardDragScrollSpeedRef = useRef(0);
   const cardDragScrollFrameRef = useRef<number | null>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
@@ -157,6 +176,41 @@ export default function PathPlannerPage() {
     });
   };
 
+  const setPlannerSequenceItems = (
+    updater: AutonSequenceItem[] | ((currentItems: AutonSequenceItem[]) => AutonSequenceItem[])
+  ) => {
+    setSequenceItems((currentItems) => {
+      const nextItems = typeof updater === "function" ? updater(currentItems) : updater;
+      sequenceItemsRef.current = nextItems;
+      return nextItems;
+    });
+  };
+
+  const setPlannerSnapshot = (snapshot: PlannerSnapshot) => {
+    const nextPoints = clonePoints(snapshot.points);
+    const nextSequenceItems = cloneSequenceItems(snapshot.sequenceItems);
+    pointsRef.current = nextPoints;
+    sequenceItemsRef.current = nextSequenceItems;
+    setPoints(nextPoints);
+    setSequenceItems(nextSequenceItems);
+  };
+
+  const createSnapshot = (): PlannerSnapshot => ({
+    points: clonePoints(pointsRef.current),
+    sequenceItems: cloneSequenceItems(sequenceItemsRef.current),
+  });
+
+  const getSequenceItemsWithPaths = (
+    items: AutonSequenceItem[] = sequenceItemsRef.current,
+    sourcePoints: Point[] = pointsRef.current
+  ) =>
+    items.length > 0
+      ? items
+      : sourcePoints.slice(1).map((point) => ({ id: generateId(), kind: "path" as const, pointId: point.id }));
+
+  const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
+    arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
+
   const clearHistory = () => {
     undoStackRef.current = [];
     redoStackRef.current = [];
@@ -167,10 +221,10 @@ export default function PathPlannerPage() {
     nameEditStartSnapshotRef.current = null;
   };
 
-  const pushUndoSnapshot = (snapshot: Point[] | null) => {
-    if (!snapshot || arePointSnapshotsEqual(snapshot, pointsRef.current)) return;
+  const pushUndoSnapshot = (snapshot: PlannerSnapshot | null) => {
+    if (!snapshot || areSnapshotsEqual(snapshot, createSnapshot())) return;
 
-    const nextUndoStack = [...undoStackRef.current, clonePoints(snapshot)];
+    const nextUndoStack = [...undoStackRef.current, snapshot];
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = [];
     setUndoStack(nextUndoStack);
@@ -178,7 +232,7 @@ export default function PathPlannerPage() {
   };
 
   const pushCurrentSnapshot = () => {
-    const currentSnapshot = clonePoints(pointsRef.current);
+    const currentSnapshot = createSnapshot();
     const nextUndoStack = [...undoStackRef.current, currentSnapshot];
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = [];
@@ -186,13 +240,13 @@ export default function PathPlannerPage() {
     setRedoStack([]);
   };
 
-  const pushCurrentSnapshotIfChanged = (nextPoints: Point[]) => {
-    if (arePointSnapshotsEqual(pointsRef.current, nextPoints)) return;
+  const pushCurrentSnapshotIfChanged = (nextPoints: Point[], nextSequenceItems = sequenceItemsRef.current) => {
+    if (areSnapshotsEqual(createSnapshot(), { points: nextPoints, sequenceItems: nextSequenceItems })) return;
     pushCurrentSnapshot();
   };
 
   const beginPositionEdit = () => {
-    editStartSnapshotRef.current ??= clonePoints(pointsRef.current);
+    editStartSnapshotRef.current ??= createSnapshot();
   };
 
   const commitPositionEdit = () => {
@@ -201,7 +255,7 @@ export default function PathPlannerPage() {
   };
 
   const beginNameEdit = () => {
-    nameEditStartSnapshotRef.current ??= clonePoints(pointsRef.current);
+    nameEditStartSnapshotRef.current ??= createSnapshot();
   };
 
   const commitNameEdit = () => {
@@ -209,10 +263,8 @@ export default function PathPlannerPage() {
     nameEditStartSnapshotRef.current = null;
   };
 
-  const restorePointSnapshot = useCallback((snapshot: Point[]) => {
-    const restoredPoints = clonePoints(snapshot);
-    pointsRef.current = restoredPoints;
-    setPoints(restoredPoints);
+  const restorePointSnapshot = useCallback((snapshot: PlannerSnapshot) => {
+    setPlannerSnapshot(snapshot);
     setHoverTarget(null);
     setActiveTarget(null);
     setIsDragging(false);
@@ -225,7 +277,7 @@ export default function PathPlannerPage() {
     const previousSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
     if (!previousSnapshot) return;
 
-    const nextRedoStack = [...redoStackRef.current, clonePoints(pointsRef.current)];
+    const nextRedoStack = [...redoStackRef.current, createSnapshot()];
     const nextUndoStack = undoStackRef.current.slice(0, -1);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = nextRedoStack;
@@ -238,7 +290,7 @@ export default function PathPlannerPage() {
     const nextSnapshot = redoStackRef.current[redoStackRef.current.length - 1];
     if (!nextSnapshot) return;
 
-    const nextUndoStack = [...undoStackRef.current, clonePoints(pointsRef.current)];
+    const nextUndoStack = [...undoStackRef.current, createSnapshot()];
     const nextRedoStack = redoStackRef.current.slice(0, -1);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = nextRedoStack;
@@ -295,6 +347,10 @@ export default function PathPlannerPage() {
   }, [points]);
 
   useEffect(() => {
+    sequenceItemsRef.current = sequenceItems;
+  }, [sequenceItems]);
+
+  useEffect(() => {
     const field = fieldRef.current;
     if (!field) return;
 
@@ -345,10 +401,11 @@ export default function PathPlannerPage() {
   const handleAddPoint = () => {
     pushCurrentSnapshot();
     const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
+    const pointId = generateId();
     setPlannerPoints([
       ...points,
       {
-        id: generateId(),
+        id: pointId,
         name: `path${points.length}`,
         nx: seed.nx,
         ny: seed.ny,
@@ -358,30 +415,51 @@ export default function PathPlannerPage() {
         ...createDefaultHeadingValues(),
       },
     ]);
+    setPlannerSequenceItems([...getSequenceItemsWithPaths(), { id: generateId(), kind: "path", pointId }]);
+  };
+
+  const handleAddAction = () => {
+    pushCurrentSnapshot();
+    setPlannerSequenceItems([
+      ...getSequenceItemsWithPaths(),
+      { id: generateId(), kind: "action", name: "ACTION", mode: "start", timeout: 1.0 },
+    ]);
   };
 
   const handleRemovePoint = (index: number) => {
     pushCurrentSnapshot();
+    const pointId = points[index]?.id;
     setPlannerPoints(points.filter((_, i) => i !== index));
+    if (pointId) {
+      setPlannerSequenceItems((currentItems) =>
+        currentItems.filter((item) => item.kind !== "path" || item.pointId !== pointId)
+      );
+    }
     if (targetPathIndex(activeTarget) === index) setActiveTarget(null);
     if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
 
-  const reorderPoints = (source: Point[], fromIndex: number, toIndex: number) => {
-    if (
-      fromIndex === toIndex ||
-      fromIndex <= 0 ||
-      toIndex <= 0 ||
-      fromIndex >= source.length ||
-      toIndex >= source.length
-    ) {
+  const reorderSequenceItems = (source: AutonSequenceItem[], fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= source.length || toIndex >= source.length) {
       return source;
     }
 
-    const reorderedPoints = [...source];
-    const [movedPoint] = reorderedPoints.splice(fromIndex, 1);
-    reorderedPoints.splice(toIndex, 0, movedPoint);
-    return reorderedPoints;
+    const reorderedItems = [...source];
+    const [movedItem] = reorderedItems.splice(fromIndex, 1);
+    reorderedItems.splice(toIndex, 0, movedItem);
+    return reorderedItems;
+  };
+
+  const orderPointsFromSequence = (sourcePoints: Point[], items: AutonSequenceItem[]) => {
+    const startPoint = sourcePoints[0];
+    const pathPointsById = new Map(sourcePoints.slice(1).map((point) => [point.id, point]));
+    const orderedPathPoints = items
+      .filter((item): item is Extract<AutonSequenceItem, { kind: "path" }> => item.kind === "path")
+      .map((item) => pathPointsById.get(item.pointId))
+      .filter((point): point is Point => Boolean(point));
+    const usedIds = new Set(orderedPathPoints.map((point) => point.id));
+    const missingPathPoints = sourcePoints.slice(1).filter((point) => !usedIds.has(point.id));
+    return [startPoint, ...orderedPathPoints, ...missingPathPoints];
   };
 
   const stopCardDragAutoScroll = () => {
@@ -463,8 +541,20 @@ export default function PathPlannerPage() {
     stopCardDragAutoScroll();
   };
 
+  const isEditableDragTarget = (target: EventTarget | null) =>
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, select, textarea, [contenteditable='true']"));
+
+  const handleSequenceCardPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.draggable = !isEditableDragTarget(event.target);
+  };
+
+  const restoreSequenceCardDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.draggable = true;
+  };
+
   const handlePathCardDragStart = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    if (index <= 0) {
+    if (index < 0 || isEditableDragTarget(event.target)) {
       event.preventDefault();
       return;
     }
@@ -472,11 +562,40 @@ export default function PathPlannerPage() {
     setDraggingPathIndex(index);
     setDragOverPathIndex(null);
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", points[index].id);
+    event.dataTransfer.setData("text/plain", sequenceItemsRef.current[index]?.id ?? "");
+  };
+
+  const handleRemoveAction = (itemId: string) => {
+    pushCurrentSnapshot();
+    setPlannerSequenceItems((currentItems) => currentItems.filter((item) => item.id !== itemId));
+  };
+
+  const handleActionNameChange = (itemId: string, name: string) => {
+    setPlannerSequenceItems((currentItems) =>
+      currentItems.map((item) => (item.id === itemId && item.kind === "action" ? { ...item, name } : item))
+    );
+  };
+
+  const handleActionModeChange = (itemId: string, mode: AutonActionMode) => {
+    pushCurrentSnapshot();
+    setPlannerSequenceItems((currentItems) =>
+      currentItems.map((item) => (item.id === itemId && item.kind === "action" ? { ...item, mode } : item))
+    );
+  };
+
+  const handleActionTimeoutChange = (itemId: string, value: string) => {
+    const timeout = Number.parseFloat(value);
+    if (!Number.isFinite(timeout)) return;
+
+    setPlannerSequenceItems((currentItems) =>
+      currentItems.map((item) =>
+        item.id === itemId && item.kind === "action" ? { ...item, timeout: Math.max(0, timeout) } : item
+      )
+    );
   };
 
   const handlePathCardDragOver = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    if (index <= 0 || draggingPathIndex === null) return;
+    if (index < 0 || draggingPathIndex === null) return;
     if (draggingPathIndex === index) {
       if (dragOverPathIndex !== null) setDragOverPathIndex(null);
       updateCardDragAutoScrollFromPointer(event.clientY);
@@ -490,19 +609,21 @@ export default function PathPlannerPage() {
 
   const handlePathCardDrop = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    if (draggingPathIndex === null || index <= 0 || draggingPathIndex === index) {
+    if (draggingPathIndex === null || index < 0 || draggingPathIndex === index) {
       clearPathCardDragState();
       return;
     }
 
-    const nextPoints = reorderPoints(pointsRef.current, draggingPathIndex, index);
-    if (nextPoints === pointsRef.current) {
+    const nextSequenceItems = reorderSequenceItems(sequenceItemsRef.current, draggingPathIndex, index);
+    if (nextSequenceItems === sequenceItemsRef.current) {
       clearPathCardDragState();
       return;
     }
 
-    pushCurrentSnapshotIfChanged(nextPoints);
+    const nextPoints = orderPointsFromSequence(pointsRef.current, nextSequenceItems);
+    pushCurrentSnapshotIfChanged(nextPoints, nextSequenceItems);
     setPlannerPoints(nextPoints);
+    setPlannerSequenceItems(nextSequenceItems);
     setHoverTarget(null);
     setActiveTarget(null);
     setIsDragging(false);
@@ -693,12 +814,12 @@ export default function PathPlannerPage() {
       return;
     }
 
-    const savedPose = savedPoses.find((pose) => pose.name === poseName);
+    const savedPose = savedPoses.find((pose) => stripStartPosePrefix(pose.name) === stripStartPosePrefix(poseName));
     if (!savedPose) return;
 
     const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
     const nextPoints = pointsRef.current.map((point, index) =>
-      index === 0 ? { ...point, nx, ny, poseName: savedPose.name } : point
+      index === 0 ? { ...point, nx, ny, poseName: stripStartPosePrefix(savedPose.name) } : point
     );
     pushCurrentSnapshotIfChanged(nextPoints);
     setPlannerPoints(nextPoints);
@@ -771,7 +892,7 @@ export default function PathPlannerPage() {
       return;
     }
 
-    const contents = serializePathPlannerKotlin(points, savedPoses);
+    const contents = serializePathPlannerKotlin(points, savedPoses, getSequenceItemsWithPaths(sequenceItems, points));
     setDidCopyExport(false);
     setKotlinExport({
       fileName: "Exported Path",
@@ -814,7 +935,9 @@ export default function PathPlannerPage() {
     const startPoseName = pointsRef.current[0]?.poseName;
     if (!startPoseName) return;
 
-    const savedPose = nextSavedPoses.find((pose) => pose.name === startPoseName);
+    const savedPose = nextSavedPoses.find(
+      (pose) => stripStartPosePrefix(pose.name) === stripStartPosePrefix(startPoseName)
+    );
     if (!savedPose) return;
 
     const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
@@ -843,7 +966,7 @@ export default function PathPlannerPage() {
     }
 
     clearHistory();
-    setPlannerPoints(importedAuton.points);
+    setPlannerSnapshot(importedAuton);
     setHoverTarget(null);
     setActiveTarget(null);
     setIsDragging(false);
@@ -930,7 +1053,7 @@ export default function PathPlannerPage() {
       !points[pathIndex].locked &&
       isPointVisible(pathIndex)
     ) {
-      dragStartSnapshotRef.current = clonePoints(pointsRef.current);
+      dragStartSnapshotRef.current = createSnapshot();
       setIsDragging(true);
       setActiveTarget(hoverTarget);
       svgRef.current?.setPointerCapture(e.pointerId);
@@ -1132,7 +1255,7 @@ export default function PathPlannerPage() {
             {sidebarPage === "auton" ? (
               <h2 className={styles.sidebarTitle}>Path Editor</h2>
             ) : sidebarPage === "poses" ? (
-              <h2 className={styles.sidebarTitle}>Saved Poses</h2>
+              <h2 className={styles.sidebarTitle}>Start Poses</h2>
             ) : (
               <h2 className={styles.sidebarTitle}>Constants</h2>
             )}
@@ -1182,7 +1305,7 @@ export default function PathPlannerPage() {
                 className={`${styles.secondaryIconButton} ${sidebarPage === "poses" ? styles.activeIconButton : ""}`}
                 onClick={handleImportPosesClick}
                 aria-label="Import Poses"
-                title={sidebarPage === "poses" ? "Import Poses" : "Saved Poses"}
+                title={sidebarPage === "poses" ? "Import Start Poses" : "Start Poses"}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="6" cy="18" r="2"></circle>
@@ -1256,23 +1379,100 @@ export default function PathPlannerPage() {
               onDragLeave={handlePointsListDragLeave}
               onDrop={() => stopCardDragAutoScroll()}
             >
-              {points.map((p, i) => {
+              {(() => {
+                const p = points[0];
                 const coords = toFieldCoords(p.nx, p.ny);
-                const isDraggablePath = i > 0;
+                return (
+                  <PointCard
+                    key={p.id}
+                    index={0}
+                    name="Start Pose"
+                    poseName={p.poseName}
+                    color={p.color}
+                    locked={p.locked}
+                    hidden={Boolean(p.hidden)}
+                    x={coords.x}
+                    y={coords.y}
+                    heading={p.heading}
+                    headingMode={p.headingMode ?? "constant"}
+                    constantHeading={p.constantHeading ?? 0}
+                    startHeading={p.startHeading ?? 0}
+                    endHeading={p.endHeading ?? 0}
+                    controlPoints={[]}
+                    controlPointCount={0}
+                    controlsExpanded={false}
+                    isActive={targetPathIndex(hoverTarget) === 0 || targetPathIndex(activeTarget) === 0}
+                    onChange={(axis, val) => handleCoordChange(0, axis, val)}
+                    startPoseOptions={savedPoses}
+                    onStartPoseSelect={handleStartPoseSelect}
+                    onPositionEditStart={beginPositionEdit}
+                    onPositionEditCommit={commitPositionEdit}
+                    onNameEditStart={beginNameEdit}
+                    onNameEditCommit={commitNameEdit}
+                    onHeadingChange={handleHeadingChange}
+                    onToggleLocked={() => handleToggleLocked(0)}
+                    onToggleHidden={() => undefined}
+                    onControlPointEditStart={beginPositionEdit}
+                    onControlPointEditCommit={commitPositionEdit}
+                    canDelete={isShiftPressed}
+                    onDelete={() => undefined}
+                  />
+                );
+              })()}
+              {(sequenceItems.length > 0
+                ? sequenceItems
+                : points.slice(1).map((point) => ({ id: `fallback-${point.id}`, kind: "path" as const, pointId: point.id }))
+              ).map((item, sequenceIndex) => {
                 const isDragOverTarget =
-                  isDraggablePath &&
                   draggingPathIndex !== null &&
-                  draggingPathIndex !== i &&
-                  dragOverPathIndex === i;
-                const isBeingDragged = draggingPathIndex === i;
+                  draggingPathIndex !== sequenceIndex &&
+                  dragOverPathIndex === sequenceIndex;
+                const isBeingDragged = draggingPathIndex === sequenceIndex;
+
+                if (item.kind === "action") {
+                  return (
+                    <div
+                      key={item.id}
+                      className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
+                      draggable
+                      onPointerDownCapture={handleSequenceCardPointerDownCapture}
+                      onPointerUpCapture={restoreSequenceCardDragging}
+                      onPointerCancel={restoreSequenceCardDragging}
+                      onDragStart={(event) => handlePathCardDragStart(sequenceIndex, event)}
+                      onDragOver={(event) => handlePathCardDragOver(sequenceIndex, event)}
+                      onDrop={(event) => handlePathCardDrop(sequenceIndex, event)}
+                      onDragEnd={clearPathCardDragState}
+                    >
+                      <ActionCard
+                        name={item.name}
+                        mode={item.mode}
+                        timeout={item.timeout}
+                        onNameChange={(name) => handleActionNameChange(item.id, name)}
+                        onModeChange={(mode) => handleActionModeChange(item.id, mode)}
+                        onTimeoutChange={(timeout) => handleActionTimeoutChange(item.id, timeout)}
+                        onEditStart={beginNameEdit}
+                        onEditCommit={commitNameEdit}
+                        onDelete={() => handleRemoveAction(item.id)}
+                      />
+                    </div>
+                  );
+                }
+
+                const i = points.findIndex((point) => point.id === item.pointId);
+                const p = points[i];
+                if (!p) return null;
+                const coords = toFieldCoords(p.nx, p.ny);
                 return (
                   <div
-                    key={p.id}
-                    className={`${styles.pointCardDragWrapper} ${isDraggablePath ? styles.pointCardDraggable : ""} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
-                    draggable={isDraggablePath}
-                    onDragStart={(event) => handlePathCardDragStart(i, event)}
-                    onDragOver={(event) => handlePathCardDragOver(i, event)}
-                    onDrop={(event) => handlePathCardDrop(i, event)}
+                    key={item.id}
+                    className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
+                    draggable
+                    onPointerDownCapture={handleSequenceCardPointerDownCapture}
+                    onPointerUpCapture={restoreSequenceCardDragging}
+                    onPointerCancel={restoreSequenceCardDragging}
+                    onDragStart={(event) => handlePathCardDragStart(sequenceIndex, event)}
+                    onDragOver={(event) => handlePathCardDragOver(sequenceIndex, event)}
+                    onDrop={(event) => handlePathCardDrop(sequenceIndex, event)}
                     onDragEnd={clearPathCardDragState}
                   >
                     <PointCard
@@ -1297,31 +1497,18 @@ export default function PathPlannerPage() {
                       controlsExpanded={p.controlsExpanded ?? true}
                       isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
                       onChange={(axis, val) => handleCoordChange(i, axis, val)}
-                      startPoseOptions={i === 0 ? savedPoses.filter((pose) => pose.name.startsWith("START")) : undefined}
-                      onStartPoseSelect={i === 0 ? handleStartPoseSelect : undefined}
                       onPositionEditStart={beginPositionEdit}
                       onPositionEditCommit={commitPositionEdit}
-                      onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
+                      onRename={(name) => handleRenamePath(i, name)}
                       onNameEditStart={beginNameEdit}
                       onNameEditCommit={commitNameEdit}
-                      onHeadingChange={i === 0 ? handleHeadingChange : undefined}
-                      onInterpolationChange={
-                        i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
-                      }
-                      onPathHeadingChange={
-                        i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
-                      }
+                      onInterpolationChange={(mode) => handlePathInterpolationChange(i, mode)}
+                      onPathHeadingChange={(field, val) => handlePathHeadingChange(i, field, val)}
                       onToggleLocked={() => handleToggleLocked(i)}
                       onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
-                      onToggleControlsExpanded={
-                        i > 0 ? () => handleToggleControlsExpanded(i) : undefined
-                      }
-                      onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
-                      onControlPointChange={
-                        i > 0
-                          ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
-                          : undefined
-                      }
+                      onToggleControlsExpanded={() => handleToggleControlsExpanded(i)}
+                      onAddControlPoint={() => handleAddControlPoint(i)}
+                      onControlPointChange={(controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)}
                       onControlPointEditStart={beginPositionEdit}
                       onControlPointEditCommit={commitPositionEdit}
                       canDelete={isShiftPressed}
@@ -1340,6 +1527,13 @@ export default function PathPlannerPage() {
                 </svg>
                 Add Path
               </button>
+              <button className={`${styles.addButton} ${styles.addActionButton}`} onClick={handleAddAction}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add Action
+              </button>
             </div>
           </>
         ) : sidebarPage === "poses" ? (
@@ -1355,7 +1549,7 @@ export default function PathPlannerPage() {
                 </div>
               ))
             ) : (
-              <div className={styles.emptyState}>No START poses saved.</div>
+              <div className={styles.emptyState}>No start poses saved.</div>
             )}
           </div>
         ) : (

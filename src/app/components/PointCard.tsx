@@ -92,6 +92,7 @@ export function PointCard({
   const [draftPathHeading, setDraftPathHeading] = useState("");
   const [draftName, setDraftName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
+  const [nameBeforeEdit, setNameBeforeEdit] = useState("");
 
   const startEditing = (axis: "x" | "y" | "heading" | PathHeadingField) => {
     setEditingAxis(axis);
@@ -162,11 +163,15 @@ export function PointCard({
     onNameEditStart();
     setIsEditingName(true);
     setDraftName(name);
+    setNameBeforeEdit(name);
   };
 
   const handleNameBlur = () => {
     const trimmedName = draftName.trim();
-    onRename?.(trimmedName || `path${index}`);
+    const nextName = trimmedName || `path${index}`;
+    if (nextName !== nameBeforeEdit) {
+      onRename?.(nextName);
+    }
     onNameEditCommit();
     setIsEditingName(false);
   };
@@ -182,7 +187,7 @@ export function PointCard({
         ) : (
           <input
             className={styles.pathNameInput}
-            maxLength={32}
+            maxLength={16}
             value={isEditingName ? draftName : name}
             onFocus={handleNameFocus}
             onChange={(e) => {
@@ -269,8 +274,8 @@ export function PointCard({
       </div>
       <div className={styles.coordRow}>
         {index === 0 && (
-          <div className={styles.selectGroup}>
-            <label className={styles.inputLabel}>Saved Pose</label>
+          <div className={`${styles.selectGroup} ${styles.startPoseSelectGroup}`}>
+            <label className={styles.inputLabel}>Preset</label>
             <select
               className={styles.selectField}
               value={poseName ?? ""}
@@ -285,33 +290,37 @@ export function PointCard({
             </select>
           </div>
         )}
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>X (in)</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={styles.inputField}
-            value={editingAxis === "x" ? draftX : x.toFixed(1)}
-            onFocus={() => startEditing("x")}
-            onChange={(e) => updateCoordinateDraft("x", e.target.value)}
-            onBlur={(e) => commitEdit("x", e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
-          />
-        </div>
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Y (in)</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={styles.inputField}
-            value={editingAxis === "y" ? draftY : y.toFixed(1)}
-            onFocus={() => startEditing("y")}
-            onChange={(e) => updateCoordinateDraft("y", e.target.value)}
-            onBlur={(e) => commitEdit("y", e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
-          />
-        </div>
-        {index === 0 && (
+        {(index > 0 || !poseName) && (
+          <>
+            <div className={styles.inputGroup}>
+              <label className={styles.inputLabel}>X (in)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className={styles.inputField}
+                value={editingAxis === "x" ? draftX : x.toFixed(1)}
+                onFocus={() => startEditing("x")}
+                onChange={(e) => updateCoordinateDraft("x", e.target.value)}
+                onBlur={(e) => commitEdit("x", e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
+              />
+            </div>
+            <div className={styles.inputGroup}>
+              <label className={styles.inputLabel}>Y (in)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className={styles.inputField}
+                value={editingAxis === "y" ? draftY : y.toFixed(1)}
+                onFocus={() => startEditing("y")}
+                onChange={(e) => updateCoordinateDraft("y", e.target.value)}
+                onBlur={(e) => commitEdit("y", e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
+              />
+            </div>
+          </>
+        )}
+        {index === 0 && !poseName && (
           <div className={styles.inputGroup}>
             <label className={styles.inputLabel}>Heading (deg)</label>
             <input

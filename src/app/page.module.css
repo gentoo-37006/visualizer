@@ -167,6 +167,10 @@
   transition: var(--transition);
 }
 
+.actionCard {
+  border-left-color: #f97316;
+}
+
 .pointCard:hover, .pointCard.active {
   background-color: var(--surface-hover);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -225,9 +229,9 @@
 }
 
 .pathNameInput {
-  width: 32ch;
-  max-width: 32ch;
-  flex: 0 1 32ch;
+  width: 16ch;
+  max-width: 16ch;
+  flex: 0 1 16ch;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -244,6 +248,28 @@
   margin-left: -0.25rem;
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
+
+.actionNameInput {
+  width: 24ch;
+  max-width: 24ch;
+  flex: 0 1 24ch;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0;
+}
+
+.actionNameInput:focus {
+  background: var(--background);
+  border-color: #f97316;
+  padding: 0.25rem;
+  margin-left: -0.25rem;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+}
+
 
 .cardActions {
   display: flex;
@@ -404,6 +430,10 @@
   flex: 0 0 7.25rem;
 }
 
+.startPoseSelectGroup {
+  flex-basis: 8.5rem;
+}
+
 .inputLabel {
   font-size: 0.75rem;
   color: var(--text-secondary);
@@ -525,6 +555,8 @@
 .sidebarFooter {
   padding: 1.25rem;
   border-top: 1px solid var(--border);
+  display: flex;
+  gap: 0.75rem;
 }
 
 .addButton {
@@ -540,6 +572,14 @@
   justify-content: center;
   align-items: center;
   gap: 0.5rem;
+}
+
+.addActionButton {
+  background-color: #f97316;
+}
+
+.addButton.addActionButton:hover {
+  background-color: #ea580c;
 }
 
 .addButton:hover {

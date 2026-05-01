@@ -1,5 +1,5 @@
 import { INITIAL_POINT_ID } from "./plannerConstants";
-import type { HeadingInterpolation, Point } from "./plannerTypes";
+import type { AutonActionMode, AutonSequenceItem, HeadingInterpolation, Point } from "./plannerTypes";
 import {
   generateId,
   normalizeHeading,
@@ -12,9 +12,11 @@ const formatKotlinNumber = (value: number) => value.toFixed(1);
 const DEFAULT_ROBOT_WIDTH = 16;
 const DEFAULT_ROBOT_LENGTH = 16;
 const POSE_MATCH_EPSILON = 0.05;
+const START_POSE_PREFIX = "START_";
 
 export type ParsedKotlinAuton = {
   points: Point[];
+  sequenceItems: AutonSequenceItem[];
 };
 
 export type SavedPose = {
@@ -38,6 +40,12 @@ type ParsedPoseReference = {
   poseName?: string;
 };
 
+export const stripStartPosePrefix = (name: string) =>
+  name.startsWith(START_POSE_PREFIX) ? name.slice(START_POSE_PREFIX.length) : name;
+
+const withStartPosePrefix = (name: string) =>
+  name.startsWith(START_POSE_PREFIX) ? name : `${START_POSE_PREFIX}${name}`;
+
 export const DEFAULT_ROBOT_CONSTANTS: RobotConstants = {
   width: DEFAULT_ROBOT_WIDTH,
   length: DEFAULT_ROBOT_LENGTH,
@@ -53,7 +61,7 @@ const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: strin
   const poseNameMatch = pointPoseName
     ? savedPoses.find(
         (pose) =>
-          pose.name === pointPoseName &&
+          stripStartPosePrefix(pose.name) === stripStartPosePrefix(pointPoseName) &&
           Math.abs(pose.x - coords.x) <= POSE_MATCH_EPSILON &&
           Math.abs(pose.y - coords.y) <= POSE_MATCH_EPSILON
       )
@@ -68,7 +76,7 @@ const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: strin
 
 const formatKotlinPose = (point: { nx: number; ny: number; poseName?: string }, savedPoses: SavedPose[]) => {
   const savedPose = findMatchingSavedPose(point, savedPoses);
-  if (savedPose) return `Poses.${savedPose.name}`;
+  if (savedPose) return `Poses.${withStartPosePrefix(savedPose.name)}`;
 
   const coords = toFieldCoords(point.nx, point.ny);
   return `Pose(${formatKotlinNumber(coords.x)}, ${formatKotlinNumber(coords.y)})`;
@@ -157,7 +165,7 @@ export const parseSavedPosesKotlin = (
   let poseMatch: RegExpExecArray | null;
 
   while ((poseMatch = poseRegex.exec(contents)) !== null) {
-    const name = poseMatch[1];
+    const name = stripStartPosePrefix(poseMatch[1]);
     if (usedNames.has(name)) continue;
 
     const openParenIndex = contents.indexOf("(", poseMatch.index);
@@ -196,10 +204,9 @@ export const serializeSavedPosesKotlin = (
   dimensions: { width?: number; length?: number } = {}
 ) =>
   savedPoses
-    .filter((pose) => pose.name.startsWith("START"))
     .map(
       (pose) =>
-        `val ${pose.name} = Pose(${formatStartPoseCoordinate(pose.x, "HALF_WIDTH", dimensions)}, ${formatStartPoseCoordinate(pose.y, "HALF_LENGTH", dimensions)}, 0.0)`
+        `val ${withStartPosePrefix(pose.name)} = Pose(${formatStartPoseCoordinate(pose.x, "HALF_WIDTH", dimensions)}, ${formatStartPoseCoordinate(pose.y, "HALF_LENGTH", dimensions)}, 0.0)`
     )
     .join("\n");
 
@@ -236,12 +243,26 @@ const createUniquePathNames = (points: Point[]) => {
   });
 };
 
+const createPathNameByPointId = (points: Point[]) => {
+  const pathNames = createUniquePathNames(points);
+  return new Map(points.slice(1).map((point, index) => [point.id, pathNames[index]]));
+};
+
+const formatActionCall = (item: AutonSequenceItem) => {
+  if (item.kind !== "action") return "";
+  const actionName = item.name.trim() || "INTAKE";
+  if (item.mode === "run") return `    .run(Actions.${actionName}, ${formatKotlinNumber(item.timeout)})`;
+  return `    .${item.mode}(Actions.${actionName})`;
+};
+
 export const serializePathPlannerKotlin = (
   points: Point[],
-  savedPoses: SavedPose[] = []
+  savedPoses: SavedPose[] = [],
+  sequenceItems: AutonSequenceItem[] = []
 ) => {
   const pathPoints = points.slice(1);
-  const pathNames = createUniquePathNames(points);
+  const pathNameByPointId = createPathNameByPointId(points);
+  const pathNames = pathPoints.map((point, pathIndex) => pathNameByPointId.get(point.id) ?? `path${pathIndex + 1}`);
   const pathDeclarations = pathPoints
     .map((point, pathIndex) => {
       const previousPoint = points[pathIndex];
@@ -265,14 +286,21 @@ ${poses.map((pose) => `    ${pose},`).join("\n")}
     })
     .join("\n\n");
 
-  const followPaths = pathPoints
-    .map((_, pathIndex) => `    .followPath(${pathNames[pathIndex]})`)
+  const builderItems = sequenceItems.length > 0
+    ? sequenceItems
+    : pathPoints.map((point) => ({ id: `path-item-${point.id}`, kind: "path" as const, pointId: point.id }));
+  const builderCalls = builderItems
+    .map((item) => {
+      if (item.kind === "action") return formatActionCall(item);
+      const pathName = pathNameByPointId.get(item.pointId);
+      return pathName ? `    .followPath(${pathName})` : "";
+    })
+    .filter(Boolean)
     .join("\n");
 
   return `${pathDeclarations || "// Add paths in the editor before exporting."}
 
-return builder${followPaths ? `\n${followPaths}` : ""}
-`;
+return builder${builderCalls ? `\n${builderCalls}` : ""}`;
 };
 
 const findMatchingParen = (contents: string, openParenIndex: number) => {
@@ -310,10 +338,11 @@ const splitTopLevelArgs = (contents: string) => {
 const parseKotlinPose = (arg: string, savedPoses: SavedPose[]): ParsedPoseReference | null => {
   const poseReferenceMatch = arg.match(/\bPoses\.([A-Za-z_][A-Za-z0-9_]*)\b/);
   if (poseReferenceMatch) {
-    const savedPose = savedPoses.find((pose) => pose.name === poseReferenceMatch[1]);
+    const poseName = stripStartPosePrefix(poseReferenceMatch[1]);
+    const savedPose = savedPoses.find((pose) => stripStartPosePrefix(pose.name) === poseName);
     if (savedPose) {
       const normalizedCoords = toNormalizedCoords(savedPose.x, savedPose.y);
-      return { ...normalizedCoords, poseName: savedPose.name };
+      return { ...normalizedCoords, poseName: stripStartPosePrefix(savedPose.name) };
     }
   }
 
@@ -324,6 +353,15 @@ const parseKotlinPose = (arg: string, savedPoses: SavedPose[]): ParsedPoseRefere
 };
 
 export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[] = []): ParsedKotlinAuton | null => {
+  type ParsedBuilderCall =
+    | { kind: "path"; pathName: string }
+    | {
+        kind: "action";
+        id: string;
+        name: string;
+        mode: AutonActionMode;
+        timeout: number;
+      };
   type ParsedPath = {
     name: string;
     args: string[];
@@ -373,9 +411,30 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     pathRegex.lastIndex = closeParenIndex + 1;
   }
 
-  const followOrder = [...contents.matchAll(/\.followPath\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g)].map(
-    (match) => match[1]
-  );
+  const builderCalls: ParsedBuilderCall[] = [...contents.matchAll(/\.(followPath|start|stop|run)\s*\(([^)]*)\)/g)].map((match): ParsedBuilderCall | null => {
+    const method = match[1];
+    const args = splitTopLevelArgs(match[2]);
+    if (method === "followPath") {
+      const pathName = args[0]?.match(/\b([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
+      return pathName ? ({ kind: "path" as const, pathName }) : null;
+    }
+
+    const actionName = args[0]?.match(/\bActions\.([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
+    if (!actionName) return null;
+
+    const mode = method as AutonActionMode;
+    const timeout = mode === "run" ? Number.parseFloat(args[1] ?? "0") : 0;
+    return {
+      kind: "action" as const,
+      id: generateId(),
+      name: actionName,
+      mode,
+      timeout: Number.isFinite(timeout) ? timeout : 0,
+    };
+  }).filter((call): call is ParsedBuilderCall => call !== null);
+  const followOrder = builderCalls
+    .filter((call): call is { kind: "path"; pathName: string } => call.kind === "path")
+    .map((call) => call.pathName);
   const orderedPaths =
     followOrder.length > 0
       ? followOrder.map((name) => pathDefinitions.get(name)).filter((path): path is ParsedPath => Boolean(path))
@@ -396,6 +455,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     },
   ];
 
+  const pathPointIdsByName = new Map<string, string>();
   orderedPaths.forEach((path) => {
     const parsedArgs = path.args.map((arg) => parseKotlinPose(arg, savedPoses));
     const endPose = [...parsedArgs].reverse().find((pose) => pose !== null);
@@ -406,8 +466,10 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       .slice(firstArgIsPose ? 1 : 0, -1)
       .filter((pose): pose is ParsedPoseReference => pose !== null);
 
+    const pointId = generateId();
+    pathPointIdsByName.set(path.name, pointId);
     importedPoints.push({
-      id: generateId(),
+      id: pointId,
       name: path.name,
       nx: endPose.nx,
       ny: endPose.ny,
@@ -428,5 +490,15 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     });
   });
 
-  return importedPoints.length > 1 ? { points: importedPoints } : null;
+  const sequenceItems = builderCalls.length > 0
+    ? builderCalls
+        .map((call): AutonSequenceItem | null => {
+          if (call.kind === "action") return call;
+          const pointId = pathPointIdsByName.get(call.pathName);
+          return pointId ? { id: generateId(), kind: "path", pointId } : null;
+        })
+        .filter((item): item is AutonSequenceItem => item !== null)
+    : importedPoints.slice(1).map((point) => ({ id: generateId(), kind: "path" as const, pointId: point.id }));
+
+  return importedPoints.length > 1 ? { points: importedPoints, sequenceItems } : null;
 };
