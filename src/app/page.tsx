@@ -50,10 +50,13 @@ export default function PathPlannerPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
+  const [kotlinExport, setKotlinExport] = useState<{ className: string; contents: string } | null>(null);
+  const [didCopyExport, setDidCopyExport] = useState(false);
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsRef = useRef<Point[]>(points);
   const undoStackRef = useRef<Point[][]>([]);
   const redoStackRef = useRef<Point[][]>([]);
@@ -167,10 +170,16 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      if (kotlinExport) return;
+
+      const isHistoryModifier = event.ctrlKey || event.metaKey;
+      if (!isHistoryModifier || event.altKey) return;
 
       const key = event.key.toLowerCase();
-      if (key === "z") {
+      if (key === "z" && event.shiftKey) {
+        event.preventDefault();
+        handleRedo();
+      } else if (key === "z") {
         event.preventDefault();
         handleUndo();
       } else if (key === "y") {
@@ -181,7 +190,26 @@ export default function PathPlannerPage() {
 
     window.addEventListener("keydown", handleHistoryKeyDown);
     return () => window.removeEventListener("keydown", handleHistoryKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, kotlinExport]);
+
+  useEffect(() => {
+    if (!kotlinExport) return;
+
+    const frame = requestAnimationFrame(() => {
+      exportTextAreaRef.current?.focus();
+      exportTextAreaRef.current?.select();
+    });
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setKotlinExport(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [kotlinExport]);
 
   useEffect(() => {
     pointsRef.current = points;
@@ -458,15 +486,21 @@ export default function PathPlannerPage() {
   const handleExportKotlin = () => {
     const className = sanitizeKotlinClassName(autonClassName);
     const contents = serializePathPlannerKotlin(points, className);
-    const blob = new Blob([contents], { type: "text/x-kotlin;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${className}.kt`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    setAutonClassName(className);
+    setDidCopyExport(false);
+    setKotlinExport({ className, contents });
+  };
+
+  const handleCopyKotlinExport = async () => {
+    if (!kotlinExport) return;
+
+    exportTextAreaRef.current?.select();
+    try {
+      await navigator.clipboard.writeText(kotlinExport.contents);
+      setDidCopyExport(true);
+    } catch {
+      setDidCopyExport(false);
+    }
   };
 
   const handleImportKotlinClick = () => {
@@ -857,6 +891,61 @@ export default function PathPlannerPage() {
           </button>
         </div>
       </aside>
+
+      {kotlinExport && (
+        <div
+          className={styles.modalBackdrop}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setKotlinExport(null);
+          }}
+        >
+          <section
+            className={styles.exportModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-modal-title"
+          >
+            <div className={styles.exportModalHeader}>
+              <div>
+                <h2 id="export-modal-title" className={styles.exportModalTitle}>
+                  {kotlinExport.className}.kt
+                </h2>
+                <p className={styles.exportModalSubtitle}>Generated Kotlin class</p>
+              </div>
+              <button
+                className={styles.secondaryIconButton}
+                onClick={() => setKotlinExport(null)}
+                aria-label="Close export modal"
+                title="Close"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <textarea
+              ref={exportTextAreaRef}
+              className={styles.exportCode}
+              value={kotlinExport.contents}
+              readOnly
+              spellCheck={false}
+              aria-label="Generated Kotlin class file contents"
+            />
+
+            <div className={styles.exportModalActions}>
+              <span className={styles.copyStatus} aria-live="polite">
+                {didCopyExport ? "Copied" : "Select or copy the class text"}
+              </span>
+              <button className={styles.copyButton} onClick={handleCopyKotlinExport}>
+                Copy
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
