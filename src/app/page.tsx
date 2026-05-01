@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -24,6 +25,7 @@ import {
   type SavedPose,
 } from "./kotlinAutonFile";
 import {
+  FIELD_SIZE_INCHES,
   FIELD_BORDER_WIDTH,
   INITIAL_POINT_COLOR,
   INITIAL_POINT_ID,
@@ -45,6 +47,7 @@ import {
   createSplinePath,
   generateId,
   isSameTarget,
+  isNumericDraft,
   mainPointHitRadius,
   normalizeHeading,
   randomColor,
@@ -57,6 +60,7 @@ import styles from "./page.module.css";
 
 const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
 const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
+const MOTION_PARAMETERS_STORAGE_KEY = "auton-path-planner:motion-parameters";
 
 const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
   Array.isArray(value) &&
@@ -121,9 +125,99 @@ type PlannerSnapshot = {
   points: Point[];
   sequenceItems: AutonSequenceItem[];
 };
+type MotionParameters = {
+  maxAngularVelocity: number;
+};
+type PlaybackPose = {
+  nx: number;
+  ny: number;
+  heading: number;
+};
+type PlaybackSegment =
+  | {
+      kind: "path";
+      startTime: number;
+      duration: number;
+      point: Point;
+      samples: PlaybackPose[];
+    }
+  | {
+      kind: "wait";
+      startTime: number;
+      duration: number;
+      pose: PlaybackPose;
+    }
+  | {
+      kind: "rotate";
+      startTime: number;
+      duration: number;
+      pose: PlaybackPose;
+      startHeading: number;
+      endHeading: number;
+    };
 type SidebarPage = "auton" | "poses" | "constants";
 const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
+const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
+  maxAngularVelocity: 180,
+};
+
+const isMotionParameters = (value: unknown): value is MotionParameters =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as MotionParameters).maxAngularVelocity === "number";
+
+const loadMotionParameters = () => {
+  if (typeof window === "undefined") return DEFAULT_MOTION_PARAMETERS;
+
+  const storedMotionParameters = window.localStorage.getItem(MOTION_PARAMETERS_STORAGE_KEY);
+  if (!storedMotionParameters) return DEFAULT_MOTION_PARAMETERS;
+
+  try {
+    const parsedMotionParameters: unknown = JSON.parse(storedMotionParameters);
+    return isMotionParameters(parsedMotionParameters)
+      ? { ...DEFAULT_MOTION_PARAMETERS, ...parsedMotionParameters }
+      : DEFAULT_MOTION_PARAMETERS;
+  } catch {
+    window.localStorage.removeItem(MOTION_PARAMETERS_STORAGE_KEY);
+    return DEFAULT_MOTION_PARAMETERS;
+  }
+};
+
+const interpolateNumber = (start: number, end: number, t: number) => start + (end - start) * t;
+
+const interpolateHeading = (start: number, end: number, t: number) => {
+  const delta = normalizeHeading(end - start);
+  return normalizeHeading(start + delta * t);
+};
+
+const interpolateBezierPoint = (points: Array<{ nx: number; ny: number }>, t: number) => {
+  let workingPoints = points.map((point) => ({ ...point }));
+
+  while (workingPoints.length > 1) {
+    workingPoints = workingPoints.slice(0, -1).map((point, index) => ({
+      nx: interpolateNumber(point.nx, workingPoints[index + 1].nx, t),
+      ny: interpolateNumber(point.ny, workingPoints[index + 1].ny, t),
+    }));
+  }
+
+  return workingPoints[0];
+};
+
+const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny: number }) => {
+  const ax = (a.nx - 0.5) * FIELD_SIZE_INCHES;
+  const ay = (0.5 - a.ny) * FIELD_SIZE_INCHES;
+  const bx = (b.nx - 0.5) * FIELD_SIZE_INCHES;
+  const by = (0.5 - b.ny) * FIELD_SIZE_INCHES;
+  return Math.hypot(bx - ax, by - ay);
+};
+
+const formatPlaybackTime = (seconds: number) => {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds - minutes * 60;
+  return `${minutes}:${remainingSeconds.toFixed(1).padStart(4, "0")}`;
+};
 
 export default function PathPlannerPage() {
   const [points, setPoints] = useState<Point[]>([
@@ -141,6 +235,12 @@ export default function PathPlannerPage() {
   const [didCopyExport, setDidCopyExport] = useState(false);
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>(loadSavedPoses);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(loadRobotConstants);
+  const [motionParameters, setMotionParameters] = useState<MotionParameters>(loadMotionParameters);
+  const [motionParameterDrafts, setMotionParameterDrafts] = useState({
+    maxAngularVelocity: String(loadMotionParameters().maxAngularVelocity),
+  });
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
   const [draggingPathIndex, setDraggingPathIndex] = useState<number | null>(null);
   const [dragOverPathIndex, setDragOverPathIndex] = useState<number | null>(null);
@@ -200,13 +300,144 @@ export default function PathPlannerPage() {
     sequenceItems: cloneSequenceItems(sequenceItemsRef.current),
   });
 
-  const getSequenceItemsWithPaths = (
-    items: AutonSequenceItem[] = sequenceItemsRef.current,
-    sourcePoints: Point[] = pointsRef.current
-  ) =>
+  const getSequenceItemsWithPaths = (items: AutonSequenceItem[], sourcePoints: Point[]) =>
     items.length > 0
       ? items
       : sourcePoints.slice(1).map((point) => ({ id: generateId(), kind: "path" as const, pointId: point.id }));
+
+  const orderedSequenceItems = useMemo(
+    () => getSequenceItemsWithPaths(sequenceItems, points),
+    [sequenceItems, points]
+  );
+
+  const playbackTimeline = useMemo(() => {
+    const pathSpeed = Math.max(
+      1,
+      Math.hypot(robotConstants.maxForwardVelocity, robotConstants.maxLateralVelocity)
+    );
+    const angularVelocity = Math.max(1, motionParameters.maxAngularVelocity);
+    const segments: PlaybackSegment[] = [];
+    let elapsedTime = 0;
+    let currentPose: PlaybackPose = {
+      nx: points[0]?.nx ?? 0.5,
+      ny: points[0]?.ny ?? 0.5,
+      heading: points[0]?.heading ?? 0,
+    };
+
+    orderedSequenceItems.forEach((item) => {
+      if (item.kind === "action") {
+        if (item.mode === "run" && item.timeout > 0) {
+          segments.push({
+            kind: "wait",
+            startTime: elapsedTime,
+            duration: item.timeout,
+            pose: currentPose,
+          });
+          elapsedTime += item.timeout;
+        }
+        return;
+      }
+
+      const pointIndex = points.findIndex((point) => point.id === item.pointId);
+      const point = points[pointIndex];
+      const previousPoint = points[pointIndex - 1];
+      if (!point || !previousPoint) return;
+
+      const bezierPoints = [
+        previousPoint,
+        ...(point.controlPoints ?? []),
+        point,
+      ].map((pathPoint) => ({ nx: pathPoint.nx, ny: pathPoint.ny }));
+      const sampleCount = Math.max(48, (point.controlPoints?.length ?? 0) * 20);
+      const positionSamples = Array.from({ length: sampleCount + 1 }, (_, index) =>
+        interpolateBezierPoint(bezierPoints, index / sampleCount)
+      );
+      const distance = positionSamples.slice(1).reduce(
+        (totalDistance, sample, index) => totalDistance + measureFieldDistance(positionSamples[index], sample),
+        0
+      );
+      const headingMode = point.headingMode ?? "constant";
+      const samples = positionSamples.map((sample, index) => {
+        const t = index / Math.max(1, positionSamples.length - 1);
+        let heading = point.constantHeading ?? 0;
+        if (headingMode === "linear") {
+          heading = interpolateHeading(point.startHeading ?? 0, point.endHeading ?? 0, t);
+        } else if (headingMode === "tangential") {
+          const nextSample = positionSamples[Math.min(positionSamples.length - 1, index + 1)];
+          const previousSample = positionSamples[Math.max(0, index - 1)];
+          const dx = (nextSample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
+          const dy = (previousSample.ny - nextSample.ny) * FIELD_SIZE_INCHES;
+          heading = normalizeHeading((Math.atan2(dy, dx) * 180) / Math.PI);
+        }
+
+        return { nx: sample.nx, ny: sample.ny, heading };
+      });
+      const pathStartHeading = samples[0]?.heading ?? currentPose.heading;
+      const rotateDegrees = Math.abs(normalizeHeading(pathStartHeading - currentPose.heading));
+      if (rotateDegrees > 0.001) {
+        const rotateDuration = rotateDegrees / angularVelocity;
+        segments.push({
+          kind: "rotate",
+          startTime: elapsedTime,
+          duration: rotateDuration,
+          pose: currentPose,
+          startHeading: currentPose.heading,
+          endHeading: pathStartHeading,
+        });
+        elapsedTime += rotateDuration;
+        currentPose = { ...currentPose, heading: pathStartHeading };
+      }
+
+      const duration = Math.max(distance / pathSpeed, 0.001);
+
+      segments.push({
+        kind: "path",
+        startTime: elapsedTime,
+        duration,
+        point,
+        samples,
+      });
+      elapsedTime += duration;
+      currentPose = samples[samples.length - 1] ?? currentPose;
+    });
+
+    return { segments, totalTime: elapsedTime };
+  }, [motionParameters.maxAngularVelocity, orderedSequenceItems, points, robotConstants.maxForwardVelocity, robotConstants.maxLateralVelocity]);
+  const clampedPlaybackTime = Math.min(playbackTime, playbackTimeline.totalTime);
+
+  const playbackPose = useMemo(() => {
+    const initialPose: PlaybackPose = {
+      nx: points[0]?.nx ?? 0.5,
+      ny: points[0]?.ny ?? 0.5,
+      heading: points[0]?.heading ?? 0,
+    };
+    const activeSegment =
+      playbackTimeline.segments.find(
+        (segment) => clampedPlaybackTime >= segment.startTime && clampedPlaybackTime <= segment.startTime + segment.duration
+      ) ?? playbackTimeline.segments[playbackTimeline.segments.length - 1];
+    if (!activeSegment) return initialPose;
+    if (activeSegment.kind === "wait") return activeSegment.pose;
+    if (activeSegment.kind === "rotate") {
+      const t = Math.max(0, Math.min(1, (clampedPlaybackTime - activeSegment.startTime) / activeSegment.duration));
+      return {
+        ...activeSegment.pose,
+        heading: interpolateHeading(activeSegment.startHeading, activeSegment.endHeading, t),
+      };
+    }
+
+    const t = Math.max(0, Math.min(1, (clampedPlaybackTime - activeSegment.startTime) / activeSegment.duration));
+    const samplePosition = t * Math.max(0, activeSegment.samples.length - 1);
+    const startIndex = Math.floor(samplePosition);
+    const endIndex = Math.min(activeSegment.samples.length - 1, startIndex + 1);
+    const localT = samplePosition - startIndex;
+    const startSample = activeSegment.samples[startIndex] ?? initialPose;
+    const endSample = activeSegment.samples[endIndex] ?? startSample;
+    return {
+      nx: interpolateNumber(startSample.nx, endSample.nx, localT),
+      ny: interpolateNumber(startSample.ny, endSample.ny, localT),
+      heading: interpolateHeading(startSample.heading, endSample.heading, localT),
+    };
+  }, [clampedPlaybackTime, playbackTimeline.segments, points]);
 
   const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
     arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
@@ -398,6 +629,54 @@ export default function PathPlannerPage() {
     };
   }, []);
 
+  useEffect(() => {
+    window.localStorage.setItem(MOTION_PARAMETERS_STORAGE_KEY, JSON.stringify(motionParameters));
+  }, [motionParameters]);
+
+  useEffect(() => {
+    if (!isPlaybackRunning) return;
+    let previousTime = performance.now();
+    let frameId: number;
+
+    const tick = (time: number) => {
+      const deltaSeconds = (time - previousTime) / 1000;
+      previousTime = time;
+      setPlaybackTime((currentTime) => {
+        const nextTime = Math.min(playbackTimeline.totalTime, currentTime + deltaSeconds);
+        if (nextTime >= playbackTimeline.totalTime) setIsPlaybackRunning(false);
+        return nextTime;
+      });
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [isPlaybackRunning, playbackTimeline.totalTime]);
+
+  const updateMotionParameter = (key: keyof MotionParameters, value: string) => {
+    if (!isNumericDraft(value)) return;
+    setMotionParameterDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
+    const parsedValue = Number.parseFloat(value);
+    if (!Number.isFinite(parsedValue)) return;
+    setMotionParameters((currentParameters) => ({
+      ...currentParameters,
+      [key]: Math.max(0.1, parsedValue),
+    }));
+  };
+
+  const formatMotionParameter = (key: keyof MotionParameters) => {
+    setMotionParameterDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [key]: motionParameters[key].toFixed(1),
+    }));
+  };
+
+  const handlePlaybackToggle = () => {
+    if (playbackTimeline.totalTime <= 0) return;
+    if (playbackTime >= playbackTimeline.totalTime) setPlaybackTime(0);
+    setIsPlaybackRunning((currentValue) => !currentValue);
+  };
+
   const handleAddPoint = () => {
     pushCurrentSnapshot();
     const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
@@ -415,13 +694,16 @@ export default function PathPlannerPage() {
         ...createDefaultHeadingValues(),
       },
     ]);
-    setPlannerSequenceItems([...getSequenceItemsWithPaths(), { id: generateId(), kind: "path", pointId }]);
+    setPlannerSequenceItems([
+      ...getSequenceItemsWithPaths(sequenceItemsRef.current, pointsRef.current),
+      { id: generateId(), kind: "path", pointId },
+    ]);
   };
 
   const handleAddAction = () => {
     pushCurrentSnapshot();
     setPlannerSequenceItems([
-      ...getSequenceItemsWithPaths(),
+      ...getSequenceItemsWithPaths(sequenceItemsRef.current, pointsRef.current),
       { id: generateId(), kind: "action", name: "ACTION", mode: "start", timeout: 1.0 },
     ]);
   };
@@ -1245,10 +1527,29 @@ export default function PathPlannerPage() {
                 );
               })
             )}
+            {hasMeasuredField && (
+              <image
+                href="/robot.png"
+                x={
+                  toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).x -
+                  ((robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2)) / 2
+                }
+                y={
+                  toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).y -
+                  ((robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2)) / 2
+                }
+                width={(robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2)}
+                height={(robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2)}
+                transform={`rotate(${playbackPose.heading - 90} ${toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).x} ${toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).y})`}
+                opacity="0.92"
+                pointerEvents="none"
+              />
+            )}
           </svg>
         </div>
       </div>
 
+      <div className={styles.sidebarColumn}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarTitleRow}>
@@ -1287,11 +1588,11 @@ export default function PathPlannerPage() {
               <button
                 className={`${styles.secondaryIconButton} ${sidebarPage === "constants" ? styles.activeIconButton : ""}`}
                 onClick={handleImportConstantsClick}
-                aria-label="Import Robot Constants"
+                aria-label="Import Constants"
                 title={
                   sidebarPage === "constants"
-                    ? "Import Robot Constants"
-                    : `Robot Constants (${robotConstants.width.toFixed(1)} x ${robotConstants.length.toFixed(1)})`
+                    ? "Import Constants"
+                    : `Constants`
                 }
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1543,8 +1844,14 @@ export default function PathPlannerPage() {
                 <div className={styles.poseCard} key={pose.name}>
                   <div className={styles.poseName}>{pose.name}</div>
                   <div className={styles.poseCoordRow}>
-                    <span className={styles.poseCoord}>X {pose.x.toFixed(1)}</span>
-                    <span className={styles.poseCoord}>Y {pose.y.toFixed(1)}</span>
+                    <div className={styles.inputGroup}>
+                      <label className={styles.inputLabel}>X (in)</label>
+                      <input className={styles.inputField} value={pose.x.toFixed(1)} readOnly />
+                    </div>
+                    <div className={styles.inputGroup}>
+                      <label className={styles.inputLabel}>Y (in)</label>
+                      <input className={styles.inputField} value={pose.y.toFixed(1)} readOnly />
+                    </div>
                   </div>
                 </div>
               ))
@@ -1557,27 +1864,99 @@ export default function PathPlannerPage() {
             <div className={styles.poseCard}>
               <div className={styles.poseName}>Robot Dimensions</div>
               <div className={styles.poseCoordRow}>
-                <span className={styles.poseCoord}>Width {robotConstants.width.toFixed(2)}</span>
-                <span className={styles.poseCoord}>Length {robotConstants.length.toFixed(2)}</span>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Width (in)</label>
+                  <input className={styles.inputField} value={robotConstants.width.toFixed(2)} readOnly />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Length (in)</label>
+                  <input className={styles.inputField} value={robotConstants.length.toFixed(2)} readOnly />
+                </div>
               </div>
             </div>
             <div className={styles.poseCard}>
-              <div className={styles.poseName}>Brake Strength</div>
+              <div className={styles.poseName}>Brake Velocity</div>
               <div className={styles.poseCoordRow}>
-                <span className={styles.poseCoord}>Forward {robotConstants.forwardBrakeStrength.toFixed(5)}</span>
-                <span className={styles.poseCoord}>Lateral {robotConstants.lateralBrakeStrength.toFixed(5)}</span>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Forward (in/s)</label>
+                  <input className={styles.inputField} value={robotConstants.forwardBrakeStrength.toFixed(5)} readOnly />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Lateral (in/s)</label>
+                  <input className={styles.inputField} value={robotConstants.lateralBrakeStrength.toFixed(5)} readOnly />
+                </div>
               </div>
             </div>
             <div className={styles.poseCard}>
               <div className={styles.poseName}>Max Velocity</div>
               <div className={styles.poseCoordRow}>
-                <span className={styles.poseCoord}>Forward {robotConstants.maxForwardVelocity.toFixed(5)}</span>
-                <span className={styles.poseCoord}>Lateral {robotConstants.maxLateralVelocity.toFixed(5)}</span>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Forward (in/s)</label>
+                  <input className={styles.inputField} value={robotConstants.maxForwardVelocity.toFixed(5)} readOnly />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Lateral (in/s)</label>
+                  <input className={styles.inputField} value={robotConstants.maxLateralVelocity.toFixed(5)} readOnly />
+                </div>
+              </div>
+            </div>
+            <div className={styles.poseCard}>
+              <div className={styles.poseName}>Angular Velocity</div>
+              <div className={styles.poseCoordRow}>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>(deg/s)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={styles.inputField}
+                    value={motionParameterDrafts.maxAngularVelocity}
+                    onChange={(event) => updateMotionParameter("maxAngularVelocity", event.target.value)}
+                    onBlur={() => formatMotionParameter("maxAngularVelocity")}
+                  />
+                </div>
               </div>
             </div>
           </div>
         )}
       </aside>
+      <section className={styles.playbackSidebar} aria-label="Path playback">
+        <div className={styles.playbackRow}>
+          <button
+            className={styles.playButton}
+            onClick={handlePlaybackToggle}
+            aria-label={isPlaybackRunning ? "Pause path playback" : "Play path playback"}
+            title={isPlaybackRunning ? "Pause" : "Play"}
+          >
+            {isPlaybackRunning ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6" y="5" width="4" height="14"></rect>
+                <rect x="14" y="5" width="4" height="14"></rect>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="8,5 19,12 8,19"></polygon>
+              </svg>
+            )}
+          </button>
+          <input
+            className={styles.playbackRange}
+            type="range"
+            min="0"
+            max={Math.max(0.001, playbackTimeline.totalTime)}
+            step="0.01"
+            value={Math.min(clampedPlaybackTime, Math.max(0.001, playbackTimeline.totalTime))}
+            onChange={(event) => {
+              setIsPlaybackRunning(false);
+              setPlaybackTime(Number(event.target.value));
+            }}
+            aria-label="Path playback progress"
+          />
+          <div className={styles.playbackTime}>
+            {formatPlaybackTime(clampedPlaybackTime)} / {formatPlaybackTime(playbackTimeline.totalTime)}
+          </div>
+        </div>
+      </section>
+      </div>
 
       {kotlinExport && (
         <div
