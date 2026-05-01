@@ -159,6 +159,27 @@
   gap: 1rem;
 }
 
+.pointCardDragWrapper {
+  border-radius: var(--border-radius);
+}
+
+.pointCardDraggable {
+  cursor: grab;
+}
+
+.pointCardDraggable:active {
+  cursor: grabbing;
+}
+
+.pointCardDropTarget {
+  outline: 2px dashed var(--primary);
+  outline-offset: 2px;
+}
+
+.pointCardDragging {
+  opacity: 0.65;
+}
+
 .pointCard {
   background-color: #262626;
   border-radius: var(--border-radius);

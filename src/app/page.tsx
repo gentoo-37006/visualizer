@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent as ReactDragEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import Image from "next/image";
 import { PointCard } from "./components/PointCard";
 import {
@@ -99,6 +107,8 @@ const clonePoints = (source: Point[]) =>
 
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 type SidebarPage = "auton" | "poses" | "constants";
+const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
+const CARD_DRAG_SCROLL_MAX_SPEED = 22;
 
 export default function PathPlannerPage() {
   const [autonClassName, setAutonClassName] = useState("AutonPath");
@@ -117,6 +127,8 @@ export default function PathPlannerPage() {
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>(loadSavedPoses);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(loadRobotConstants);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
+  const [draggingPathIndex, setDraggingPathIndex] = useState<number | null>(null);
+  const [dragOverPathIndex, setDragOverPathIndex] = useState<number | null>(null);
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -124,12 +136,15 @@ export default function PathPlannerPage() {
   const posesInputRef = useRef<HTMLInputElement>(null);
   const constantsInputRef = useRef<HTMLInputElement>(null);
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
+  const pointsListRef = useRef<HTMLDivElement>(null);
   const pointsRef = useRef<Point[]>(points);
   const undoStackRef = useRef<Point[][]>([]);
   const redoStackRef = useRef<Point[][]>([]);
   const dragStartSnapshotRef = useRef<Point[] | null>(null);
   const editStartSnapshotRef = useRef<Point[] | null>(null);
   const nameEditStartSnapshotRef = useRef<Point[] | null>(null);
+  const cardDragScrollSpeedRef = useRef(0);
+  const cardDragScrollFrameRef = useRef<number | null>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
   const isPointVisible = (index: number) => {
     const previousSegmentVisible = index > 0 && !points[index].hidden;
@@ -354,6 +369,165 @@ export default function PathPlannerPage() {
     if (targetPathIndex(activeTarget) === index) setActiveTarget(null);
     if (targetPathIndex(hoverTarget) === index) setHoverTarget(null);
   };
+
+  const reorderPoints = (source: Point[], fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex <= 0 ||
+      toIndex <= 0 ||
+      fromIndex >= source.length ||
+      toIndex >= source.length
+    ) {
+      return source;
+    }
+
+    const reorderedPoints = [...source];
+    const [movedPoint] = reorderedPoints.splice(fromIndex, 1);
+    reorderedPoints.splice(toIndex, 0, movedPoint);
+    return reorderedPoints;
+  };
+
+  const stopCardDragAutoScroll = () => {
+    cardDragScrollSpeedRef.current = 0;
+    if (cardDragScrollFrameRef.current !== null) {
+      cancelAnimationFrame(cardDragScrollFrameRef.current);
+      cardDragScrollFrameRef.current = null;
+    }
+  };
+
+  const startCardDragAutoScroll = () => {
+    if (cardDragScrollFrameRef.current !== null) return;
+
+    const run = () => {
+      const list = pointsListRef.current;
+      const speed = cardDragScrollSpeedRef.current;
+      if (!list || speed === 0) {
+        cardDragScrollFrameRef.current = null;
+        return;
+      }
+
+      const previousScrollTop = list.scrollTop;
+      list.scrollTop += speed;
+      if (list.scrollTop === previousScrollTop) {
+        cardDragScrollSpeedRef.current = 0;
+        cardDragScrollFrameRef.current = null;
+        return;
+      }
+
+      cardDragScrollFrameRef.current = requestAnimationFrame(run);
+    };
+
+    cardDragScrollFrameRef.current = requestAnimationFrame(run);
+  };
+
+  const updateCardDragAutoScrollFromPointer = (clientY: number) => {
+    const list = pointsListRef.current;
+    if (!list || draggingPathIndex === null) {
+      stopCardDragAutoScroll();
+      return;
+    }
+
+    const rect = list.getBoundingClientRect();
+    if (clientY < rect.top || clientY > rect.bottom) {
+      stopCardDragAutoScroll();
+      return;
+    }
+
+    const zoneHeight = Math.min(CARD_DRAG_SCROLL_ZONE_HEIGHT, rect.height / 2);
+    const topBoundary = rect.top + zoneHeight;
+    const bottomBoundary = rect.bottom - zoneHeight;
+
+    let direction: "up" | "down" | null = null;
+    let strength = 0;
+
+    if (clientY < topBoundary) {
+      direction = "up";
+      strength = (topBoundary - clientY) / zoneHeight;
+    } else if (clientY > bottomBoundary) {
+      direction = "down";
+      strength = (clientY - bottomBoundary) / zoneHeight;
+    }
+
+    if (!direction) {
+      stopCardDragAutoScroll();
+      return;
+    }
+
+    const boundedStrength = Math.max(0, Math.min(1, strength));
+    const easedStrength = boundedStrength * boundedStrength;
+    const speed = CARD_DRAG_SCROLL_MAX_SPEED * easedStrength;
+    cardDragScrollSpeedRef.current = direction === "up" ? -speed : speed;
+    startCardDragAutoScroll();
+  };
+
+  const clearPathCardDragState = () => {
+    setDraggingPathIndex(null);
+    setDragOverPathIndex(null);
+    stopCardDragAutoScroll();
+  };
+
+  const handlePathCardDragStart = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
+    if (index <= 0) {
+      event.preventDefault();
+      return;
+    }
+
+    setDraggingPathIndex(index);
+    setDragOverPathIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", points[index].id);
+  };
+
+  const handlePathCardDragOver = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
+    if (index <= 0 || draggingPathIndex === null || draggingPathIndex === index) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverPathIndex !== index) setDragOverPathIndex(index);
+    updateCardDragAutoScrollFromPointer(event.clientY);
+  };
+
+  const handlePathCardDrop = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (draggingPathIndex === null || index <= 0 || draggingPathIndex === index) {
+      clearPathCardDragState();
+      return;
+    }
+
+    const nextPoints = reorderPoints(pointsRef.current, draggingPathIndex, index);
+    if (nextPoints === pointsRef.current) {
+      clearPathCardDragState();
+      return;
+    }
+
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
+    setHoverTarget(null);
+    setActiveTarget(null);
+    setIsDragging(false);
+    clearPathCardDragState();
+  };
+
+  const handlePointsListDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (draggingPathIndex === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    updateCardDragAutoScrollFromPointer(event.clientY);
+  };
+
+  const handlePointsListDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (draggingPathIndex === null) return;
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+    stopCardDragAutoScroll();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (cardDragScrollFrameRef.current !== null) {
+        cancelAnimationFrame(cardDragScrollFrameRef.current);
+      }
+    };
+  }, []);
 
   const handleToggleLocked = (index: number) => {
     if (points[index].hidden) return;
@@ -1069,63 +1243,85 @@ export default function PathPlannerPage() {
 
         {sidebarPage === "auton" ? (
           <>
-            <div className={styles.pointsList}>
+            <div
+              ref={pointsListRef}
+              className={styles.pointsList}
+              onDragOver={handlePointsListDragOver}
+              onDragLeave={handlePointsListDragLeave}
+              onDrop={() => stopCardDragAutoScroll()}
+            >
               {points.map((p, i) => {
                 const coords = toFieldCoords(p.nx, p.ny);
+                const isDraggablePath = i > 0;
+                const isDragOverTarget =
+                  isDraggablePath &&
+                  draggingPathIndex !== null &&
+                  draggingPathIndex !== i &&
+                  dragOverPathIndex === i;
+                const isBeingDragged = draggingPathIndex === i;
                 return (
-                  <PointCard
+                  <div
                     key={p.id}
-                    index={i}
-                    name={p.name ?? `path${i}`}
-                    poseName={p.poseName}
-                    color={p.color}
-                    locked={p.locked}
-                    hidden={Boolean(p.hidden)}
-                    x={coords.x}
-                    y={coords.y}
-                    heading={p.heading}
-                    headingMode={p.headingMode ?? "constant"}
-                    constantHeading={p.constantHeading ?? 0}
-                    startHeading={p.startHeading ?? 0}
-                    endHeading={p.endHeading ?? 0}
-                    controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
-                      id: controlPoint.id,
-                      ...toFieldCoords(controlPoint.nx, controlPoint.ny),
-                    }))}
-                    controlPointCount={(p.controlPoints ?? []).length}
-                    controlsExpanded={p.controlsExpanded ?? true}
-                    isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
-                    onChange={(axis, val) => handleCoordChange(i, axis, val)}
-                    startPoseOptions={i === 0 ? savedPoses.filter((pose) => pose.name.startsWith("START")) : undefined}
-                    onStartPoseSelect={i === 0 ? handleStartPoseSelect : undefined}
-                    onPositionEditStart={beginPositionEdit}
-                    onPositionEditCommit={commitPositionEdit}
-                    onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
-                    onNameEditStart={beginNameEdit}
-                    onNameEditCommit={commitNameEdit}
-                    onHeadingChange={i === 0 ? handleHeadingChange : undefined}
-                    onInterpolationChange={
-                      i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
-                    }
-                    onPathHeadingChange={
-                      i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
-                    }
-                    onToggleLocked={() => handleToggleLocked(i)}
-                    onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
-                    onToggleControlsExpanded={
-                      i > 0 ? () => handleToggleControlsExpanded(i) : undefined
-                    }
-                    onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
-                    onControlPointChange={
-                      i > 0
-                        ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
-                        : undefined
-                    }
-                    onControlPointEditStart={beginPositionEdit}
-                    onControlPointEditCommit={commitPositionEdit}
-                    canDelete={isShiftPressed}
-                    onDelete={() => handleRemovePoint(i)}
-                  />
+                    className={`${styles.pointCardDragWrapper} ${isDraggablePath ? styles.pointCardDraggable : ""} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
+                    draggable={isDraggablePath}
+                    onDragStart={(event) => handlePathCardDragStart(i, event)}
+                    onDragOver={(event) => handlePathCardDragOver(i, event)}
+                    onDrop={(event) => handlePathCardDrop(i, event)}
+                    onDragEnd={clearPathCardDragState}
+                  >
+                    <PointCard
+                      index={i}
+                      name={p.name ?? `path${i}`}
+                      poseName={p.poseName}
+                      color={p.color}
+                      locked={p.locked}
+                      hidden={Boolean(p.hidden)}
+                      x={coords.x}
+                      y={coords.y}
+                      heading={p.heading}
+                      headingMode={p.headingMode ?? "constant"}
+                      constantHeading={p.constantHeading ?? 0}
+                      startHeading={p.startHeading ?? 0}
+                      endHeading={p.endHeading ?? 0}
+                      controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
+                        id: controlPoint.id,
+                        ...toFieldCoords(controlPoint.nx, controlPoint.ny),
+                      }))}
+                      controlPointCount={(p.controlPoints ?? []).length}
+                      controlsExpanded={p.controlsExpanded ?? true}
+                      isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
+                      onChange={(axis, val) => handleCoordChange(i, axis, val)}
+                      startPoseOptions={i === 0 ? savedPoses.filter((pose) => pose.name.startsWith("START")) : undefined}
+                      onStartPoseSelect={i === 0 ? handleStartPoseSelect : undefined}
+                      onPositionEditStart={beginPositionEdit}
+                      onPositionEditCommit={commitPositionEdit}
+                      onRename={i > 0 ? (name) => handleRenamePath(i, name) : undefined}
+                      onNameEditStart={beginNameEdit}
+                      onNameEditCommit={commitNameEdit}
+                      onHeadingChange={i === 0 ? handleHeadingChange : undefined}
+                      onInterpolationChange={
+                        i > 0 ? (mode) => handlePathInterpolationChange(i, mode) : undefined
+                      }
+                      onPathHeadingChange={
+                        i > 0 ? (field, val) => handlePathHeadingChange(i, field, val) : undefined
+                      }
+                      onToggleLocked={() => handleToggleLocked(i)}
+                      onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
+                      onToggleControlsExpanded={
+                        i > 0 ? () => handleToggleControlsExpanded(i) : undefined
+                      }
+                      onAddControlPoint={i > 0 ? () => handleAddControlPoint(i) : undefined}
+                      onControlPointChange={
+                        i > 0
+                          ? (controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)
+                          : undefined
+                      }
+                      onControlPointEditStart={beginPositionEdit}
+                      onControlPointEditCommit={commitPositionEdit}
+                      canDelete={isShiftPressed}
+                      onDelete={() => handleRemovePoint(i)}
+                    />
+                  </div>
                 );
               })}
             </div>
