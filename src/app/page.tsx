@@ -17,7 +17,6 @@ import {
   parsePathPlannerKotlin,
   parseRobotConstantsKotlin,
   parseSavedPosesKotlin,
-  sanitizeKotlinClassName,
   DEFAULT_ROBOT_CONSTANTS,
   type RobotConstants,
   type SavedPose,
@@ -39,7 +38,6 @@ import {
   mainPointHitRadius,
   normalizeHeading,
   randomColor,
-  isKotlinIdentifierDraft,
   targetPathIndex,
   toFieldCoords,
   toNormalizedCoords,
@@ -111,7 +109,6 @@ const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
 
 export default function PathPlannerPage() {
-  const [autonClassName, setAutonClassName] = useState("AutonPath");
   const [points, setPoints] = useState<Point[]>([
     { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
   ]);
@@ -769,13 +766,11 @@ export default function PathPlannerPage() {
       return;
     }
 
-    const className = sanitizeKotlinClassName(autonClassName);
-    const contents = serializePathPlannerKotlin(points, className, savedPoses);
-    setAutonClassName(className);
+    const contents = serializePathPlannerKotlin(points, savedPoses);
     setDidCopyExport(false);
     setKotlinExport({
-      fileName: `${className}.kt`,
-      subtitle: "Generated Kotlin class",
+      fileName: "Exported Path",
+      subtitle: "defineAutonSequence contents",
       contents,
     });
   };
@@ -826,7 +821,6 @@ export default function PathPlannerPage() {
       return;
     }
 
-    setAutonClassName(importedAuton.className);
     clearHistory();
     setPlannerPoints(importedAuton.points);
     setHoverTarget(null);
@@ -1114,21 +1108,11 @@ export default function PathPlannerPage() {
         <div className={styles.sidebarHeader}>
           <div className={styles.sidebarTitleRow}>
             {sidebarPage === "auton" ? (
-              <input
-                className={styles.autonClassNameInput}
-                value={autonClassName}
-                maxLength={32}
-                onChange={(event) => {
-                  if (!isKotlinIdentifierDraft(event.target.value)) return;
-                  setAutonClassName(event.target.value);
-                }}
-                onBlur={() => setAutonClassName((className) => sanitizeKotlinClassName(className))}
-                aria-label="Auton class name"
-              />
+              <h2 className={styles.sidebarTitle}>Path Editor</h2>
             ) : sidebarPage === "poses" ? (
               <h2 className={styles.sidebarTitle}>Saved Poses</h2>
             ) : (
-              <h2 className={styles.sidebarTitle}>Robot Constants</h2>
+              <h2 className={styles.sidebarTitle}>Constants</h2>
             )}
             <div className={styles.importExportActions}>
               <button
@@ -1189,7 +1173,7 @@ export default function PathPlannerPage() {
                 className={`${styles.secondaryIconButton} ${sidebarPage === "auton" ? styles.activeIconButton : ""}`}
                 onClick={handleSelectAutonClick}
                 aria-label="Select Auton"
-                title={sidebarPage === "auton" ? "Select Auton" : "Auton Paths"}
+                title={sidebarPage === "auton" ? "Select Auton" : "Path Editor"}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>

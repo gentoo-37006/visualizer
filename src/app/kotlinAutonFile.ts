@@ -2,7 +2,6 @@ import { INITIAL_POINT_ID } from "./plannerConstants";
 import type { HeadingInterpolation, Point } from "./plannerTypes";
 import {
   generateId,
-  isKotlinIdentifierDraft,
   normalizeHeading,
   randomColor,
   toFieldCoords,
@@ -10,13 +9,11 @@ import {
 } from "./plannerUtils";
 
 const formatKotlinNumber = (value: number) => value.toFixed(1);
-const DEFAULT_AUTON_CLASS_NAME = "AutonPath";
 const DEFAULT_ROBOT_WIDTH = 16;
 const DEFAULT_ROBOT_LENGTH = 16;
 const POSE_MATCH_EPSILON = 0.05;
 
 export type ParsedKotlinAuton = {
-  className: string;
   points: Point[];
 };
 
@@ -239,17 +236,10 @@ const createUniquePathNames = (points: Point[]) => {
   });
 };
 
-export const sanitizeKotlinClassName = (name: string) => {
-  const trimmedName = name.trim();
-  return isKotlinIdentifierDraft(trimmedName) && trimmedName ? trimmedName : DEFAULT_AUTON_CLASS_NAME;
-};
-
 export const serializePathPlannerKotlin = (
   points: Point[],
-  requestedClassName = DEFAULT_AUTON_CLASS_NAME,
   savedPoses: SavedPose[] = []
 ) => {
-  const className = sanitizeKotlinClassName(requestedClassName);
   const pathPoints = points.slice(1);
   const pathNames = createUniquePathNames(points);
   const pathDeclarations = pathPoints
@@ -269,31 +259,19 @@ export const serializePathPlannerKotlin = (
             ? "tangentHeading()"
             : `constantHeading(${formatKotlinNumber(point.constantHeading ?? 0)})`;
 
-      return `        val ${pathName} = Path(
-${poses.map((pose) => `            ${pose},`).join("\n")}
-        ).${headingCall}`;
+      return `val ${pathName} = Path(
+${poses.map((pose) => `    ${pose},`).join("\n")}
+).${headingCall}`;
     })
     .join("\n\n");
 
   const followPaths = pathPoints
-    .map((_, pathIndex) => `            .followPath(${pathNames[pathIndex]})`)
+    .map((_, pathIndex) => `    .followPath(${pathNames[pathIndex]})`)
     .join("\n");
 
-  return `package org.firstinspires.ftc.teamcode.opmodes.auto
+  return `${pathDeclarations || "// Add paths in the editor before exporting."}
 
-import gentoo.myrelib.Alliance
-import gentoo.myrelib.math.Pose
-import gentoo.myrelib.pathing.Path
-import org.firstinspires.ftc.teamcode.util.AutonSequence
-${savedPoses.length > 0 ? "import org.firstinspires.ftc.teamcode.util.constants.Poses\n" : ""}
-
-class ${className} : Auto(Alliance.BLUE) {
-    override fun defineAutonSequence(builder: AutonSequence.Builder): AutonSequence.Builder {
-${pathDeclarations || "        // Add paths in the editor before exporting."}
-
-        return builder${followPaths ? `\n${followPaths}` : ""}
-    }
-}
+return builder${followPaths ? `\n${followPaths}` : ""}
 `;
 };
 
@@ -356,9 +334,6 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
   };
 
   const pathDefinitions = new Map<string, ParsedPath>();
-  const className = sanitizeKotlinClassName(
-    contents.match(/\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1] ?? DEFAULT_AUTON_CLASS_NAME
-  );
   const pathRegex = /val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*Path\s*\(/g;
   let pathMatch: RegExpExecArray | null;
 
@@ -453,5 +428,5 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     });
   });
 
-  return importedPoints.length > 1 ? { className, points: importedPoints } : null;
+  return importedPoints.length > 1 ? { points: importedPoints } : null;
 };
