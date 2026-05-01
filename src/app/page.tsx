@@ -470,13 +470,18 @@ export default function PathPlannerPage() {
     }
 
     setDraggingPathIndex(index);
-    setDragOverPathIndex(index);
+    setDragOverPathIndex(null);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", points[index].id);
   };
 
   const handlePathCardDragOver = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    if (index <= 0 || draggingPathIndex === null || draggingPathIndex === index) return;
+    if (index <= 0 || draggingPathIndex === null) return;
+    if (draggingPathIndex === index) {
+      if (dragOverPathIndex !== null) setDragOverPathIndex(null);
+      updateCardDragAutoScrollFromPointer(event.clientY);
+      return;
+    }
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     if (dragOverPathIndex !== index) setDragOverPathIndex(index);
@@ -805,6 +810,22 @@ export default function PathPlannerPage() {
     posesInputRef.current?.click();
   };
 
+  const syncStartPoseFromSavedPoses = (nextSavedPoses: SavedPose[]) => {
+    const startPoseName = pointsRef.current[0]?.poseName;
+    if (!startPoseName) return;
+
+    const savedPose = nextSavedPoses.find((pose) => pose.name === startPoseName);
+    if (!savedPose) return;
+
+    const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
+    const nextPoints = pointsRef.current.map((point, index) =>
+      index === 0 ? { ...point, nx, ny } : point
+    );
+    if (!arePointSnapshotsEqual(pointsRef.current, nextPoints)) {
+      setPlannerPoints(nextPoints);
+    }
+  };
+
   const handleImportConstantsClick = () => {
     if (sidebarPage !== "constants") {
       setSidebarPage("constants");
@@ -859,6 +880,7 @@ export default function PathPlannerPage() {
 
       setSavedPoses(importedSavedPoses);
       window.localStorage.setItem(SAVED_POSES_STORAGE_KEY, JSON.stringify(importedSavedPoses));
+      syncStartPoseFromSavedPoses(importedSavedPoses);
       setSidebarPage("poses");
     } catch {
       window.alert("Unable to import this poses file.");
@@ -988,7 +1010,7 @@ export default function PathPlannerPage() {
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
-            style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "pointer" : "default") }}
+            style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "grab" : "default") }}
             viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
           >
             {hasMeasuredField && points.map((p, i) => {
