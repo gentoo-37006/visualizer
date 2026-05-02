@@ -481,7 +481,7 @@ export default function PathPlannerPage() {
           const previousSample = positionSamples[Math.max(0, index - 1)];
           const dx = (nextSample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
           const dy = (previousSample.ny - nextSample.ny) * FIELD_SIZE_INCHES;
-          heading = normalizeHeading((Math.atan2(dy, dx) * 180) / Math.PI);
+          heading = normalizeHeading((Math.atan2(dx, dy) * 180) / Math.PI);
         }
 
         return { nx: sample.nx, ny: sample.ny, heading };
