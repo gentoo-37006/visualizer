@@ -344,14 +344,15 @@ export default function PathPlannerPage() {
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
   const [kotlinExport, setKotlinExport] = useState<{ fileName: string; subtitle: string; contents: string } | null>(null);
   const [didCopyExport, setDidCopyExport] = useState(false);
-  const [savedPoses, setSavedPoses] = useState<SavedPose[]>(loadSavedPoses);
-  const [robotConstants, setRobotConstants] = useState<RobotConstants>(loadRobotConstants);
-  const [motionParameters, setMotionParameters] = useState<MotionParameters>(loadMotionParameters);
+  const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
+  const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
+  const [motionParameters, setMotionParameters] = useState<MotionParameters>(DEFAULT_MOTION_PARAMETERS);
   const [motionParameterDrafts, setMotionParameterDrafts] = useState({
-    maxAngularVelocity: String(loadMotionParameters().maxAngularVelocity),
-    maxForwardAcceleration: String(loadMotionParameters().maxForwardAcceleration),
-    maxLateralAcceleration: String(loadMotionParameters().maxLateralAcceleration),
+    maxAngularVelocity: String(DEFAULT_MOTION_PARAMETERS.maxAngularVelocity),
+    maxForwardAcceleration: String(DEFAULT_MOTION_PARAMETERS.maxForwardAcceleration),
+    maxLateralAcceleration: String(DEFAULT_MOTION_PARAMETERS.maxLateralAcceleration),
   });
+  const [didLoadStoredSettings, setDidLoadStoredSettings] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [areActionsHidden, setAreActionsHidden] = useState(false);
@@ -826,6 +827,23 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
+      const storedMotionParameters = loadMotionParameters();
+      setSavedPoses(loadSavedPoses());
+      setRobotConstants(loadRobotConstants());
+      setMotionParameters(storedMotionParameters);
+      setMotionParameterDrafts({
+        maxAngularVelocity: String(storedMotionParameters.maxAngularVelocity),
+        maxForwardAcceleration: String(storedMotionParameters.maxForwardAcceleration),
+        maxLateralAcceleration: String(storedMotionParameters.maxLateralAcceleration),
+      });
+      setDidLoadStoredSettings(true);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
       setPlannerPoints((currentPoints) =>
         currentPoints.map((point) =>
           point.id === INITIAL_POINT_ID ? { ...point, color: randomColor() } : point
@@ -857,8 +875,9 @@ export default function PathPlannerPage() {
   }, []);
 
   useEffect(() => {
+    if (!didLoadStoredSettings) return;
     window.localStorage.setItem(MOTION_PARAMETERS_STORAGE_KEY, JSON.stringify(motionParameters));
-  }, [motionParameters]);
+  }, [didLoadStoredSettings, motionParameters]);
 
   useEffect(() => {
     if (!isPlaybackRunning) return;
