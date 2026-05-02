@@ -324,7 +324,7 @@ const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: number) =>
 const snapSvgPixel = (value: number) => Math.round(value);
 
 const formatPlaybackTime = (seconds: number) => {
-  const safeSeconds = Math.max(0, seconds);
+  const safeSeconds = Math.max(0, seconds || 0);
   const minutes = Math.floor(safeSeconds / 60);
   const remainingSeconds = safeSeconds - minutes * 60;
   return `${minutes}:${remainingSeconds.toFixed(1).padStart(4, "0")}`;
@@ -427,7 +427,7 @@ export default function PathPlannerPage() {
   const hasActions = orderedSequenceItems.some((item) => item.kind === "action");
 
   const playbackTimeline = useMemo(() => {
-    const angularVelocity = Math.max(1, motionParameters.maxAngularVelocity);
+    const angularVelocity = safeMotionLimit(motionParameters.maxAngularVelocity);
     const maxForwardVelocity = safeMotionLimit(robotConstants.maxForwardVelocity);
     const maxLateralVelocity = safeMotionLimit(robotConstants.maxLateralVelocity);
     const maxForwardAcceleration = safeMotionLimit(motionParameters.maxForwardAcceleration);
@@ -2241,9 +2241,9 @@ export default function PathPlannerPage() {
             className={styles.playbackRange}
             type="range"
             min="0"
-            max={Math.max(0.001, playbackTimeline.totalTime)}
+            max={Math.max(0.001, playbackTimeline.totalTime || 0)}
             step="0.01"
-            value={Math.min(clampedPlaybackTime, Math.max(0.001, playbackTimeline.totalTime))}
+            value={Math.min(clampedPlaybackTime || 0, Math.max(0.001, playbackTimeline.totalTime || 0))}
             style={
               {
                 "--playback-color": playbackAccentColor,
