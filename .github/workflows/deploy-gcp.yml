@@ -34,3 +34,4 @@ jobs:
           region: ${{ env.REGION }}
           source: ./
           flags: '--allow-unauthenticated'
+          wait: true
