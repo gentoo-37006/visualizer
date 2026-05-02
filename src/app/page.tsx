@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -106,7 +107,9 @@ const loadRobotConstants = () => {
 
   try {
     const parsedRobotConstants: unknown = JSON.parse(storedRobotConstants);
-    return isRobotConstants(parsedRobotConstants) ? parsedRobotConstants : DEFAULT_ROBOT_CONSTANTS;
+    return isRobotConstants(parsedRobotConstants)
+      ? { ...DEFAULT_ROBOT_CONSTANTS, ...parsedRobotConstants }
+      : DEFAULT_ROBOT_CONSTANTS;
   } catch {
     window.localStorage.removeItem(ROBOT_CONSTANTS_STORAGE_KEY);
     return DEFAULT_ROBOT_CONSTANTS;
@@ -127,11 +130,25 @@ type PlannerSnapshot = {
 };
 type MotionParameters = {
   maxAngularVelocity: number;
+  maxForwardAcceleration: number;
+  maxLateralAcceleration: number;
 };
 type PlaybackPose = {
   nx: number;
   ny: number;
   heading: number;
+  color?: string;
+};
+type MotionProfile = {
+  distance: number;
+  acceleration: number;
+  cruiseVelocity: number;
+  brakeAcceleration: number;
+  accelerationTime: number;
+  cruiseTime: number;
+  brakeTime: number;
+  accelerationDistance: number;
+  cruiseDistance: number;
 };
 type PlaybackSegment =
   | {
@@ -140,6 +157,8 @@ type PlaybackSegment =
       duration: number;
       point: Point;
       samples: PlaybackPose[];
+      cumulativeDistances: number[];
+      profile: MotionProfile;
     }
   | {
       kind: "wait";
@@ -152,6 +171,7 @@ type PlaybackSegment =
       startTime: number;
       duration: number;
       pose: PlaybackPose;
+      color: string;
       startHeading: number;
       endHeading: number;
     };
@@ -160,6 +180,8 @@ const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
 const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
   maxAngularVelocity: 180,
+  maxForwardAcceleration: 60,
+  maxLateralAcceleration: 60,
 };
 
 const isMotionParameters = (value: unknown): value is MotionParameters =>
@@ -212,6 +234,95 @@ const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny
   return Math.hypot(bx - ax, by - ay);
 };
 
+const safeMotionLimit = (value: number, fallback = 1) =>
+  Number.isFinite(value) && Math.abs(value) > 0.001 ? Math.abs(value) : fallback;
+
+const getDirectionalMotionLimit = (
+  dx: number,
+  dy: number,
+  heading: number,
+  forwardLimit: number,
+  lateralLimit: number
+) => {
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 0.001) return Math.max(forwardLimit, lateralLimit);
+
+  const unitX = dx / distance;
+  const unitY = dy / distance;
+  const headingRadians = (heading * Math.PI) / 180;
+  const forwardX = Math.sin(headingRadians);
+  const forwardY = Math.cos(headingRadians);
+  const lateralX = Math.cos(headingRadians);
+  const lateralY = -Math.sin(headingRadians);
+  const forwardComponent = Math.abs(unitX * forwardX + unitY * forwardY);
+  const lateralComponent = Math.abs(unitX * lateralX + unitY * lateralY);
+  const limits = [];
+  if (forwardComponent > 0.001) limits.push(forwardLimit / forwardComponent);
+  if (lateralComponent > 0.001) limits.push(lateralLimit / lateralComponent);
+  return Math.min(...limits);
+};
+
+const createMotionProfile = (
+  distance: number,
+  maxVelocity: number,
+  acceleration: number,
+  brakeAcceleration: number
+): MotionProfile => {
+  const safeDistance = Math.max(0, distance);
+  const safeMaxVelocity = safeMotionLimit(maxVelocity);
+  const safeAcceleration = safeMotionLimit(acceleration);
+  const safeBrakeAcceleration = safeMotionLimit(brakeAcceleration, safeAcceleration);
+  const peakVelocity = Math.sqrt(
+    (2 * safeAcceleration * safeBrakeAcceleration * safeDistance) /
+      (safeAcceleration + safeBrakeAcceleration)
+  );
+  const cruiseVelocity = Math.min(safeMaxVelocity, peakVelocity);
+  const accelerationTime = cruiseVelocity / safeAcceleration;
+  const brakeTime = cruiseVelocity / safeBrakeAcceleration;
+  const accelerationDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeAcceleration);
+  const brakeDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeBrakeAcceleration);
+  const cruiseDistance = Math.max(0, safeDistance - accelerationDistance - brakeDistance);
+  const cruiseTime = cruiseDistance / cruiseVelocity;
+
+  return {
+    distance: safeDistance,
+    acceleration: safeAcceleration,
+    cruiseVelocity,
+    brakeAcceleration: safeBrakeAcceleration,
+    accelerationTime,
+    cruiseTime,
+    brakeTime,
+    accelerationDistance,
+    cruiseDistance,
+  };
+};
+
+const getMotionProfileDuration = (profile: MotionProfile) =>
+  profile.accelerationTime + profile.cruiseTime + profile.brakeTime;
+
+const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: number) => {
+  const safeTime = Math.max(0, Math.min(time, getMotionProfileDuration(profile)));
+  if (safeTime <= profile.accelerationTime) {
+    return 0.5 * profile.acceleration * safeTime * safeTime;
+  }
+
+  const cruiseEndTime = profile.accelerationTime + profile.cruiseTime;
+  if (safeTime <= cruiseEndTime) {
+    return profile.accelerationDistance + profile.cruiseVelocity * (safeTime - profile.accelerationTime);
+  }
+
+  const brakeElapsed = safeTime - cruiseEndTime;
+  return Math.min(
+    profile.distance,
+    profile.accelerationDistance +
+      profile.cruiseDistance +
+      profile.cruiseVelocity * brakeElapsed -
+      0.5 * profile.brakeAcceleration * brakeElapsed * brakeElapsed
+  );
+};
+
+const snapSvgPixel = (value: number) => Math.round(value);
+
 const formatPlaybackTime = (seconds: number) => {
   const safeSeconds = Math.max(0, seconds);
   const minutes = Math.floor(safeSeconds / 60);
@@ -238,9 +349,12 @@ export default function PathPlannerPage() {
   const [motionParameters, setMotionParameters] = useState<MotionParameters>(loadMotionParameters);
   const [motionParameterDrafts, setMotionParameterDrafts] = useState({
     maxAngularVelocity: String(loadMotionParameters().maxAngularVelocity),
+    maxForwardAcceleration: String(loadMotionParameters().maxForwardAcceleration),
+    maxLateralAcceleration: String(loadMotionParameters().maxLateralAcceleration),
   });
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
+  const [areActionsHidden, setAreActionsHidden] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
   const [draggingPathIndex, setDraggingPathIndex] = useState<number | null>(null);
   const [dragOverPathIndex, setDragOverPathIndex] = useState<number | null>(null);
@@ -309,19 +423,23 @@ export default function PathPlannerPage() {
     () => getSequenceItemsWithPaths(sequenceItems, points),
     [sequenceItems, points]
   );
+  const hasActions = orderedSequenceItems.some((item) => item.kind === "action");
 
   const playbackTimeline = useMemo(() => {
-    const pathSpeed = Math.max(
-      1,
-      Math.hypot(robotConstants.maxForwardVelocity, robotConstants.maxLateralVelocity)
-    );
     const angularVelocity = Math.max(1, motionParameters.maxAngularVelocity);
+    const maxForwardVelocity = safeMotionLimit(robotConstants.maxForwardVelocity);
+    const maxLateralVelocity = safeMotionLimit(robotConstants.maxLateralVelocity);
+    const maxForwardAcceleration = safeMotionLimit(motionParameters.maxForwardAcceleration);
+    const maxLateralAcceleration = safeMotionLimit(motionParameters.maxLateralAcceleration);
+    const forwardBrakeAcceleration = safeMotionLimit(robotConstants.forwardBrakeStrength, maxForwardAcceleration);
+    const lateralBrakeAcceleration = safeMotionLimit(robotConstants.lateralBrakeStrength, maxLateralAcceleration);
     const segments: PlaybackSegment[] = [];
     let elapsedTime = 0;
     let currentPose: PlaybackPose = {
       nx: points[0]?.nx ?? 0.5,
       ny: points[0]?.ny ?? 0.5,
       heading: points[0]?.heading ?? 0,
+      color: points[0]?.color ?? INITIAL_POINT_COLOR,
     };
 
     orderedSequenceItems.forEach((item) => {
@@ -352,10 +470,6 @@ export default function PathPlannerPage() {
       const positionSamples = Array.from({ length: sampleCount + 1 }, (_, index) =>
         interpolateBezierPoint(bezierPoints, index / sampleCount)
       );
-      const distance = positionSamples.slice(1).reduce(
-        (totalDistance, sample, index) => totalDistance + measureFieldDistance(positionSamples[index], sample),
-        0
-      );
       const headingMode = point.headingMode ?? "constant";
       const samples = positionSamples.map((sample, index) => {
         const t = index / Math.max(1, positionSamples.length - 1);
@@ -372,6 +486,39 @@ export default function PathPlannerPage() {
 
         return { nx: sample.nx, ny: sample.ny, heading };
       });
+      const cumulativeDistances = [0];
+      const motionLimits = positionSamples.slice(1).reduce(
+        (limits, sample, index) => {
+          const previousSample = positionSamples[index];
+          const segmentDistance = measureFieldDistance(previousSample, sample);
+          cumulativeDistances.push(cumulativeDistances[cumulativeDistances.length - 1] + segmentDistance);
+          if (segmentDistance <= 0.001) return limits;
+
+          const dx = (sample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
+          const dy = (previousSample.ny - sample.ny) * FIELD_SIZE_INCHES;
+          const heading = samples[index]?.heading ?? point.constantHeading ?? 0;
+          return {
+            maxVelocity: Math.min(
+              limits.maxVelocity,
+              getDirectionalMotionLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity)
+            ),
+            acceleration: Math.min(
+              limits.acceleration,
+              getDirectionalMotionLimit(dx, dy, heading, maxForwardAcceleration, maxLateralAcceleration)
+            ),
+            brakeAcceleration: Math.min(
+              limits.brakeAcceleration,
+              getDirectionalMotionLimit(dx, dy, heading, forwardBrakeAcceleration, lateralBrakeAcceleration)
+            ),
+          };
+        },
+        {
+          maxVelocity: Math.max(maxForwardVelocity, maxLateralVelocity),
+          acceleration: Math.max(maxForwardAcceleration, maxLateralAcceleration),
+          brakeAcceleration: Math.max(forwardBrakeAcceleration, lateralBrakeAcceleration),
+        }
+      );
+      const distance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
       const pathStartHeading = samples[0]?.heading ?? currentPose.heading;
       const rotateDegrees = Math.abs(normalizeHeading(pathStartHeading - currentPose.heading));
       if (rotateDegrees > 0.001) {
@@ -381,6 +528,7 @@ export default function PathPlannerPage() {
           startTime: elapsedTime,
           duration: rotateDuration,
           pose: currentPose,
+          color: point.color,
           startHeading: currentPose.heading,
           endHeading: pathStartHeading,
         });
@@ -388,7 +536,13 @@ export default function PathPlannerPage() {
         currentPose = { ...currentPose, heading: pathStartHeading };
       }
 
-      const duration = Math.max(distance / pathSpeed, 0.001);
+      const profile = createMotionProfile(
+        distance,
+        motionLimits.maxVelocity,
+        motionLimits.acceleration,
+        motionLimits.brakeAcceleration
+      );
+      const duration = Math.max(getMotionProfileDuration(profile), 0.001);
 
       segments.push({
         kind: "path",
@@ -396,25 +550,46 @@ export default function PathPlannerPage() {
         duration,
         point,
         samples,
+        cumulativeDistances,
+        profile,
       });
       elapsedTime += duration;
-      currentPose = samples[samples.length - 1] ?? currentPose;
+      currentPose = {
+        ...(samples[samples.length - 1] ?? currentPose),
+        color: point.color,
+      };
     });
 
     return { segments, totalTime: elapsedTime };
-  }, [motionParameters.maxAngularVelocity, orderedSequenceItems, points, robotConstants.maxForwardVelocity, robotConstants.maxLateralVelocity]);
+  }, [
+    motionParameters.maxAngularVelocity,
+    motionParameters.maxForwardAcceleration,
+    motionParameters.maxLateralAcceleration,
+    orderedSequenceItems,
+    points,
+    robotConstants.forwardBrakeStrength,
+    robotConstants.lateralBrakeStrength,
+    robotConstants.maxForwardVelocity,
+    robotConstants.maxLateralVelocity,
+  ]);
   const clampedPlaybackTime = Math.min(playbackTime, playbackTimeline.totalTime);
+
+  const activePlaybackSegment = useMemo(
+    () =>
+      playbackTimeline.segments.find(
+        (segment) => clampedPlaybackTime >= segment.startTime && clampedPlaybackTime <= segment.startTime + segment.duration
+      ) ?? playbackTimeline.segments[playbackTimeline.segments.length - 1],
+    [clampedPlaybackTime, playbackTimeline.segments]
+  );
 
   const playbackPose = useMemo(() => {
     const initialPose: PlaybackPose = {
       nx: points[0]?.nx ?? 0.5,
       ny: points[0]?.ny ?? 0.5,
       heading: points[0]?.heading ?? 0,
+      color: points[0]?.color ?? INITIAL_POINT_COLOR,
     };
-    const activeSegment =
-      playbackTimeline.segments.find(
-        (segment) => clampedPlaybackTime >= segment.startTime && clampedPlaybackTime <= segment.startTime + segment.duration
-      ) ?? playbackTimeline.segments[playbackTimeline.segments.length - 1];
+    const activeSegment = activePlaybackSegment;
     if (!activeSegment) return initialPose;
     if (activeSegment.kind === "wait") return activeSegment.pose;
     if (activeSegment.kind === "rotate") {
@@ -425,19 +600,71 @@ export default function PathPlannerPage() {
       };
     }
 
-    const t = Math.max(0, Math.min(1, (clampedPlaybackTime - activeSegment.startTime) / activeSegment.duration));
-    const samplePosition = t * Math.max(0, activeSegment.samples.length - 1);
-    const startIndex = Math.floor(samplePosition);
+    const segmentTime = clampedPlaybackTime - activeSegment.startTime;
+    const pathDistance = getMotionProfileDistanceAtTime(activeSegment.profile, segmentTime);
+    const startIndex = Math.max(
+      0,
+      activeSegment.cumulativeDistances.findIndex((distance) => distance >= pathDistance) - 1
+    );
     const endIndex = Math.min(activeSegment.samples.length - 1, startIndex + 1);
-    const localT = samplePosition - startIndex;
+    const startDistance = activeSegment.cumulativeDistances[startIndex] ?? 0;
+    const endDistance = activeSegment.cumulativeDistances[endIndex] ?? startDistance;
+    const localT =
+      endDistance > startDistance ? Math.max(0, Math.min(1, (pathDistance - startDistance) / (endDistance - startDistance))) : 0;
     const startSample = activeSegment.samples[startIndex] ?? initialPose;
     const endSample = activeSegment.samples[endIndex] ?? startSample;
     return {
       nx: interpolateNumber(startSample.nx, endSample.nx, localT),
       ny: interpolateNumber(startSample.ny, endSample.ny, localT),
       heading: interpolateHeading(startSample.heading, endSample.heading, localT),
+      color: activeSegment.point.color,
     };
-  }, [clampedPlaybackTime, playbackTimeline.segments, points]);
+  }, [activePlaybackSegment, clampedPlaybackTime, points]);
+
+  const playbackAccentColor =
+    activePlaybackSegment?.kind === "path"
+      ? activePlaybackSegment.point.color
+      : activePlaybackSegment?.kind === "rotate"
+        ? activePlaybackSegment.color
+        : activePlaybackSegment?.pose.color ?? points[0]?.color ?? INITIAL_POINT_COLOR;
+
+  const playbackTrackBackground = useMemo(() => {
+    if (playbackTimeline.totalTime <= 0) return "rgba(148, 163, 184, 0.35)";
+
+    const stops: string[] = [];
+    playbackTimeline.segments.forEach((segment) => {
+      const startPercent = (segment.startTime / playbackTimeline.totalTime) * 100;
+      const endPercent = ((segment.startTime + segment.duration) / playbackTimeline.totalTime) * 100;
+      const segmentColor =
+        segment.kind === "path"
+          ? segment.point.color
+          : segment.kind === "rotate"
+            ? segment.color
+            : "rgba(148, 163, 184, 0.35)";
+      stops.push(`${segmentColor} ${startPercent.toFixed(3)}%`, `${segmentColor} ${endPercent.toFixed(3)}%`);
+    });
+
+    return `linear-gradient(to right, ${stops.join(", ")})`;
+  }, [playbackTimeline.segments, playbackTimeline.totalTime]);
+
+  const robotSvgFrame = useMemo(() => {
+    const center = toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize);
+    const width = (robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2);
+    const height = (robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2);
+    const x = snapSvgPixel(center.x - width / 2);
+    const y = snapSvgPixel(center.y - height / 2);
+    const snappedWidth = Math.max(1, snapSvgPixel(width));
+    const snappedHeight = Math.max(1, snapSvgPixel(height));
+
+    return {
+      x,
+      y,
+      width: snappedWidth,
+      height: snappedHeight,
+      centerX: x + snappedWidth / 2,
+      centerY: y + snappedHeight / 2,
+    };
+  }, [fieldSize, playbackPose.nx, playbackPose.ny, robotConstants.length, robotConstants.width]);
 
   const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
     arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
@@ -635,10 +862,16 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     if (!isPlaybackRunning) return;
-    let previousTime = performance.now();
+    let previousTime: number | null = null;
     let frameId: number;
 
     const tick = (time: number) => {
+      if (previousTime === null) {
+        previousTime = time;
+        frameId = requestAnimationFrame(tick);
+        return;
+      }
+
       const deltaSeconds = (time - previousTime) / 1000;
       previousTime = time;
       setPlaybackTime((currentTime) => {
@@ -1530,17 +1763,12 @@ export default function PathPlannerPage() {
             {hasMeasuredField && (
               <image
                 href="/robot.png"
-                x={
-                  toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).x -
-                  ((robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2)) / 2
-                }
-                y={
-                  toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).y -
-                  ((robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2)) / 2
-                }
-                width={(robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2)}
-                height={(robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2)}
-                transform={`rotate(${playbackPose.heading - 90} ${toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).x} ${toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize).y})`}
+                x={robotSvgFrame.x}
+                y={robotSvgFrame.y}
+                width={robotSvgFrame.width}
+                height={robotSvgFrame.height}
+                preserveAspectRatio="none"
+                transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}
                 opacity="0.92"
                 pointerEvents="none"
               />
@@ -1731,6 +1959,8 @@ export default function PathPlannerPage() {
                 const isBeingDragged = draggingPathIndex === sequenceIndex;
 
                 if (item.kind === "action") {
+                  if (areActionsHidden) return null;
+
                   return (
                     <div
                       key={item.id}
@@ -1835,6 +2065,29 @@ export default function PathPlannerPage() {
                 </svg>
                 Add Action
               </button>
+              <button
+                className={`${styles.addButton} ${styles.toggleActionsButton} ${areActionsHidden ? styles.actionsHiddenButton : ""}`}
+                onClick={() => setAreActionsHidden((currentValue) => !currentValue)}
+                disabled={!hasActions}
+                aria-pressed={areActionsHidden}
+                aria-label={areActionsHidden ? "Show all actions" : "Hide all actions"}
+                title={areActionsHidden ? "Show actions" : "Hide actions"}
+              >
+                {areActionsHidden ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.9 10.9 0 0 1 12 19c-6.5 0-10-7-10-7a18.4 18.4 0 0 1 5.06-5.94"></path>
+                    <path d="M9.9 4.24A10.6 10.6 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19"></path>
+                    <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"></path>
+                    <line x1="2" y1="2" x2="22" y2="22"></line>
+                  </svg>
+                )}
+                {areActionsHidden ? "Show Actions" : "Hide Actions"}
+              </button>
             </div>
           </>
         ) : sidebarPage === "poses" ? (
@@ -1863,7 +2116,7 @@ export default function PathPlannerPage() {
           <div className={styles.pointsList}>
             <div className={styles.poseCard}>
               <div className={styles.poseName}>Robot Dimensions</div>
-              <div className={styles.poseCoordRow}>
+              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
                 <div className={styles.inputGroup}>
                   <label className={styles.inputLabel}>Width (in)</label>
                   <input className={styles.inputField} value={robotConstants.width.toFixed(2)} readOnly />
@@ -1875,21 +2128,21 @@ export default function PathPlannerPage() {
               </div>
             </div>
             <div className={styles.poseCard}>
-              <div className={styles.poseName}>Brake Velocity</div>
-              <div className={styles.poseCoordRow}>
+              <div className={styles.poseName}>Braking Acceleration</div>
+              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
                 <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Forward (in/s)</label>
+                  <label className={styles.inputLabel}>Forward (in/s^2)</label>
                   <input className={styles.inputField} value={robotConstants.forwardBrakeStrength.toFixed(5)} readOnly />
                 </div>
                 <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Lateral (in/s)</label>
+                  <label className={styles.inputLabel}>Lateral (in/s^2)</label>
                   <input className={styles.inputField} value={robotConstants.lateralBrakeStrength.toFixed(5)} readOnly />
                 </div>
               </div>
             </div>
             <div className={styles.poseCard}>
               <div className={styles.poseName}>Max Velocity</div>
-              <div className={styles.poseCoordRow}>
+              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
                 <div className={styles.inputGroup}>
                   <label className={styles.inputLabel}>Forward (in/s)</label>
                   <input className={styles.inputField} value={robotConstants.maxForwardVelocity.toFixed(5)} readOnly />
@@ -1901,8 +2154,35 @@ export default function PathPlannerPage() {
               </div>
             </div>
             <div className={styles.poseCard}>
+              <div className={styles.poseName}>Acceleration</div>
+              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Forward (in/s^2)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={styles.inputField}
+                    value={motionParameterDrafts.maxForwardAcceleration}
+                    onChange={(event) => updateMotionParameter("maxForwardAcceleration", event.target.value)}
+                    onBlur={() => formatMotionParameter("maxForwardAcceleration")}
+                  />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Lateral (in/s^2)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={styles.inputField}
+                    value={motionParameterDrafts.maxLateralAcceleration}
+                    onChange={(event) => updateMotionParameter("maxLateralAcceleration", event.target.value)}
+                    onBlur={() => formatMotionParameter("maxLateralAcceleration")}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.poseCard}>
               <div className={styles.poseName}>Angular Velocity</div>
-              <div className={styles.poseCoordRow}>
+              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
                 <div className={styles.inputGroup}>
                   <label className={styles.inputLabel}>(deg/s)</label>
                   <input
@@ -1945,6 +2225,13 @@ export default function PathPlannerPage() {
             max={Math.max(0.001, playbackTimeline.totalTime)}
             step="0.01"
             value={Math.min(clampedPlaybackTime, Math.max(0.001, playbackTimeline.totalTime))}
+            style={
+              {
+                "--playback-color": playbackAccentColor,
+                "--playback-track": playbackTrackBackground,
+                accentColor: playbackAccentColor,
+              } as CSSProperties
+            }
             onChange={(event) => {
               setIsPlaybackRunning(false);
               setPlaybackTime(Number(event.target.value));
