@@ -1,17 +1,68 @@
-const CACHE_NAME = "auton-path-planner-v2";
+const CACHE_NAME = "auton-path-planner-v3";
 const APP_SHELL_URLS = [
-  "/",
   "/favicon.ico",
   "/fields/decode.webp",
 ];
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL_URLS))
-      .then(() => self.skipWaiting())
+async function precacheAppShell() {
+  const cache = await caches.open(CACHE_NAME);
+  await cache.addAll(APP_SHELL_URLS);
+
+  const response = await fetch("/", { cache: "reload" });
+  if (!response.ok) return;
+
+  await cache.put("/", response.clone());
+  const html = await response.text();
+  const assetUrls = extractLocalAssetUrls(html);
+  await Promise.all(
+    assetUrls.map((assetUrl) =>
+      fetch(assetUrl, { cache: "reload" })
+        .then((assetResponse) => {
+          if (assetResponse.ok) return cache.put(assetUrl, assetResponse);
+        })
+        .catch(() => {})
+    )
   );
+}
+
+function extractLocalAssetUrls(html) {
+  const urls = new Set(APP_SHELL_URLS);
+  const assetRegex = /\b(?:href|src)="([^"]+)"/g;
+  let match;
+
+  while ((match = assetRegex.exec(html)) !== null) {
+    const assetUrl = match[1];
+    if (
+      assetUrl.startsWith("/_next/") ||
+      assetUrl.startsWith("/fields/") ||
+      assetUrl === "/favicon.ico"
+    ) {
+      urls.add(assetUrl);
+    }
+  }
+
+  return [...urls];
+}
+
+async function cacheAppShellResponse(response) {
+  const cache = await caches.open(CACHE_NAME);
+  await cache.put("/", response.clone());
+
+  const html = await response.text();
+  const assetUrls = extractLocalAssetUrls(html);
+  await Promise.all(
+    assetUrls.map((assetUrl) =>
+      fetch(assetUrl, { cache: "reload" })
+        .then((assetResponse) => {
+          if (assetResponse.ok) return cache.put(assetUrl, assetResponse);
+        })
+        .catch(() => {})
+    )
+  );
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(precacheAppShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -39,8 +90,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", responseClone));
+          cacheAppShellResponse(response.clone());
           return response;
         })
         .catch(() => caches.match("/") || Response.error())
