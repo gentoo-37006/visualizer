@@ -1699,6 +1699,7 @@ export default function PathPlannerPage() {
             alt="Field Map"
             fill
             priority
+            unoptimized
             sizes="(max-width: 768px) 100vw, (max-height: 100vh) 100vh, 1000px"
             className={styles.fieldImage}
           />

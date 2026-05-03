@@ -1,7 +1,13 @@
-const CACHE_NAME = "auton-path-planner-v3";
+const CACHE_NAME = "auton-path-planner-v4";
 const APP_SHELL_URLS = [
   "/favicon.ico",
   "/fields/decode.webp",
+  "/robot.png",
+  "/file.svg",
+  "/globe.svg",
+  "/next.svg",
+  "/vercel.svg",
+  "/window.svg",
 ];
 
 async function precacheAppShell() {
@@ -35,6 +41,7 @@ function extractLocalAssetUrls(html) {
     if (
       assetUrl.startsWith("/_next/") ||
       assetUrl.startsWith("/fields/") ||
+      assetUrl === "/robot.png" ||
       assetUrl === "/favicon.ico"
     ) {
       urls.add(assetUrl);
