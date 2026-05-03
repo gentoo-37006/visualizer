@@ -20,6 +20,8 @@ type PointCardProps = {
   constantHeading: number;
   startHeading: number;
   endHeading: number;
+  linearStartT: number;
+  linearEndT: number;
   controlPoints: Array<{ id: string; x: number; y: number }>;
   controlPointCount: number;
   controlsExpanded: boolean;
@@ -60,6 +62,8 @@ export function PointCard({
   constantHeading,
   startHeading,
   endHeading,
+  linearStartT,
+  linearEndT,
   controlPoints,
   controlPointCount,
   controlsExpanded,
@@ -110,7 +114,11 @@ export function PointCard({
           ? constantHeading
           : axis === "start"
             ? startHeading
-            : endHeading;
+            : axis === "end"
+              ? endHeading
+              : axis === "startT"
+                ? linearStartT
+                : linearEndT;
       setDraftPathHeading(value.toFixed(1));
     }
   };
@@ -118,7 +126,7 @@ export function PointCard({
   const commitEdit = (axis: "x" | "y" | "heading" | PathHeadingField, val: string) => {
     if (axis === "heading") {
       onHeadingChange?.(val);
-    } else if (axis === "constant" || axis === "start" || axis === "end") {
+    } else if (axis === "constant" || axis === "start" || axis === "end" || axis === "startT" || axis === "endT") {
       onPathHeadingChange?.(axis, val);
     } else {
       onChange(axis, val);
@@ -398,6 +406,36 @@ export function PointCard({
                     }}
                     onBlur={(e) => commitEdit("end", e.target.value)}
                     onKeyDown={(e) => handleKeyDown(e, "end", e.currentTarget.value)}
+                  />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Start T</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={styles.inputField}
+                    value={editingAxis === "startT" ? draftPathHeading : linearStartT.toFixed(1)}
+                    onFocus={() => startEditing("startT")}
+                    onChange={(e) => {
+                      if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                    }}
+                    onBlur={(e) => commitEdit("startT", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, "startT", e.currentTarget.value)}
+                  />
+                </div>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>End T</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={styles.inputField}
+                    value={editingAxis === "endT" ? draftPathHeading : linearEndT.toFixed(1)}
+                    onFocus={() => startEditing("endT")}
+                    onChange={(e) => {
+                      if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                    }}
+                    onBlur={(e) => commitEdit("endT", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, "endT", e.currentTarget.value)}
                   />
                 </div>
               </>

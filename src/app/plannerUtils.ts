@@ -46,6 +46,8 @@ export const createDefaultHeadingValues = () => ({
   constantHeading: 0,
   startHeading: 0,
   endHeading: 0,
+  linearStartT: 0,
+  linearEndT: 1,
   controlPoints: [] as ControlPoint[],
   controlsExpanded: true,
 });

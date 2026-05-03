@@ -69,7 +69,8 @@ const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
     (pose) =>
       typeof pose?.name === "string" &&
       typeof pose?.x === "number" &&
-      typeof pose?.y === "number"
+      typeof pose?.y === "number" &&
+      (typeof pose?.heading === "number" || pose?.heading === undefined)
   );
 
 const loadSavedPoses = () => {
@@ -81,7 +82,11 @@ const loadSavedPoses = () => {
   try {
     const parsedSavedPoses: unknown = JSON.parse(storedSavedPoses);
     return isSavedPoseArray(parsedSavedPoses)
-      ? parsedSavedPoses.map((pose) => ({ ...pose, name: stripStartPosePrefix(pose.name) }))
+      ? parsedSavedPoses.map((pose) => ({
+          ...pose,
+          heading: pose.heading ?? 0,
+          name: stripStartPosePrefix(pose.name),
+        }))
       : [];
   } catch {
     window.localStorage.removeItem(SAVED_POSES_STORAGE_KEY);
@@ -211,6 +216,20 @@ const interpolateNumber = (start: number, end: number, t: number) => start + (en
 const interpolateHeading = (start: number, end: number, t: number) => {
   const delta = normalizeHeading(end - start);
   return normalizeHeading(start + delta * t);
+};
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const smoothInterpolationT = (t: number) => t * t * (3 - 2 * t);
+
+const interpolateHeadingRange = (start: number, end: number, t: number, startT = 0, endT = 1) => {
+  const clampedStartT = clamp01(startT);
+  const clampedEndT = clamp01(endT);
+  if (clampedEndT <= clampedStartT) return t < clampedStartT ? normalizeHeading(start) : normalizeHeading(end);
+  if (t <= clampedStartT) return normalizeHeading(start);
+  if (t >= clampedEndT) return normalizeHeading(end);
+  const localT = (t - clampedStartT) / (clampedEndT - clampedStartT);
+  return interpolateHeading(start, end, smoothInterpolationT(localT));
 };
 
 const interpolateBezierPoint = (points: Array<{ nx: number; ny: number }>, t: number) => {
@@ -476,7 +495,13 @@ export default function PathPlannerPage() {
         const t = index / Math.max(1, positionSamples.length - 1);
         let heading = point.constantHeading ?? 0;
         if (headingMode === "linear") {
-          heading = interpolateHeading(point.startHeading ?? 0, point.endHeading ?? 0, t);
+          heading = interpolateHeadingRange(
+            point.startHeading ?? 0,
+            point.endHeading ?? 0,
+            t,
+            point.linearStartT ?? 0,
+            point.linearEndT ?? 1
+          );
         } else if (headingMode === "tangential") {
           const nextSample = positionSamples[Math.min(positionSamples.length - 1, index + 1)];
           const previousSample = positionSamples[Math.max(0, index - 1)];
@@ -612,12 +637,24 @@ export default function PathPlannerPage() {
     const endDistance = activeSegment.cumulativeDistances[endIndex] ?? startDistance;
     const localT =
       endDistance > startDistance ? Math.max(0, Math.min(1, (pathDistance - startDistance) / (endDistance - startDistance))) : 0;
+    const bezierT = (startIndex + localT) / Math.max(1, activeSegment.samples.length - 1);
     const startSample = activeSegment.samples[startIndex] ?? initialPose;
     const endSample = activeSegment.samples[endIndex] ?? startSample;
+    const headingMode = activeSegment.point.headingMode ?? "constant";
+    const heading =
+      headingMode === "linear"
+        ? interpolateHeadingRange(
+            activeSegment.point.startHeading ?? 0,
+            activeSegment.point.endHeading ?? 0,
+            bezierT,
+            activeSegment.point.linearStartT ?? 0,
+            activeSegment.point.linearEndT ?? 1
+          )
+        : interpolateHeading(startSample.heading, endSample.heading, localT);
     return {
       nx: interpolateNumber(startSample.nx, endSample.nx, localT),
       ny: interpolateNumber(startSample.ny, endSample.ny, localT),
-      heading: interpolateHeading(startSample.heading, endSample.heading, localT),
+      heading,
       color: activeSegment.point.color,
     };
   }, [activePlaybackSegment, clampedPlaybackTime, points]);
@@ -1353,7 +1390,9 @@ export default function PathPlannerPage() {
 
     const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
     const nextPoints = pointsRef.current.map((point, index) =>
-      index === 0 ? { ...point, nx, ny, poseName: stripStartPosePrefix(savedPose.name) } : point
+      index === 0
+        ? { ...point, nx, ny, heading: savedPose.heading ?? 0, poseName: stripStartPosePrefix(savedPose.name) }
+        : point
     );
     pushCurrentSnapshotIfChanged(nextPoints);
     setPlannerPoints(nextPoints);
@@ -1392,24 +1431,28 @@ export default function PathPlannerPage() {
   };
 
   const handlePathHeadingChange = (index: number, field: PathHeadingField, value: string) => {
-    const heading = parseFloat(value);
-    if (isNaN(heading)) return;
+    const parsedValue = parseFloat(value);
+    if (isNaN(parsedValue)) return;
 
-    const normalizedHeading = normalizeHeading(heading);
     const key =
       field === "constant"
         ? "constantHeading"
         : field === "start"
           ? "startHeading"
-          : "endHeading";
+          : field === "end"
+            ? "endHeading"
+            : field === "startT"
+              ? "linearStartT"
+              : "linearEndT";
+    const nextValue = field === "startT" || field === "endT" ? clamp01(parsedValue) : normalizeHeading(parsedValue);
 
     const nextPoints = pointsRef.current.map((point, i) =>
-      i === index ? { ...point, [key]: normalizedHeading } : point
+      i === index ? { ...point, [key]: nextValue } : point
     );
     pushCurrentSnapshotIfChanged(nextPoints);
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
-        i === index ? { ...point, [key]: normalizedHeading } : point
+        i === index ? { ...point, [key]: nextValue } : point
       )
     );
   };
@@ -1476,7 +1519,7 @@ export default function PathPlannerPage() {
 
     const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
     const nextPoints = pointsRef.current.map((point, index) =>
-      index === 0 ? { ...point, nx, ny } : point
+      index === 0 ? { ...point, nx, ny, heading: savedPose.heading ?? 0 } : point
     );
     if (!arePointSnapshotsEqual(pointsRef.current, nextPoints)) {
       setPlannerPoints(nextPoints);
@@ -1946,6 +1989,8 @@ export default function PathPlannerPage() {
                     constantHeading={p.constantHeading ?? 0}
                     startHeading={p.startHeading ?? 0}
                     endHeading={p.endHeading ?? 0}
+                    linearStartT={p.linearStartT ?? 0}
+                    linearEndT={p.linearEndT ?? 1}
                     controlPoints={[]}
                     controlPointCount={0}
                     controlsExpanded={false}
@@ -2039,6 +2084,8 @@ export default function PathPlannerPage() {
                       constantHeading={p.constantHeading ?? 0}
                       startHeading={p.startHeading ?? 0}
                       endHeading={p.endHeading ?? 0}
+                      linearStartT={p.linearStartT ?? 0}
+                      linearEndT={p.linearEndT ?? 1}
                       controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
                         id: controlPoint.id,
                         ...toFieldCoords(controlPoint.nx, controlPoint.ny),
@@ -2123,6 +2170,10 @@ export default function PathPlannerPage() {
                     <div className={styles.inputGroup}>
                       <label className={styles.inputLabel}>Y (in)</label>
                       <input className={styles.inputField} value={pose.y.toFixed(1)} readOnly />
+                    </div>
+                    <div className={styles.inputGroup}>
+                      <label className={styles.inputLabel}>Heading (deg)</label>
+                      <input className={styles.inputField} value={(pose.heading ?? 0).toFixed(1)} readOnly />
                     </div>
                   </div>
                 </div>

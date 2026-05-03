@@ -23,6 +23,7 @@ export type SavedPose = {
   name: string;
   x: number;
   y: number;
+  heading: number;
 };
 
 export type RobotConstants = {
@@ -37,6 +38,7 @@ export type RobotConstants = {
 type ParsedPoseReference = {
   nx: number;
   ny: number;
+  heading?: number;
   poseName?: string;
 };
 
@@ -175,10 +177,11 @@ export const parseSavedPosesKotlin = (
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex)).map(stripLineComment);
     const x = evaluatePoseExpression(args[0] ?? "", width, length);
     const y = evaluatePoseExpression(args[1] ?? "", width, length);
+    const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
     if (x === null || y === null) continue;
 
     usedNames.add(name);
-    savedPoses.push({ name, x, y });
+    savedPoses.push({ name, x, y, heading: normalizeHeading(heading ?? 0) });
     poseRegex.lastIndex = closeParenIndex + 1;
   }
 
@@ -206,7 +209,7 @@ export const serializeSavedPosesKotlin = (
   savedPoses
     .map(
       (pose) =>
-        `val ${withStartPosePrefix(pose.name)} = Pose(${formatStartPoseCoordinate(pose.x, "HALF_WIDTH", dimensions)}, ${formatStartPoseCoordinate(pose.y, "HALF_LENGTH", dimensions)}, 0.0)`
+        `val ${withStartPosePrefix(pose.name)} = Pose(${formatStartPoseCoordinate(pose.x, "HALF_WIDTH", dimensions)}, ${formatStartPoseCoordinate(pose.y, "HALF_LENGTH", dimensions)}, ${formatKotlinNumber(pose.heading ?? 0)})`
     )
     .join("\n");
 
@@ -273,9 +276,12 @@ export const serializePathPlannerKotlin = (
         formatKotlinPose(point, savedPoses),
       ];
       const headingMode = point.headingMode ?? "constant";
+      const linearStartT = point.linearStartT ?? 0;
+      const linearEndT = point.linearEndT ?? 1;
+      const shouldExportLinearT = Math.abs(linearStartT) > 0.0001 || Math.abs(linearEndT - 1) > 0.0001;
       const headingCall =
         headingMode === "linear"
-          ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)})`
+          ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)}${shouldExportLinearT ? `, ${formatKotlinNumber(linearStartT)}, ${formatKotlinNumber(linearEndT)}` : ""})`
           : headingMode === "tangential"
             ? "tangentHeading()"
             : `constantHeading(${formatKotlinNumber(point.constantHeading ?? 0)})`;
@@ -342,14 +348,22 @@ const parseKotlinPose = (arg: string, savedPoses: SavedPose[]): ParsedPoseRefere
     const savedPose = savedPoses.find((pose) => stripStartPosePrefix(pose.name) === poseName);
     if (savedPose) {
       const normalizedCoords = toNormalizedCoords(savedPose.x, savedPose.y);
-      return { ...normalizedCoords, poseName: stripStartPosePrefix(savedPose.name) };
+      return {
+        ...normalizedCoords,
+        heading: savedPose.heading ?? 0,
+        poseName: stripStartPosePrefix(savedPose.name),
+      };
     }
   }
 
   const match = arg.match(/Pose\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
   if (!match) return null;
 
-  return toNormalizedCoords(Number(match[1]), Number(match[2]));
+  const headingMatch = arg.match(/Pose\s*\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*,\s*(-?\d+(?:\.\d+)?)/);
+  return {
+    ...toNormalizedCoords(Number(match[1]), Number(match[2])),
+    heading: normalizeHeading(headingMatch ? Number(headingMatch[1]) : 0),
+  };
 };
 
 export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[] = []): ParsedKotlinAuton | null => {
@@ -369,6 +383,8 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     constantHeading: number;
     startHeading: number;
     endHeading: number;
+    linearStartT: number;
+    linearEndT: number;
   };
 
   const pathDefinitions = new Map<string, ParsedPath>();
@@ -391,6 +407,8 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     let constantHeading = 0;
     let startHeading = 0;
     let endHeading = 0;
+    let linearStartT = 0;
+    let linearEndT = 1;
 
     if (headingMatch?.[1] === "linearHeading") {
       headingMode = "linear";
@@ -400,6 +418,8 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
         .filter((value) => !Number.isNaN(value));
       startHeading = normalizeHeading(values[0] ?? 0);
       endHeading = normalizeHeading(values[1] ?? 0);
+      linearStartT = Math.max(0, Math.min(1, values[2] ?? 0));
+      linearEndT = Math.max(0, Math.min(1, values[3] ?? 1));
     } else if (headingMatch?.[1] === "tangentHeading") {
       headingMode = "tangential";
     } else if (headingMatch?.[1] === "constantHeading") {
@@ -407,7 +427,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       constantHeading = normalizeHeading(Number.isNaN(value) ? 0 : value);
     }
 
-    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading });
+    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading, linearStartT, linearEndT });
     pathRegex.lastIndex = closeParenIndex + 1;
   }
 
@@ -450,7 +470,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       ny: firstStart?.ny ?? 0.5,
       color: randomColor(),
       locked: true,
-      heading: 0,
+      heading: firstStart?.heading ?? 0,
       poseName: firstStart?.poseName,
     },
   ];
@@ -480,6 +500,8 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       constantHeading: path.constantHeading,
       startHeading: path.startHeading,
       endHeading: path.endHeading,
+      linearStartT: path.linearStartT,
+      linearEndT: path.linearEndT,
       controlPoints: controlPoses.map((pose) => ({
         id: generateId(),
         nx: pose.nx,

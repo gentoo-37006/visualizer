@@ -6,7 +6,7 @@ export type ControlPoint = {
 };
 
 export type HeadingInterpolation = "constant" | "linear" | "tangential";
-export type PathHeadingField = "constant" | "start" | "end";
+export type PathHeadingField = "constant" | "start" | "end" | "startT" | "endT";
 export type AutonActionMode = "start" | "run" | "stop";
 
 export type Point = {
@@ -22,6 +22,8 @@ export type Point = {
   constantHeading?: number;
   startHeading?: number;
   endHeading?: number;
+  linearStartT?: number;
+  linearEndT?: number;
   controlPoints?: ControlPoint[];
   controlsExpanded?: boolean;
   poseName?: string;
