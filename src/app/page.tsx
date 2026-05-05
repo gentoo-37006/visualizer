@@ -562,28 +562,30 @@ export default function PathPlannerPage() {
         currentPose = { ...currentPose, heading: pathStartHeading };
       }
 
-      const profile = createMotionProfile(
-        distance,
-        motionLimits.maxVelocity,
-        motionLimits.acceleration,
-        motionLimits.brakeAcceleration
-      );
-      const duration = Math.max(getMotionProfileDuration(profile), 0.001);
+      if (distance > 0.001) {
+        const profile = createMotionProfile(
+          distance,
+          motionLimits.maxVelocity,
+          motionLimits.acceleration,
+          motionLimits.brakeAcceleration
+        );
+        const duration = Math.max(getMotionProfileDuration(profile), 0.001);
 
-      segments.push({
-        kind: "path",
-        startTime: elapsedTime,
-        duration,
-        point,
-        samples,
-        cumulativeDistances,
-        profile,
-      });
-      elapsedTime += duration;
-      currentPose = {
-        ...(samples[samples.length - 1] ?? currentPose),
-        color: point.color,
-      };
+        segments.push({
+          kind: "path",
+          startTime: elapsedTime,
+          duration,
+          point,
+          samples,
+          cumulativeDistances,
+          profile,
+        });
+        elapsedTime += duration;
+        currentPose = {
+          ...(samples[samples.length - 1] ?? currentPose),
+          color: point.color,
+        };
+      }
     });
 
     return { segments, totalTime: elapsedTime };
