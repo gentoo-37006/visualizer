@@ -9,6 +9,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import Image from "next/image";
@@ -62,6 +63,14 @@ import styles from "./page.module.css";
 const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
 const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
 const MOTION_PARAMETERS_STORAGE_KEY = "auton-path-planner:motion-parameters";
+const FIELD_IMAGE_STORAGE_KEY = "auton-path-planner:field-image";
+
+const FIELD_IMAGE_PRESETS = [
+  { id: "decode", name: "Decode", src: "/fields/decode.webp" },
+  { id: "intothedeep", name: "Into The Deep", src: "/fields/intothedeep.webp" },
+  { id: "centerstage", name: "Centerstage", src: "/fields/centerstage.webp" },
+] as const;
+const DEFAULT_FIELD_IMAGE = FIELD_IMAGE_PRESETS[0];
 
 const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
   Array.isArray(value) &&
@@ -375,6 +384,10 @@ export default function PathPlannerPage() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [areActionsHidden, setAreActionsHidden] = useState(false);
+  const [fieldImageSrc, setFieldImageSrc] = useState<string>(DEFAULT_FIELD_IMAGE.src);
+  const [selectedFieldPresetId, setSelectedFieldPresetId] = useState<string>(DEFAULT_FIELD_IMAGE.id);
+  const [isFieldImageModalOpen, setIsFieldImageModalOpen] = useState(false);
+  const [isFieldImageModalVisible, setIsFieldImageModalVisible] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
   const [draggingPathIndex, setDraggingPathIndex] = useState<number | null>(null);
   const [dragOverPathIndex, setDragOverPathIndex] = useState<number | null>(null);
@@ -384,6 +397,7 @@ export default function PathPlannerPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const posesInputRef = useRef<HTMLInputElement>(null);
   const constantsInputRef = useRef<HTMLInputElement>(null);
+  const fieldImageInputRef = useRef<HTMLInputElement>(null);
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsListRef = useRef<HTMLDivElement>(null);
   const pointsRef = useRef<Point[]>(points);
@@ -393,6 +407,8 @@ export default function PathPlannerPage() {
   const dragStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
   const editStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
   const nameEditStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
+  const suppressFieldDoubleClickUntilRef = useRef(0);
+  const fieldImageModalCloseTimerRef = useRef<number | null>(null);
   const cardDragScrollSpeedRef = useRef(0);
   const cardDragScrollFrameRef = useRef<number | null>(null);
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
@@ -865,9 +881,15 @@ export default function PathPlannerPage() {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const storedMotionParameters = loadMotionParameters();
+      const storedFieldImageId = window.localStorage.getItem(FIELD_IMAGE_STORAGE_KEY);
+      const storedFieldImage = FIELD_IMAGE_PRESETS.find((field) => field.id === storedFieldImageId);
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
       setMotionParameters(storedMotionParameters);
+      if (storedFieldImage) {
+        setFieldImageSrc(storedFieldImage.src);
+        setSelectedFieldPresetId(storedFieldImage.id);
+      }
       setMotionParameterDrafts({
         maxAngularVelocity: String(storedMotionParameters.maxAngularVelocity),
         maxForwardAcceleration: String(storedMotionParameters.maxForwardAcceleration),
@@ -1608,7 +1630,7 @@ export default function PathPlannerPage() {
     }
   };
 
-  const getPointerNormalized = (e: ReactPointerEvent<SVGSVGElement> | globalThis.PointerEvent) => {
+  const getPointerNormalized = (e: ReactPointerEvent<SVGSVGElement> | globalThis.PointerEvent | globalThis.MouseEvent) => {
     if (!svgRef.current) return { nx: 0, ny: 0 };
     const rect = svgRef.current.getBoundingClientRect();
     const fieldWidth = rect.width - POINT_DIAMETER - FIELD_BORDER_WIDTH * 2;
@@ -1620,6 +1642,37 @@ export default function PathPlannerPage() {
     ny = Math.max(0, Math.min(1, ny));
 
     return { nx, ny };
+  };
+
+  const getHitTarget = (nx: number, ny: number) => {
+    const minFieldSize = Math.min(
+      fieldSize.width - FIELD_BORDER_WIDTH * 2,
+      fieldSize.height - FIELD_BORDER_WIDTH * 2
+    );
+    if (minFieldSize <= 0) return null;
+
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i].locked) continue;
+      const controlPoints = points[i].controlPoints ?? [];
+      if (!points[i].hidden) {
+        for (let j = controlPoints.length - 1; j >= 0; j--) {
+          const dx = controlPoints[j].nx - nx;
+          const dy = controlPoints[j].ny - ny;
+          if (Math.sqrt(dx * dx + dy * dy) <= controlPointHitRadius(minFieldSize)) {
+            return { kind: "control", pathIndex: i, controlIndex: j } as DragTarget;
+          }
+        }
+      }
+      if (!isPointVisible(i)) continue;
+
+      const dx = points[i].nx - nx;
+      const dy = points[i].ny - ny;
+      if (Math.sqrt(dx * dx + dy * dy) <= mainPointHitRadius(minFieldSize)) {
+        return { kind: "point", index: i } as DragTarget;
+      }
+    }
+
+    return null;
   };
 
   const handlePointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -1646,37 +1699,7 @@ export default function PathPlannerPage() {
 
     if (!svgRef.current) return;
     const { nx, ny } = getPointerNormalized(e);
-    const minFieldSize = Math.min(
-      fieldSize.width - FIELD_BORDER_WIDTH * 2,
-      fieldSize.height - FIELD_BORDER_WIDTH * 2
-    );
-    if (minFieldSize <= 0) return;
-
-    let hit: DragTarget | null = null;
-    for (let i = points.length - 1; i >= 0; i--) {
-      if (points[i].locked) continue;
-      const controlPoints = points[i].controlPoints ?? [];
-      if (!points[i].hidden) {
-        for (let j = controlPoints.length - 1; j >= 0; j--) {
-          const dx = controlPoints[j].nx - nx;
-          const dy = controlPoints[j].ny - ny;
-          if (Math.sqrt(dx * dx + dy * dy) <= controlPointHitRadius(minFieldSize)) {
-            hit = { kind: "control", pathIndex: i, controlIndex: j };
-            break;
-          }
-        }
-      }
-      if (hit) break;
-      if (!isPointVisible(i)) continue;
-
-      const dx = points[i].nx - nx;
-      const dy = points[i].ny - ny;
-      if (Math.sqrt(dx * dx + dy * dy) <= mainPointHitRadius(minFieldSize)) {
-        hit = { kind: "point", index: i };
-        break;
-      }
-    }
-    setHoverTarget(hit);
+    setHoverTarget(getHitTarget(nx, ny));
   };
 
   const handlePointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -1690,15 +1713,65 @@ export default function PathPlannerPage() {
     }
   };
 
+  const handleFieldDoubleClick = (event: ReactMouseEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    if (performance.now() < suppressFieldDoubleClickUntilRef.current) return;
+    if (isDragging) return;
+    const { nx, ny } = getPointerNormalized(event.nativeEvent);
+    if (getHitTarget(nx, ny) !== null) return;
+    if (fieldImageModalCloseTimerRef.current !== null) {
+      window.clearTimeout(fieldImageModalCloseTimerRef.current);
+      fieldImageModalCloseTimerRef.current = null;
+    }
+    setIsFieldImageModalOpen(true);
+    requestAnimationFrame(() => setIsFieldImageModalVisible(true));
+  };
+
+  const closeFieldImageModal = (suppressNextFieldDoubleClick = false) => {
+    if (suppressNextFieldDoubleClick) {
+      suppressFieldDoubleClickUntilRef.current = performance.now() + 450;
+    }
+    setIsFieldImageModalVisible(false);
+    if (fieldImageModalCloseTimerRef.current !== null) {
+      window.clearTimeout(fieldImageModalCloseTimerRef.current);
+    }
+    fieldImageModalCloseTimerRef.current = window.setTimeout(() => {
+      setIsFieldImageModalOpen(false);
+      fieldImageModalCloseTimerRef.current = null;
+    }, 160);
+  };
+
+  const selectFieldPreset = (preset: typeof FIELD_IMAGE_PRESETS[number]) => {
+    setFieldImageSrc(preset.src);
+    setSelectedFieldPresetId(preset.id);
+    window.localStorage.setItem(FIELD_IMAGE_STORAGE_KEY, preset.id);
+  };
+
+  const handleFieldImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result !== "string") return;
+      setFieldImageSrc(reader.result);
+      setSelectedFieldPresetId("custom");
+      window.localStorage.removeItem(FIELD_IMAGE_STORAGE_KEY);
+    });
+    reader.readAsDataURL(file);
+  };
+
   return (
     <main className={styles.container}>
       <div className={styles.fieldWrapper}>
         <div className={styles.fieldContainer} ref={fieldRef}>
           <Image
-            src="/fields/decode.webp"
+            src={fieldImageSrc}
             alt="Field Map"
             fill
             priority
+            unoptimized={fieldImageSrc.startsWith("data:")}
             sizes="(max-width: 768px) 100vw, (max-height: 100vh) 100vh, 1000px"
             className={styles.fieldImage}
           />
@@ -1710,6 +1783,7 @@ export default function PathPlannerPage() {
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
+            onDoubleClick={handleFieldDoubleClick}
             style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "grab" : "default") }}
             viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
           >
@@ -2133,8 +2207,11 @@ export default function PathPlannerPage() {
               </button>
               <button
                 className={`${styles.addButton} ${styles.toggleActionsButton} ${areActionsHidden ? styles.actionsHiddenButton : ""}`}
-                onClick={() => setAreActionsHidden((currentValue) => !currentValue)}
-                disabled={!hasActions}
+                onClick={() => {
+                  if (!hasActions) return;
+                  setAreActionsHidden((currentValue) => !currentValue);
+                }}
+                aria-disabled={!hasActions}
                 aria-pressed={areActionsHidden}
                 aria-label={areActionsHidden ? "Show all actions" : "Hide all actions"}
                 title={areActionsHidden ? "Show actions" : "Hide actions"}
@@ -2314,6 +2391,75 @@ export default function PathPlannerPage() {
         </div>
       </section>
       </div>
+
+      {isFieldImageModalOpen && (
+        <div
+          className={`${styles.modalBackdrop} ${styles.fadeModalBackdrop} ${isFieldImageModalVisible ? styles.fadeModalOpen : ""}`}
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeFieldImageModal(true);
+          }}
+          onDoubleClick={(event) => event.preventDefault()}
+        >
+          <section
+            className={`${styles.fieldImageModal} ${styles.fadeModalPanel}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="field-image-modal-title"
+          >
+            <div className={styles.exportModalHeader}>
+              <div>
+                <h2 id="field-image-modal-title" className={styles.exportModalTitle}>
+                  Field Image
+                </h2>
+                <p className={styles.exportModalSubtitle}>Choose a preset or upload a custom image.</p>
+              </div>
+              <button
+                className={styles.secondaryIconButton}
+                onClick={() => closeFieldImageModal()}
+                aria-label="Close field image modal"
+                title="Close"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className={styles.fieldImageModalBody}>
+              <div className={styles.fieldPresetGrid}>
+                {FIELD_IMAGE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    className={`${styles.fieldPresetButton} ${selectedFieldPresetId === preset.id ? styles.fieldPresetActive : ""}`}
+                    onClick={() => selectFieldPreset(preset)}
+                  >
+                    <span className={styles.fieldPresetPreview}>
+                      <Image src={preset.src} alt="" fill sizes="8rem" className={styles.fieldPresetImage} />
+                    </span>
+                    <span>{preset.name}</span>
+                  </button>
+                ))}
+              </div>
+              <input
+                ref={fieldImageInputRef}
+                className={styles.hiddenFileInput}
+                type="file"
+                accept="image/*"
+                onChange={handleFieldImageUpload}
+              />
+              <button className={styles.uploadFieldButton} onClick={() => fieldImageInputRef.current?.click()}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload Custom Field
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {kotlinExport && (
         <div
