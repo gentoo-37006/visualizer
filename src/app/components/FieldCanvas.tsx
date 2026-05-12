@@ -81,6 +81,36 @@ export function FieldCanvas({
           {hasMeasuredField && points.map((point, index) => {
             if (index === points.length - 1) return null;
             const nextPoint = points[index + 1];
+            if (nextPoint.hidden || !nextPoint.controlPoints?.length) return null;
+
+            const start = toSvgPixelCoords(point.nx, point.ny, fieldSize);
+            const end = toSvgPixelCoords(nextPoint.nx, nextPoint.ny, fieldSize);
+            const guidePoints = [
+              start,
+              ...nextPoint.controlPoints.map((controlPoint) =>
+                toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize)
+              ),
+              end,
+            ];
+
+            return (
+              <polyline
+                key={`control-guide-${nextPoint.id}`}
+                points={guidePoints.map((guidePoint) => `${guidePoint.x},${guidePoint.y}`).join(" ")}
+                fill="none"
+                stroke={nextPoint.color}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.72"
+                pointerEvents="none"
+              />
+            );
+          })}
+
+          {hasMeasuredField && points.map((point, index) => {
+            if (index === points.length - 1) return null;
+            const nextPoint = points[index + 1];
             if (nextPoint.hidden) return null;
             const start = toSvgPixelCoords(point.nx, point.ny, fieldSize);
             const end = toSvgPixelCoords(nextPoint.nx, nextPoint.ny, fieldSize);
