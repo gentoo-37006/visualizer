@@ -45,6 +45,17 @@ export type AutonPathItem = {
 
 export type AutonSequenceItem = AutonActionItem | AutonPathItem;
 
+export type PlannerSnapshot = {
+  points: Point[];
+  sequenceItems: AutonSequenceItem[];
+};
+
+export type MotionParameters = {
+  maxAngularVelocity: number;
+  maxForwardAcceleration: number;
+  maxLateralAcceleration: number;
+};
+
 export type DragTarget =
   | { kind: "point"; index: number }
   | { kind: "control"; pathIndex: number; controlIndex: number };

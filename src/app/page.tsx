@@ -1,20 +1,21 @@
 "use client";
 
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
-  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import Image from "next/image";
-import { ActionCard } from "./components/ActionCard";
-import { PointCard } from "./components/PointCard";
+import { FieldImageModal } from "./components/FieldImageModal";
+import { FieldCanvas } from "./components/FieldCanvas";
+import { KotlinExportModal } from "./components/KotlinExportModal";
+import { PlaybackControls } from "./components/PlaybackControls";
+import { PlannerSidebar, type SidebarPage } from "./components/PlannerSidebar";
+import { usePlannerState } from "./hooks/usePlannerState";
 import {
   serializePathPlannerKotlin,
   serializeSavedPosesKotlin,
@@ -31,8 +32,8 @@ import {
   FIELD_BORDER_WIDTH,
   INITIAL_POINT_COLOR,
   INITIAL_POINT_ID,
-  POINT_DIAMETER,
   POINT_RADIUS,
+  POINT_DIAMETER,
 } from "./plannerConstants";
 import type {
   AutonActionMode,
@@ -40,15 +41,15 @@ import type {
   DragTarget,
   FieldSize,
   HeadingInterpolation,
+  MotionParameters,
   PathHeadingField,
+  PlannerSnapshot,
   Point,
 } from "./plannerTypes";
 import {
   controlPointHitRadius,
   createDefaultHeadingValues,
-  createSplinePath,
   generateId,
-  isSameTarget,
   isNumericDraft,
   mainPointHitRadius,
   normalizeHeading,
@@ -58,313 +59,34 @@ import {
   toNormalizedCoords,
   toSvgPixelCoords,
 } from "./plannerUtils";
+import {
+  buildPlaybackTimeline,
+  clamp01,
+  createPlaybackTrackBackground,
+  getPlaybackPoseAtTime,
+  snapSvgPixel,
+} from "./playback";
+import {
+  DEFAULT_MOTION_PARAMETERS,
+  MOTION_PARAMETERS_STORAGE_KEY,
+  ROBOT_CONSTANTS_STORAGE_KEY,
+  SAVED_POSES_STORAGE_KEY,
+  loadMotionParameters,
+  loadRobotConstants,
+  loadSavedPoses,
+} from "./plannerStorage";
+import {
+  DEFAULT_FIELD_IMAGE,
+  FIELD_IMAGE_PRESETS,
+  FIELD_IMAGE_STORAGE_KEY,
+} from "./fieldImages";
 import styles from "./page.module.css";
 
-const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
-const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
-const MOTION_PARAMETERS_STORAGE_KEY = "auton-path-planner:motion-parameters";
-const FIELD_IMAGE_STORAGE_KEY = "auton-path-planner:field-image";
-
-const FIELD_IMAGE_PRESETS = [
-  { id: "decode", name: "Decode", src: "/fields/decode.webp" },
-  { id: "intothedeep", name: "Into The Deep", src: "/fields/intothedeep.webp" },
-  { id: "centerstage", name: "Centerstage", src: "/fields/centerstage.webp" },
-] as const;
-const DEFAULT_FIELD_IMAGE = FIELD_IMAGE_PRESETS[0];
-
-const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
-  Array.isArray(value) &&
-  value.every(
-    (pose) =>
-      typeof pose?.name === "string" &&
-      typeof pose?.x === "number" &&
-      typeof pose?.y === "number" &&
-      (typeof pose?.heading === "number" || pose?.heading === undefined)
-  );
-
-const loadSavedPoses = () => {
-  if (typeof window === "undefined") return [];
-
-  const storedSavedPoses = window.localStorage.getItem(SAVED_POSES_STORAGE_KEY);
-  if (!storedSavedPoses) return [];
-
-  try {
-    const parsedSavedPoses: unknown = JSON.parse(storedSavedPoses);
-    return isSavedPoseArray(parsedSavedPoses)
-      ? parsedSavedPoses.map((pose) => ({
-          ...pose,
-          heading: pose.heading ?? 0,
-          name: stripStartPosePrefix(pose.name),
-        }))
-      : [];
-  } catch {
-    window.localStorage.removeItem(SAVED_POSES_STORAGE_KEY);
-    return [];
-  }
-};
-
-const isRobotConstants = (value: unknown): value is RobotConstants =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as RobotConstants).width === "number" &&
-  typeof (value as RobotConstants).length === "number" &&
-  typeof (value as RobotConstants).forwardBrakeStrength === "number" &&
-  typeof (value as RobotConstants).lateralBrakeStrength === "number" &&
-  typeof (value as RobotConstants).maxForwardVelocity === "number" &&
-  typeof (value as RobotConstants).maxLateralVelocity === "number";
-
-const loadRobotConstants = () => {
-  if (typeof window === "undefined") return DEFAULT_ROBOT_CONSTANTS;
-
-  const storedRobotConstants = window.localStorage.getItem(ROBOT_CONSTANTS_STORAGE_KEY);
-  if (!storedRobotConstants) return DEFAULT_ROBOT_CONSTANTS;
-
-  try {
-    const parsedRobotConstants: unknown = JSON.parse(storedRobotConstants);
-    return isRobotConstants(parsedRobotConstants)
-      ? { ...DEFAULT_ROBOT_CONSTANTS, ...parsedRobotConstants }
-      : DEFAULT_ROBOT_CONSTANTS;
-  } catch {
-    window.localStorage.removeItem(ROBOT_CONSTANTS_STORAGE_KEY);
-    return DEFAULT_ROBOT_CONSTANTS;
-  }
-};
-
-const clonePoints = (source: Point[]) =>
-  source.map((point) => ({
-    ...point,
-    controlPoints: point.controlPoints?.map((controlPoint) => ({ ...controlPoint })),
-  }));
-
-const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
-const cloneSequenceItems = (source: AutonSequenceItem[]) => source.map((item) => ({ ...item }));
-type PlannerSnapshot = {
-  points: Point[];
-  sequenceItems: AutonSequenceItem[];
-};
-type MotionParameters = {
-  maxAngularVelocity: number;
-  maxForwardAcceleration: number;
-  maxLateralAcceleration: number;
-};
-type PlaybackPose = {
-  nx: number;
-  ny: number;
-  heading: number;
-  color?: string;
-};
-type MotionProfile = {
-  distance: number;
-  acceleration: number;
-  cruiseVelocity: number;
-  brakeAcceleration: number;
-  accelerationTime: number;
-  cruiseTime: number;
-  brakeTime: number;
-  accelerationDistance: number;
-  cruiseDistance: number;
-};
-type PlaybackSegment =
-  | {
-      kind: "path";
-      startTime: number;
-      duration: number;
-      point: Point;
-      samples: PlaybackPose[];
-      cumulativeDistances: number[];
-      profile: MotionProfile;
-    }
-  | {
-      kind: "wait";
-      startTime: number;
-      duration: number;
-      pose: PlaybackPose;
-    }
-  | {
-      kind: "rotate";
-      startTime: number;
-      duration: number;
-      pose: PlaybackPose;
-      color: string;
-      startHeading: number;
-      endHeading: number;
-    };
-type SidebarPage = "auton" | "poses" | "constants";
 const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
-const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
-  maxAngularVelocity: 180,
-  maxForwardAcceleration: 60,
-  maxLateralAcceleration: 60,
-};
-
-const isMotionParameters = (value: unknown): value is MotionParameters =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as MotionParameters).maxAngularVelocity === "number";
-
-const loadMotionParameters = () => {
-  if (typeof window === "undefined") return DEFAULT_MOTION_PARAMETERS;
-
-  const storedMotionParameters = window.localStorage.getItem(MOTION_PARAMETERS_STORAGE_KEY);
-  if (!storedMotionParameters) return DEFAULT_MOTION_PARAMETERS;
-
-  try {
-    const parsedMotionParameters: unknown = JSON.parse(storedMotionParameters);
-    return isMotionParameters(parsedMotionParameters)
-      ? { ...DEFAULT_MOTION_PARAMETERS, ...parsedMotionParameters }
-      : DEFAULT_MOTION_PARAMETERS;
-  } catch {
-    window.localStorage.removeItem(MOTION_PARAMETERS_STORAGE_KEY);
-    return DEFAULT_MOTION_PARAMETERS;
-  }
-};
-
-const interpolateNumber = (start: number, end: number, t: number) => start + (end - start) * t;
-
-const interpolateHeading = (start: number, end: number, t: number) => {
-  const delta = normalizeHeading(end - start);
-  return normalizeHeading(start + delta * t);
-};
-
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-
-const smoothInterpolationT = (t: number) => t * t * (3 - 2 * t);
-
-const interpolateHeadingRange = (start: number, end: number, t: number, startT = 0, endT = 1) => {
-  const clampedStartT = clamp01(startT);
-  const clampedEndT = clamp01(endT);
-  if (clampedEndT <= clampedStartT) return t < clampedStartT ? normalizeHeading(start) : normalizeHeading(end);
-  if (t <= clampedStartT) return normalizeHeading(start);
-  if (t >= clampedEndT) return normalizeHeading(end);
-  const localT = (t - clampedStartT) / (clampedEndT - clampedStartT);
-  return interpolateHeading(start, end, smoothInterpolationT(localT));
-};
-
-const interpolateBezierPoint = (points: Array<{ nx: number; ny: number }>, t: number) => {
-  let workingPoints = points.map((point) => ({ ...point }));
-
-  while (workingPoints.length > 1) {
-    workingPoints = workingPoints.slice(0, -1).map((point, index) => ({
-      nx: interpolateNumber(point.nx, workingPoints[index + 1].nx, t),
-      ny: interpolateNumber(point.ny, workingPoints[index + 1].ny, t),
-    }));
-  }
-
-  return workingPoints[0];
-};
-
-const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny: number }) => {
-  const ax = (a.nx - 0.5) * FIELD_SIZE_INCHES;
-  const ay = (0.5 - a.ny) * FIELD_SIZE_INCHES;
-  const bx = (b.nx - 0.5) * FIELD_SIZE_INCHES;
-  const by = (0.5 - b.ny) * FIELD_SIZE_INCHES;
-  return Math.hypot(bx - ax, by - ay);
-};
-
-const safeMotionLimit = (value: number, fallback = 1) =>
-  Number.isFinite(value) && Math.abs(value) > 0.001 ? Math.abs(value) : fallback;
-
-const getDirectionalMotionLimit = (
-  dx: number,
-  dy: number,
-  heading: number,
-  forwardLimit: number,
-  lateralLimit: number
-) => {
-  const distance = Math.hypot(dx, dy);
-  if (distance <= 0.001) return Math.max(forwardLimit, lateralLimit);
-
-  const unitX = dx / distance;
-  const unitY = dy / distance;
-  const headingRadians = (heading * Math.PI) / 180;
-  const forwardX = Math.sin(headingRadians);
-  const forwardY = Math.cos(headingRadians);
-  const lateralX = Math.cos(headingRadians);
-  const lateralY = -Math.sin(headingRadians);
-  const forwardComponent = Math.abs(unitX * forwardX + unitY * forwardY);
-  const lateralComponent = Math.abs(unitX * lateralX + unitY * lateralY);
-  const limits = [];
-  if (forwardComponent > 0.001) limits.push(forwardLimit / forwardComponent);
-  if (lateralComponent > 0.001) limits.push(lateralLimit / lateralComponent);
-  return Math.min(...limits);
-};
-
-const createMotionProfile = (
-  distance: number,
-  maxVelocity: number,
-  acceleration: number,
-  brakeAcceleration: number
-): MotionProfile => {
-  const safeDistance = Math.max(0, distance);
-  const safeMaxVelocity = safeMotionLimit(maxVelocity);
-  const safeAcceleration = safeMotionLimit(acceleration);
-  const safeBrakeAcceleration = safeMotionLimit(brakeAcceleration, safeAcceleration);
-  const peakVelocity = Math.sqrt(
-    (2 * safeAcceleration * safeBrakeAcceleration * safeDistance) /
-      (safeAcceleration + safeBrakeAcceleration)
-  );
-  const cruiseVelocity = Math.min(safeMaxVelocity, peakVelocity);
-  const accelerationTime = cruiseVelocity / safeAcceleration;
-  const brakeTime = cruiseVelocity / safeBrakeAcceleration;
-  const accelerationDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeAcceleration);
-  const brakeDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeBrakeAcceleration);
-  const cruiseDistance = Math.max(0, safeDistance - accelerationDistance - brakeDistance);
-  const cruiseTime = cruiseDistance / cruiseVelocity;
-
-  return {
-    distance: safeDistance,
-    acceleration: safeAcceleration,
-    cruiseVelocity,
-    brakeAcceleration: safeBrakeAcceleration,
-    accelerationTime,
-    cruiseTime,
-    brakeTime,
-    accelerationDistance,
-    cruiseDistance,
-  };
-};
-
-const getMotionProfileDuration = (profile: MotionProfile) =>
-  profile.accelerationTime + profile.cruiseTime + profile.brakeTime;
-
-const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: number) => {
-  const safeTime = Math.max(0, Math.min(time, getMotionProfileDuration(profile)));
-  if (safeTime <= profile.accelerationTime) {
-    return 0.5 * profile.acceleration * safeTime * safeTime;
-  }
-
-  const cruiseEndTime = profile.accelerationTime + profile.cruiseTime;
-  if (safeTime <= cruiseEndTime) {
-    return profile.accelerationDistance + profile.cruiseVelocity * (safeTime - profile.accelerationTime);
-  }
-
-  const brakeElapsed = safeTime - cruiseEndTime;
-  return Math.min(
-    profile.distance,
-    profile.accelerationDistance +
-      profile.cruiseDistance +
-      profile.cruiseVelocity * brakeElapsed -
-      0.5 * profile.brakeAcceleration * brakeElapsed * brakeElapsed
-  );
-};
-
-const snapSvgPixel = (value: number) => Math.round(value);
-
-const formatPlaybackTime = (seconds: number) => {
-  const safeSeconds = Math.max(0, seconds || 0);
-  const minutes = Math.floor(safeSeconds / 60);
-  const remainingSeconds = safeSeconds - minutes * 60;
-  return `${minutes}:${remainingSeconds.toFixed(1).padStart(4, "0")}`;
-};
+const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function PathPlannerPage() {
-  const [points, setPoints] = useState<Point[]>([
-    { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
-  ]);
-  const [sequenceItems, setSequenceItems] = useState<AutonSequenceItem[]>([]);
-  const [undoStack, setUndoStack] = useState<PlannerSnapshot[]>([]);
-  const [redoStack, setRedoStack] = useState<PlannerSnapshot[]>([]);
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -400,55 +122,49 @@ export default function PathPlannerPage() {
   const fieldImageInputRef = useRef<HTMLInputElement>(null);
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsListRef = useRef<HTMLDivElement>(null);
-  const pointsRef = useRef<Point[]>(points);
-  const sequenceItemsRef = useRef<AutonSequenceItem[]>(sequenceItems);
-  const undoStackRef = useRef<PlannerSnapshot[]>([]);
-  const redoStackRef = useRef<PlannerSnapshot[]>([]);
   const dragStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
-  const editStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
-  const nameEditStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
   const suppressFieldDoubleClickUntilRef = useRef(0);
   const fieldImageModalCloseTimerRef = useRef<number | null>(null);
   const cardDragScrollSpeedRef = useRef(0);
   const cardDragScrollFrameRef = useRef<number | null>(null);
+  const {
+    points,
+    sequenceItems,
+    undoStack,
+    redoStack,
+    pointsRef,
+    sequenceItemsRef,
+    setPlannerPoints,
+    setPlannerSequenceItems,
+    setPlannerSnapshot,
+    createSnapshot,
+    clearHistory,
+    pushUndoSnapshot,
+    pushCurrentSnapshot,
+    pushCurrentSnapshotIfChanged,
+    beginPositionEdit,
+    commitPositionEdit,
+    beginNameEdit,
+    commitNameEdit,
+    handleUndo,
+    handleRedo,
+  } = usePlannerState({
+    initialPoints: [
+      { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
+    ],
+    onRestore: () => {
+      setHoverTarget(null);
+      setActiveTarget(null);
+      setIsDragging(false);
+      dragStartSnapshotRef.current = null;
+    },
+  });
   const hasMeasuredField = fieldSize.width > 0 && fieldSize.height > 0;
   const isPointVisible = (index: number) => {
     const previousSegmentVisible = index > 0 && !points[index].hidden;
     const nextSegmentVisible = index < points.length - 1 && !points[index + 1].hidden;
     return previousSegmentVisible || nextSegmentVisible || points.length === 1;
   };
-
-  const setPlannerPoints = (updater: Point[] | ((currentPoints: Point[]) => Point[])) => {
-    setPoints((currentPoints) => {
-      const nextPoints = typeof updater === "function" ? updater(currentPoints) : updater;
-      pointsRef.current = nextPoints;
-      return nextPoints;
-    });
-  };
-
-  const setPlannerSequenceItems = (
-    updater: AutonSequenceItem[] | ((currentItems: AutonSequenceItem[]) => AutonSequenceItem[])
-  ) => {
-    setSequenceItems((currentItems) => {
-      const nextItems = typeof updater === "function" ? updater(currentItems) : updater;
-      sequenceItemsRef.current = nextItems;
-      return nextItems;
-    });
-  };
-
-  const setPlannerSnapshot = (snapshot: PlannerSnapshot) => {
-    const nextPoints = clonePoints(snapshot.points);
-    const nextSequenceItems = cloneSequenceItems(snapshot.sequenceItems);
-    pointsRef.current = nextPoints;
-    sequenceItemsRef.current = nextSequenceItems;
-    setPoints(nextPoints);
-    setSequenceItems(nextSequenceItems);
-  };
-
-  const createSnapshot = (): PlannerSnapshot => ({
-    points: clonePoints(pointsRef.current),
-    sequenceItems: cloneSequenceItems(sequenceItemsRef.current),
-  });
 
   const getSequenceItemsWithPaths = (items: AutonSequenceItem[], sourcePoints: Point[]) =>
     items.length > 0
@@ -461,221 +177,16 @@ export default function PathPlannerPage() {
   );
   const hasActions = orderedSequenceItems.some((item) => item.kind === "action");
 
-  const playbackTimeline = useMemo(() => {
-    const angularVelocity = safeMotionLimit(motionParameters.maxAngularVelocity);
-    const maxForwardVelocity = safeMotionLimit(robotConstants.maxForwardVelocity);
-    const maxLateralVelocity = safeMotionLimit(robotConstants.maxLateralVelocity);
-    const maxForwardAcceleration = safeMotionLimit(motionParameters.maxForwardAcceleration);
-    const maxLateralAcceleration = safeMotionLimit(motionParameters.maxLateralAcceleration);
-    const forwardBrakeAcceleration = safeMotionLimit(robotConstants.forwardBrakeStrength, maxForwardAcceleration);
-    const lateralBrakeAcceleration = safeMotionLimit(robotConstants.lateralBrakeStrength, maxLateralAcceleration);
-    const segments: PlaybackSegment[] = [];
-    let elapsedTime = 0;
-    let currentPose: PlaybackPose = {
-      nx: points[0]?.nx ?? 0.5,
-      ny: points[0]?.ny ?? 0.5,
-      heading: points[0]?.heading ?? 0,
-      color: points[0]?.color ?? INITIAL_POINT_COLOR,
-    };
-
-    orderedSequenceItems.forEach((item) => {
-      if (item.kind === "action") {
-        if (item.mode === "run" && item.timeout > 0) {
-          segments.push({
-            kind: "wait",
-            startTime: elapsedTime,
-            duration: item.timeout,
-            pose: currentPose,
-          });
-          elapsedTime += item.timeout;
-        }
-        return;
-      }
-
-      const pointIndex = points.findIndex((point) => point.id === item.pointId);
-      const point = points[pointIndex];
-      const previousPoint = points[pointIndex - 1];
-      if (!point || !previousPoint) return;
-
-      const bezierPoints = [
-        previousPoint,
-        ...(point.controlPoints ?? []),
-        point,
-      ].map((pathPoint) => ({ nx: pathPoint.nx, ny: pathPoint.ny }));
-      const sampleCount = Math.max(48, (point.controlPoints?.length ?? 0) * 20);
-      const positionSamples = Array.from({ length: sampleCount + 1 }, (_, index) =>
-        interpolateBezierPoint(bezierPoints, index / sampleCount)
-      );
-      const headingMode = point.headingMode ?? "constant";
-      const samples = positionSamples.map((sample, index) => {
-        const t = index / Math.max(1, positionSamples.length - 1);
-        let heading = point.constantHeading ?? 0;
-        if (headingMode === "linear") {
-          heading = interpolateHeadingRange(
-            point.startHeading ?? 0,
-            point.endHeading ?? 0,
-            t,
-            point.linearStartT ?? 0,
-            point.linearEndT ?? 1
-          );
-        } else if (headingMode === "tangential") {
-          const nextSample = positionSamples[Math.min(positionSamples.length - 1, index + 1)];
-          const previousSample = positionSamples[Math.max(0, index - 1)];
-          const dx = (nextSample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
-          const dy = (previousSample.ny - nextSample.ny) * FIELD_SIZE_INCHES;
-          heading = normalizeHeading((Math.atan2(dx, dy) * 180) / Math.PI);
-        }
-
-        return { nx: sample.nx, ny: sample.ny, heading };
-      });
-      const cumulativeDistances = [0];
-      const motionLimits = positionSamples.slice(1).reduce(
-        (limits, sample, index) => {
-          const previousSample = positionSamples[index];
-          const segmentDistance = measureFieldDistance(previousSample, sample);
-          cumulativeDistances.push(cumulativeDistances[cumulativeDistances.length - 1] + segmentDistance);
-          if (segmentDistance <= 0.001) return limits;
-
-          const dx = (sample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
-          const dy = (previousSample.ny - sample.ny) * FIELD_SIZE_INCHES;
-          const heading = samples[index]?.heading ?? point.constantHeading ?? 0;
-          return {
-            maxVelocity: Math.min(
-              limits.maxVelocity,
-              getDirectionalMotionLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity)
-            ),
-            acceleration: Math.min(
-              limits.acceleration,
-              getDirectionalMotionLimit(dx, dy, heading, maxForwardAcceleration, maxLateralAcceleration)
-            ),
-            brakeAcceleration: Math.min(
-              limits.brakeAcceleration,
-              getDirectionalMotionLimit(dx, dy, heading, forwardBrakeAcceleration, lateralBrakeAcceleration)
-            ),
-          };
-        },
-        {
-          maxVelocity: Math.max(maxForwardVelocity, maxLateralVelocity),
-          acceleration: Math.max(maxForwardAcceleration, maxLateralAcceleration),
-          brakeAcceleration: Math.max(forwardBrakeAcceleration, lateralBrakeAcceleration),
-        }
-      );
-      const distance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
-      const pathStartHeading = samples[0]?.heading ?? currentPose.heading;
-      const rotateDegrees = Math.abs(normalizeHeading(pathStartHeading - currentPose.heading));
-      if (rotateDegrees > 0.001) {
-        const rotateDuration = rotateDegrees / angularVelocity;
-        segments.push({
-          kind: "rotate",
-          startTime: elapsedTime,
-          duration: rotateDuration,
-          pose: currentPose,
-          color: point.color,
-          startHeading: currentPose.heading,
-          endHeading: pathStartHeading,
-        });
-        elapsedTime += rotateDuration;
-        currentPose = { ...currentPose, heading: pathStartHeading };
-      }
-
-      if (distance > 0.001) {
-        const profile = createMotionProfile(
-          distance,
-          motionLimits.maxVelocity,
-          motionLimits.acceleration,
-          motionLimits.brakeAcceleration
-        );
-        const duration = Math.max(getMotionProfileDuration(profile), 0.001);
-
-        segments.push({
-          kind: "path",
-          startTime: elapsedTime,
-          duration,
-          point,
-          samples,
-          cumulativeDistances,
-          profile,
-        });
-        elapsedTime += duration;
-        currentPose = {
-          ...(samples[samples.length - 1] ?? currentPose),
-          color: point.color,
-        };
-      }
-    });
-
-    return { segments, totalTime: elapsedTime };
-  }, [
-    motionParameters.maxAngularVelocity,
-    motionParameters.maxForwardAcceleration,
-    motionParameters.maxLateralAcceleration,
-    orderedSequenceItems,
-    points,
-    robotConstants.forwardBrakeStrength,
-    robotConstants.lateralBrakeStrength,
-    robotConstants.maxForwardVelocity,
-    robotConstants.maxLateralVelocity,
-  ]);
+  const playbackTimeline = useMemo(
+    () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants, motionParameters),
+    [motionParameters, orderedSequenceItems, points, robotConstants]
+  );
   const clampedPlaybackTime = Math.min(playbackTime, playbackTimeline.totalTime);
 
-  const activePlaybackSegment = useMemo(
-    () =>
-      playbackTimeline.segments.find(
-        (segment) => clampedPlaybackTime >= segment.startTime && clampedPlaybackTime <= segment.startTime + segment.duration
-      ) ?? playbackTimeline.segments[playbackTimeline.segments.length - 1],
-    [clampedPlaybackTime, playbackTimeline.segments]
+  const { pose: playbackPose, activeSegment: activePlaybackSegment } = useMemo(
+    () => getPlaybackPoseAtTime(playbackTimeline, clampedPlaybackTime, points),
+    [clampedPlaybackTime, playbackTimeline, points]
   );
-
-  const playbackPose = useMemo(() => {
-    const initialPose: PlaybackPose = {
-      nx: points[0]?.nx ?? 0.5,
-      ny: points[0]?.ny ?? 0.5,
-      heading: points[0]?.heading ?? 0,
-      color: points[0]?.color ?? INITIAL_POINT_COLOR,
-    };
-    const activeSegment = activePlaybackSegment;
-    if (!activeSegment) return initialPose;
-    if (activeSegment.kind === "wait") return activeSegment.pose;
-    if (activeSegment.kind === "rotate") {
-      const t = Math.max(0, Math.min(1, (clampedPlaybackTime - activeSegment.startTime) / activeSegment.duration));
-      return {
-        ...activeSegment.pose,
-        heading: interpolateHeading(activeSegment.startHeading, activeSegment.endHeading, t),
-      };
-    }
-
-    const segmentTime = clampedPlaybackTime - activeSegment.startTime;
-    const pathDistance = getMotionProfileDistanceAtTime(activeSegment.profile, segmentTime);
-    const startIndex = Math.max(
-      0,
-      activeSegment.cumulativeDistances.findIndex((distance) => distance >= pathDistance) - 1
-    );
-    const endIndex = Math.min(activeSegment.samples.length - 1, startIndex + 1);
-    const startDistance = activeSegment.cumulativeDistances[startIndex] ?? 0;
-    const endDistance = activeSegment.cumulativeDistances[endIndex] ?? startDistance;
-    const localT =
-      endDistance > startDistance ? Math.max(0, Math.min(1, (pathDistance - startDistance) / (endDistance - startDistance))) : 0;
-    const bezierT = (startIndex + localT) / Math.max(1, activeSegment.samples.length - 1);
-    const startSample = activeSegment.samples[startIndex] ?? initialPose;
-    const endSample = activeSegment.samples[endIndex] ?? startSample;
-    const headingMode = activeSegment.point.headingMode ?? "constant";
-    const heading =
-      headingMode === "linear"
-        ? interpolateHeadingRange(
-            activeSegment.point.startHeading ?? 0,
-            activeSegment.point.endHeading ?? 0,
-            bezierT,
-            activeSegment.point.linearStartT ?? 0,
-            activeSegment.point.linearEndT ?? 1
-          )
-        : interpolateHeading(startSample.heading, endSample.heading, localT);
-    return {
-      nx: interpolateNumber(startSample.nx, endSample.nx, localT),
-      ny: interpolateNumber(startSample.ny, endSample.ny, localT),
-      heading,
-      color: activeSegment.point.color,
-    };
-  }, [activePlaybackSegment, clampedPlaybackTime, points]);
 
   const playbackAccentColor =
     activePlaybackSegment?.kind === "path"
@@ -684,24 +195,10 @@ export default function PathPlannerPage() {
         ? activePlaybackSegment.color
         : activePlaybackSegment?.pose.color ?? points[0]?.color ?? INITIAL_POINT_COLOR;
 
-  const playbackTrackBackground = useMemo(() => {
-    if (playbackTimeline.totalTime <= 0) return "rgba(148, 163, 184, 0.35)";
-
-    const stops: string[] = [];
-    playbackTimeline.segments.forEach((segment) => {
-      const startPercent = (segment.startTime / playbackTimeline.totalTime) * 100;
-      const endPercent = ((segment.startTime + segment.duration) / playbackTimeline.totalTime) * 100;
-      const segmentColor =
-        segment.kind === "path"
-          ? segment.point.color
-          : segment.kind === "rotate"
-            ? segment.color
-            : "rgba(148, 163, 184, 0.35)";
-      stops.push(`${segmentColor} ${startPercent.toFixed(3)}%`, `${segmentColor} ${endPercent.toFixed(3)}%`);
-    });
-
-    return `linear-gradient(to right, ${stops.join(", ")})`;
-  }, [playbackTimeline.segments, playbackTimeline.totalTime]);
+  const playbackTrackBackground = useMemo(
+    () => createPlaybackTrackBackground(playbackTimeline),
+    [playbackTimeline]
+  );
 
   const robotSvgFrame = useMemo(() => {
     const safeNx = Number.isFinite(playbackPose.nx) ? clamp01(playbackPose.nx) : 0.5;
@@ -733,97 +230,6 @@ export default function PathPlannerPage() {
       centerY: y + snappedHeight / 2,
     };
   }, [fieldSize, playbackPose.nx, playbackPose.ny, robotConstants.length, robotConstants.width]);
-
-  const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
-    arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
-
-  const clearHistory = () => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setUndoStack([]);
-    setRedoStack([]);
-    dragStartSnapshotRef.current = null;
-    editStartSnapshotRef.current = null;
-    nameEditStartSnapshotRef.current = null;
-  };
-
-  const pushUndoSnapshot = (snapshot: PlannerSnapshot | null) => {
-    if (!snapshot || areSnapshotsEqual(snapshot, createSnapshot())) return;
-
-    const nextUndoStack = [...undoStackRef.current, snapshot];
-    undoStackRef.current = nextUndoStack;
-    redoStackRef.current = [];
-    setUndoStack(nextUndoStack);
-    setRedoStack([]);
-  };
-
-  const pushCurrentSnapshot = () => {
-    const currentSnapshot = createSnapshot();
-    const nextUndoStack = [...undoStackRef.current, currentSnapshot];
-    undoStackRef.current = nextUndoStack;
-    redoStackRef.current = [];
-    setUndoStack(nextUndoStack);
-    setRedoStack([]);
-  };
-
-  const pushCurrentSnapshotIfChanged = (nextPoints: Point[], nextSequenceItems = sequenceItemsRef.current) => {
-    if (areSnapshotsEqual(createSnapshot(), { points: nextPoints, sequenceItems: nextSequenceItems })) return;
-    pushCurrentSnapshot();
-  };
-
-  const beginPositionEdit = () => {
-    editStartSnapshotRef.current ??= createSnapshot();
-  };
-
-  const commitPositionEdit = () => {
-    pushUndoSnapshot(editStartSnapshotRef.current);
-    editStartSnapshotRef.current = null;
-  };
-
-  const beginNameEdit = () => {
-    nameEditStartSnapshotRef.current ??= createSnapshot();
-  };
-
-  const commitNameEdit = () => {
-    pushUndoSnapshot(nameEditStartSnapshotRef.current);
-    nameEditStartSnapshotRef.current = null;
-  };
-
-  const restorePointSnapshot = useCallback((snapshot: PlannerSnapshot) => {
-    setPlannerSnapshot(snapshot);
-    setHoverTarget(null);
-    setActiveTarget(null);
-    setIsDragging(false);
-    dragStartSnapshotRef.current = null;
-    editStartSnapshotRef.current = null;
-    nameEditStartSnapshotRef.current = null;
-  }, []);
-
-  const handleUndo = useCallback(() => {
-    const previousSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
-    if (!previousSnapshot) return;
-
-    const nextRedoStack = [...redoStackRef.current, createSnapshot()];
-    const nextUndoStack = undoStackRef.current.slice(0, -1);
-    undoStackRef.current = nextUndoStack;
-    redoStackRef.current = nextRedoStack;
-    setRedoStack(nextRedoStack);
-    setUndoStack(nextUndoStack);
-    restorePointSnapshot(previousSnapshot);
-  }, [restorePointSnapshot]);
-
-  const handleRedo = useCallback(() => {
-    const nextSnapshot = redoStackRef.current[redoStackRef.current.length - 1];
-    if (!nextSnapshot) return;
-
-    const nextUndoStack = [...undoStackRef.current, createSnapshot()];
-    const nextRedoStack = redoStackRef.current.slice(0, -1);
-    undoStackRef.current = nextUndoStack;
-    redoStackRef.current = nextRedoStack;
-    setUndoStack(nextUndoStack);
-    setRedoStack(nextRedoStack);
-    restorePointSnapshot(nextSnapshot);
-  }, [restorePointSnapshot]);
 
   useEffect(() => {
     const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -869,14 +275,6 @@ export default function PathPlannerPage() {
   }, [kotlinExport]);
 
   useEffect(() => {
-    pointsRef.current = points;
-  }, [points]);
-
-  useEffect(() => {
-    sequenceItemsRef.current = sequenceItems;
-  }, [sequenceItems]);
-
-  useEffect(() => {
     const field = fieldRef.current;
     if (!field) return;
 
@@ -890,7 +288,7 @@ export default function PathPlannerPage() {
 
     observer.observe(field);
     return () => observer.disconnect();
-  }, []);
+  }, [setPlannerPoints]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -925,7 +323,7 @@ export default function PathPlannerPage() {
     });
 
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [setPlannerPoints]);
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1788,756 +1186,123 @@ export default function PathPlannerPage() {
 
   return (
     <main className={styles.container}>
-      <div className={styles.fieldWrapper}>
-        <div className={styles.fieldContainer} ref={fieldRef}>
-          <Image
-            src={fieldImageSrc}
-            alt="Field Map"
-            fill
-            priority
-            unoptimized={fieldImageSrc.startsWith("data:")}
-            sizes="(max-width: 768px) 100vw, (max-height: 100vh) 100vh, 1000px"
-            className={styles.fieldImage}
-          />
-          <svg
-            ref={svgRef}
-            className={styles.svgOverlay}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
-            onDoubleClick={handleFieldDoubleClick}
-            style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "grab" : "default") }}
-            viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
-          >
-            {hasMeasuredField && points.map((p, i) => {
-              if (i === points.length - 1) return null;
-              const nextP = points[i + 1];
-              if (nextP.hidden) return null;
-              const start = toSvgPixelCoords(p.nx, p.ny, fieldSize);
-              const end = toSvgPixelCoords(nextP.nx, nextP.ny, fieldSize);
-              const controlPoints = (nextP.controlPoints ?? []).map((controlPoint) =>
-                toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize)
-              );
-
-              if (controlPoints.length > 0) {
-                return (
-                  <path
-                    key={`line-${p.id}`}
-                    d={createSplinePath(start, controlPoints, end)}
-                    fill="none"
-                    stroke={nextP.color}
-                    strokeWidth="6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                );
-              }
-
-              return (
-                <line
-                  key={`line-${p.id}`}
-                  x1={start.x}
-                  y1={start.y}
-                  x2={end.x}
-                  y2={end.y}
-                  stroke={nextP.color}
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                />
-              );
-            })}
-
-            {hasMeasuredField && points.map((p, i) => {
-              if (!isPointVisible(i)) return null;
-              const { x, y } = toSvgPixelCoords(p.nx, p.ny, fieldSize);
-              const isHovered = isSameTarget(hoverTarget, { kind: "point", index: i }) && !p.locked;
-
-              return (
-                <g key={`point-${p.id}`}>
-                  {isHovered && (
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r={POINT_DIAMETER / 2}
-                      fill="rgba(0,0,0,0.45)"
-                      filter="blur(4px)"
-                      transform="translate(0 2)"
-                    />
-                  )}
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={POINT_DIAMETER / 2}
-                    fill={p.color}
-                    stroke={isHovered ? "white" : "transparent"}
-                    strokeWidth="2"
-                  />
-                </g>
-              );
-            })}
-
-            {hasMeasuredField && points.map((p, i) =>
-              p.hidden ? null : (p.controlPoints ?? []).map((controlPoint, j) => {
-                const { x, y } = toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize);
-                const isHovered =
-                  isSameTarget(hoverTarget, { kind: "control", pathIndex: i, controlIndex: j }) && !p.locked;
-
-                return (
-                  <g key={`control-${controlPoint.id}`}>
-                    {isHovered && (
-                      <circle
-                        cx={x}
-                        cy={y}
-                        r={POINT_DIAMETER / 2}
-                        fill="rgba(0,0,0,0.45)"
-                        filter="blur(4px)"
-                        transform="translate(0 2)"
-                      />
-                    )}
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r={POINT_DIAMETER / 2}
-                      fill={p.color}
-                      stroke={isHovered ? "white" : "transparent"}
-                      strokeWidth="2"
-                    />
-                    <text
-                      x={x}
-                      y={y}
-                      fill="#111827"
-                      fontSize="12"
-                      fontWeight="700"
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      pointerEvents="none"
-                    >
-                      {j + 1}
-                    </text>
-                  </g>
-                );
-              })
-            )}
-            {hasMeasuredField && (
-              <image
-                href="/robot.png"
-                x={robotSvgFrame.x}
-                y={robotSvgFrame.y}
-                width={robotSvgFrame.width}
-                height={robotSvgFrame.height}
-                preserveAspectRatio="none"
-                transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}
-                opacity="0.92"
-                pointerEvents="none"
-              />
-            )}
-          </svg>
-        </div>
-      </div>
+      <FieldCanvas
+        fieldRef={fieldRef}
+        svgRef={svgRef}
+        fieldImageSrc={fieldImageSrc}
+        fieldSize={fieldSize}
+        points={points}
+        hoverTarget={hoverTarget}
+        isDragging={isDragging}
+        hasMeasuredField={hasMeasuredField}
+        robotSvgFrame={robotSvgFrame}
+        playbackPose={playbackPose}
+        isPointVisible={isPointVisible}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
+        onDoubleClick={handleFieldDoubleClick}
+      />
 
       <div className={styles.sidebarColumn}>
-      <aside className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>
-          <div className={styles.sidebarTitleRow}>
-            {sidebarPage === "auton" ? (
-              <h2 className={styles.sidebarTitle}>Path Editor</h2>
-            ) : sidebarPage === "poses" ? (
-              <h2 className={styles.sidebarTitle}>Start Poses</h2>
-            ) : (
-              <h2 className={styles.sidebarTitle}>Constants</h2>
-            )}
-            <div className={styles.importExportActions}>
-              <button
-                className={styles.secondaryIconButton}
-                onClick={handleUndo}
-                aria-disabled={undoStack.length === 0}
-                aria-label="Undo"
-                title="Undo"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 7v6h6"></path>
-                  <path d="M21 17a9 9 0 0 0-15-6.7L3 13"></path>
-                </svg>
-              </button>
-              <button
-                className={styles.secondaryIconButton}
-                onClick={handleRedo}
-                aria-disabled={redoStack.length === 0}
-                aria-label="Redo"
-                title="Redo"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 7v6h-6"></path>
-                  <path d="M3 17a9 9 0 0 1 15-6.7L21 13"></path>
-                </svg>
-              </button>
-              <button
-                className={`${styles.secondaryIconButton} ${sidebarPage === "constants" ? styles.activeIconButton : ""}`}
-                onClick={handleImportConstantsClick}
-                aria-label="Import Constants"
-                title={
-                  sidebarPage === "constants"
-                    ? "Import Constants"
-                    : `Constants`
-                }
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v20"></path>
-                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path>
-                  <path d="M19 12h3"></path>
-                  <path d="M2 12h3"></path>
-                </svg>
-              </button>
-              <button
-                className={`${styles.secondaryIconButton} ${sidebarPage === "poses" ? styles.activeIconButton : ""}`}
-                onClick={handleImportPosesClick}
-                aria-label="Import Poses"
-                title={sidebarPage === "poses" ? "Import Start Poses" : "Start Poses"}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="6" cy="18" r="2"></circle>
-                  <circle cx="18" cy="6" r="2"></circle>
-                  <path d="M8 18c4 0 4-12 8-12"></path>
-                  <path d="M12 10h.01"></path>
-                </svg>
-              </button>
-              <button
-                className={`${styles.secondaryIconButton} ${sidebarPage === "auton" ? styles.activeIconButton : ""}`}
-                onClick={handleSelectAutonClick}
-                aria-label="Select Auton"
-                title={sidebarPage === "auton" ? "Select Auton" : "Path Editor"}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>
-                  <path d="M14 2v6h6"></path>
-                  <path d="m9 15 2 2 4-4"></path>
-                </svg>
-              </button>
-              <button
-                className={styles.secondaryIconButton}
-                onClick={handleExportKotlin}
-                disabled={sidebarPage === "constants"}
-                aria-label={sidebarPage === "poses" ? "Export Poses" : "Export Kotlin"}
-                title={
-                  sidebarPage === "constants"
-                    ? "Export unavailable for robot constants"
-                    : sidebarPage === "poses"
-                      ? "Export Poses"
-                      : "Export Kotlin"
-                }
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="17 8 12 3 7 8"></polyline>
-                  <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-              </button>
-              <input
-                ref={importInputRef}
-                className={styles.hiddenFileInput}
-                type="file"
-                accept=".kt,text/x-kotlin,text/plain"
-                onChange={handleImportKotlin}
-              />
-              <input
-                ref={posesInputRef}
-                className={styles.hiddenFileInput}
-                type="file"
-                accept=".kt,text/x-kotlin,text/plain"
-                onChange={handleImportPoses}
-              />
-              <input
-                ref={constantsInputRef}
-                className={styles.hiddenFileInput}
-                type="file"
-                accept=".kt,text/x-kotlin,text/plain"
-                onChange={handleImportConstants}
-              />
-            </div>
-          </div>
-        </div>
-
-        {sidebarPage === "auton" ? (
-          <>
-            <div
-              ref={pointsListRef}
-              className={styles.pointsList}
-              onDragOver={handlePointsListDragOver}
-              onDragLeave={handlePointsListDragLeave}
-              onDrop={() => stopCardDragAutoScroll()}
-            >
-              {(() => {
-                const p = points[0];
-                const coords = toFieldCoords(p.nx, p.ny);
-                return (
-                  <PointCard
-                    key={p.id}
-                    index={0}
-                    name="Start Pose"
-                    poseName={p.poseName}
-                    color={p.color}
-                    locked={p.locked}
-                    hidden={Boolean(p.hidden)}
-                    x={coords.x}
-                    y={coords.y}
-                    heading={p.heading}
-                    headingMode={p.headingMode ?? "constant"}
-                    constantHeading={p.constantHeading ?? 0}
-                    startHeading={p.startHeading ?? 0}
-                    endHeading={p.endHeading ?? 0}
-                    linearStartT={p.linearStartT ?? 0}
-                    linearEndT={p.linearEndT ?? 1}
-                    controlPoints={[]}
-                    controlPointCount={0}
-                    controlsExpanded={false}
-                    isActive={targetPathIndex(hoverTarget) === 0 || targetPathIndex(activeTarget) === 0}
-                    onChange={(axis, val) => handleCoordChange(0, axis, val)}
-                    startPoseOptions={savedPoses}
-                    onStartPoseSelect={handleStartPoseSelect}
-                    onPositionEditStart={beginPositionEdit}
-                    onPositionEditCommit={commitPositionEdit}
-                    onNameEditStart={beginNameEdit}
-                    onNameEditCommit={commitNameEdit}
-                    onHeadingChange={handleHeadingChange}
-                    onToggleLocked={() => handleToggleLocked(0)}
-                    onToggleHidden={() => undefined}
-                    onControlPointEditStart={beginPositionEdit}
-                    onControlPointEditCommit={commitPositionEdit}
-                    canDelete={isShiftPressed}
-                    onDelete={() => undefined}
-                  />
-                );
-              })()}
-              {(sequenceItems.length > 0
-                ? sequenceItems
-                : points.slice(1).map((point) => ({ id: `fallback-${point.id}`, kind: "path" as const, pointId: point.id }))
-              ).map((item, sequenceIndex) => {
-                const isDragOverTarget =
-                  draggingPathIndex !== null &&
-                  draggingPathIndex !== sequenceIndex &&
-                  dragOverPathIndex === sequenceIndex;
-                const isBeingDragged = draggingPathIndex === sequenceIndex;
-
-                if (item.kind === "action") {
-                  if (areActionsHidden) return null;
-
-                  return (
-                    <div
-                      key={item.id}
-                      className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
-                      draggable
-                      onPointerDownCapture={handleSequenceCardPointerDownCapture}
-                      onPointerUpCapture={restoreSequenceCardDragging}
-                      onPointerCancel={restoreSequenceCardDragging}
-                      onDragStart={(event) => handlePathCardDragStart(sequenceIndex, event)}
-                      onDragOver={(event) => handlePathCardDragOver(sequenceIndex, event)}
-                      onDrop={(event) => handlePathCardDrop(sequenceIndex, event)}
-                      onDragEnd={clearPathCardDragState}
-                    >
-                      <ActionCard
-                        name={item.name}
-                        mode={item.mode}
-                        timeout={item.timeout}
-                        onNameChange={(name) => handleActionNameChange(item.id, name)}
-                        onModeChange={(mode) => handleActionModeChange(item.id, mode)}
-                        onTimeoutChange={(timeout) => handleActionTimeoutChange(item.id, timeout)}
-                        onEditStart={beginNameEdit}
-                        onEditCommit={commitNameEdit}
-                        onDelete={() => handleRemoveAction(item.id)}
-                      />
-                    </div>
-                  );
-                }
-
-                const i = points.findIndex((point) => point.id === item.pointId);
-                const p = points[i];
-                if (!p) return null;
-                const coords = toFieldCoords(p.nx, p.ny);
-                return (
-                  <div
-                    key={item.id}
-                    className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
-                    draggable
-                    onPointerDownCapture={handleSequenceCardPointerDownCapture}
-                    onPointerUpCapture={restoreSequenceCardDragging}
-                    onPointerCancel={restoreSequenceCardDragging}
-                    onDragStart={(event) => handlePathCardDragStart(sequenceIndex, event)}
-                    onDragOver={(event) => handlePathCardDragOver(sequenceIndex, event)}
-                    onDrop={(event) => handlePathCardDrop(sequenceIndex, event)}
-                    onDragEnd={clearPathCardDragState}
-                  >
-                    <PointCard
-                      index={i}
-                      name={p.name ?? `path${i}`}
-                      poseName={p.poseName}
-                      color={p.color}
-                      locked={p.locked}
-                      hidden={Boolean(p.hidden)}
-                      x={coords.x}
-                      y={coords.y}
-                      heading={p.heading}
-                      headingMode={p.headingMode ?? "constant"}
-                      constantHeading={p.constantHeading ?? 0}
-                      startHeading={p.startHeading ?? 0}
-                      endHeading={p.endHeading ?? 0}
-                      linearStartT={p.linearStartT ?? 0}
-                      linearEndT={p.linearEndT ?? 1}
-                      controlPoints={(p.controlPoints ?? []).map((controlPoint) => ({
-                        id: controlPoint.id,
-                        ...toFieldCoords(controlPoint.nx, controlPoint.ny),
-                      }))}
-                      controlPointCount={(p.controlPoints ?? []).length}
-                      controlsExpanded={p.controlsExpanded ?? true}
-                      isActive={targetPathIndex(hoverTarget) === i || targetPathIndex(activeTarget) === i}
-                      onChange={(axis, val) => handleCoordChange(i, axis, val)}
-                      onPositionEditStart={beginPositionEdit}
-                      onPositionEditCommit={commitPositionEdit}
-                      onRename={(name) => handleRenamePath(i, name)}
-                      onNameEditStart={beginNameEdit}
-                      onNameEditCommit={commitNameEdit}
-                      onInterpolationChange={(mode) => handlePathInterpolationChange(i, mode)}
-                      onPathHeadingChange={(field, val) => handlePathHeadingChange(i, field, val)}
-                      onToggleLocked={() => handleToggleLocked(i)}
-                      onToggleHidden={(hideOthers) => handleToggleHidden(i, hideOthers)}
-                      onToggleControlsExpanded={() => handleToggleControlsExpanded(i)}
-                      onAddControlPoint={() => handleAddControlPoint(i)}
-                      onControlPointChange={(controlIndex, axis, val) => handleControlCoordChange(i, controlIndex, axis, val)}
-                      onControlPointEditStart={beginPositionEdit}
-                      onControlPointEditCommit={commitPositionEdit}
-                      canDelete={isShiftPressed}
-                      onDelete={() => handleRemovePoint(i)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className={styles.sidebarFooter}>
-              <button className={styles.addButton} onClick={handleAddPoint}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                Add Path
-              </button>
-              <button className={`${styles.addButton} ${styles.addActionButton}`} onClick={handleAddAction}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                Add Action
-              </button>
-              <button
-                className={`${styles.addButton} ${styles.toggleActionsButton} ${areActionsHidden ? styles.actionsHiddenButton : ""}`}
-                onClick={() => {
-                  if (!hasActions) return;
-                  setAreActionsHidden((currentValue) => !currentValue);
-                }}
-                aria-disabled={!hasActions}
-                aria-pressed={areActionsHidden}
-                aria-label={areActionsHidden ? "Show all actions" : "Hide all actions"}
-                title={areActionsHidden ? "Show actions" : "Hide actions"}
-              >
-                {areActionsHidden ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17.94 17.94A10.9 10.9 0 0 1 12 19c-6.5 0-10-7-10-7a18.4 18.4 0 0 1 5.06-5.94"></path>
-                    <path d="M9.9 4.24A10.6 10.6 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19"></path>
-                    <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88"></path>
-                    <line x1="2" y1="2" x2="22" y2="22"></line>
-                  </svg>
-                )}
-                {areActionsHidden ? "Show Actions" : "Hide Actions"}
-              </button>
-            </div>
-          </>
-        ) : sidebarPage === "poses" ? (
-          <div className={styles.pointsList}>
-            {savedPoses.length > 0 ? (
-              savedPoses.map((pose) => (
-                <div className={styles.poseCard} key={pose.name}>
-                  <div className={styles.poseName}>{pose.name}</div>
-                  <div className={styles.poseCoordRow}>
-                    <div className={styles.inputGroup}>
-                      <label className={styles.inputLabel}>X (in)</label>
-                      <input className={styles.inputField} value={pose.x.toFixed(1)} readOnly />
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label className={styles.inputLabel}>Y (in)</label>
-                      <input className={styles.inputField} value={pose.y.toFixed(1)} readOnly />
-                    </div>
-                    <div className={styles.inputGroup}>
-                      <label className={styles.inputLabel}>Heading (deg)</label>
-                      <input className={styles.inputField} value={(pose.heading ?? 0).toFixed(1)} readOnly />
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className={styles.emptyState}>No start poses saved.</div>
-            )}
-          </div>
-        ) : (
-          <div className={styles.pointsList}>
-            <div className={styles.poseCard}>
-              <div className={styles.poseName}>Robot Dimensions</div>
-              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Width (in)</label>
-                  <input className={styles.inputField} value={robotConstants.width.toFixed(2)} readOnly />
-                </div>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Length (in)</label>
-                  <input className={styles.inputField} value={robotConstants.length.toFixed(2)} readOnly />
-                </div>
-              </div>
-            </div>
-            <div className={styles.poseCard}>
-              <div className={styles.poseName}>Braking Acceleration</div>
-              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Forward (in/s^2)</label>
-                  <input className={styles.inputField} value={robotConstants.forwardBrakeStrength.toFixed(5)} readOnly />
-                </div>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Lateral (in/s^2)</label>
-                  <input className={styles.inputField} value={robotConstants.lateralBrakeStrength.toFixed(5)} readOnly />
-                </div>
-              </div>
-            </div>
-            <div className={styles.poseCard}>
-              <div className={styles.poseName}>Max Velocity</div>
-              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Forward (in/s)</label>
-                  <input className={styles.inputField} value={robotConstants.maxForwardVelocity.toFixed(5)} readOnly />
-                </div>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Lateral (in/s)</label>
-                  <input className={styles.inputField} value={robotConstants.maxLateralVelocity.toFixed(5)} readOnly />
-                </div>
-              </div>
-            </div>
-            <div className={styles.poseCard}>
-              <div className={styles.poseName}>Acceleration</div>
-              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Forward (in/s^2)</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className={styles.inputField}
-                    value={motionParameterDrafts.maxForwardAcceleration}
-                    onChange={(event) => updateMotionParameter("maxForwardAcceleration", event.target.value)}
-                    onBlur={() => formatMotionParameter("maxForwardAcceleration")}
-                  />
-                </div>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Lateral (in/s^2)</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className={styles.inputField}
-                    value={motionParameterDrafts.maxLateralAcceleration}
-                    onChange={(event) => updateMotionParameter("maxLateralAcceleration", event.target.value)}
-                    onBlur={() => formatMotionParameter("maxLateralAcceleration")}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className={styles.poseCard}>
-              <div className={styles.poseName}>Angular Velocity</div>
-              <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-                <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>(deg/s)</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className={styles.inputField}
-                    value={motionParameterDrafts.maxAngularVelocity}
-                    onChange={(event) => updateMotionParameter("maxAngularVelocity", event.target.value)}
-                    onBlur={() => formatMotionParameter("maxAngularVelocity")}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </aside>
-      <section className={styles.playbackSidebar} aria-label="Path playback">
-        <div className={styles.playbackRow}>
-          <button
-            className={styles.playButton}
-            onClick={handlePlaybackToggle}
-            aria-label={isPlaybackRunning ? "Pause path playback" : "Play path playback"}
-            title={isPlaybackRunning ? "Pause" : "Play"}
-          >
-            {isPlaybackRunning ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <rect x="6" y="5" width="4" height="14"></rect>
-                <rect x="14" y="5" width="4" height="14"></rect>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <polygon points="8,5 19,12 8,19"></polygon>
-              </svg>
-            )}
-          </button>
-          <input
-            className={styles.playbackRange}
-            type="range"
-            min="0"
-            max={Math.max(0.001, playbackTimeline.totalTime || 0)}
-            step="0.01"
-            value={Math.min(clampedPlaybackTime || 0, Math.max(0.001, playbackTimeline.totalTime || 0))}
-            style={
-              {
-                "--playback-color": playbackAccentColor,
-                "--playback-track": playbackTrackBackground,
-                accentColor: playbackAccentColor,
-              } as CSSProperties
-            }
-            onChange={(event) => {
-              setIsPlaybackRunning(false);
-              setPlaybackTime(Number(event.target.value));
-            }}
-            aria-label="Path playback progress"
-          />
-          <div className={styles.playbackTime}>
-            {formatPlaybackTime(clampedPlaybackTime)} / {formatPlaybackTime(playbackTimeline.totalTime)}
-          </div>
-        </div>
-      </section>
+        <PlannerSidebar
+          sidebarPage={sidebarPage}
+          points={points}
+          sequenceItems={sequenceItems}
+          savedPoses={savedPoses}
+          robotConstants={robotConstants}
+          motionParameterDrafts={motionParameterDrafts}
+          hoverTarget={hoverTarget}
+          activeTarget={activeTarget}
+          undoStackLength={undoStack.length}
+          redoStackLength={redoStack.length}
+          isShiftPressed={isShiftPressed}
+          areActionsHidden={areActionsHidden}
+          hasActions={hasActions}
+          draggingPathIndex={draggingPathIndex}
+          dragOverPathIndex={dragOverPathIndex}
+          importInputRef={importInputRef}
+          posesInputRef={posesInputRef}
+          constantsInputRef={constantsInputRef}
+          pointsListRef={pointsListRef}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onImportConstantsClick={handleImportConstantsClick}
+          onImportPosesClick={handleImportPosesClick}
+          onSelectAutonClick={handleSelectAutonClick}
+          onExportKotlin={handleExportKotlin}
+          onImportKotlin={handleImportKotlin}
+          onImportPoses={handleImportPoses}
+          onImportConstants={handleImportConstants}
+          onPointsListDragOver={handlePointsListDragOver}
+          onPointsListDragLeave={handlePointsListDragLeave}
+          onStopCardDragAutoScroll={stopCardDragAutoScroll}
+          onSequenceCardPointerDownCapture={handleSequenceCardPointerDownCapture}
+          onRestoreSequenceCardDragging={restoreSequenceCardDragging}
+          onPathCardDragStart={handlePathCardDragStart}
+          onPathCardDragOver={handlePathCardDragOver}
+          onPathCardDrop={handlePathCardDrop}
+          onClearPathCardDragState={clearPathCardDragState}
+          onCoordChange={handleCoordChange}
+          onStartPoseSelect={handleStartPoseSelect}
+          onPositionEditStart={beginPositionEdit}
+          onPositionEditCommit={commitPositionEdit}
+          onNameEditStart={beginNameEdit}
+          onNameEditCommit={commitNameEdit}
+          onHeadingChange={handleHeadingChange}
+          onRenamePath={handleRenamePath}
+          onPathInterpolationChange={handlePathInterpolationChange}
+          onPathHeadingChange={handlePathHeadingChange}
+          onToggleLocked={handleToggleLocked}
+          onToggleHidden={handleToggleHidden}
+          onToggleControlsExpanded={handleToggleControlsExpanded}
+          onAddControlPoint={handleAddControlPoint}
+          onControlCoordChange={handleControlCoordChange}
+          onRemovePoint={handleRemovePoint}
+          onActionNameChange={handleActionNameChange}
+          onActionModeChange={handleActionModeChange}
+          onActionTimeoutChange={handleActionTimeoutChange}
+          onRemoveAction={handleRemoveAction}
+          onAddPoint={handleAddPoint}
+          onAddAction={handleAddAction}
+          onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}
+          onUpdateMotionParameter={updateMotionParameter}
+          onFormatMotionParameter={formatMotionParameter}
+        />
+        <PlaybackControls
+          isRunning={isPlaybackRunning}
+          currentTime={clampedPlaybackTime}
+          totalTime={playbackTimeline.totalTime}
+          accentColor={playbackAccentColor}
+          trackBackground={playbackTrackBackground}
+          onToggle={handlePlaybackToggle}
+          onScrub={(time) => {
+            setIsPlaybackRunning(false);
+            setPlaybackTime(time);
+          }}
+        />
       </div>
 
       {isFieldImageModalOpen && (
-        <div
-          className={`${styles.modalBackdrop} ${styles.fadeModalBackdrop} ${isFieldImageModalVisible ? styles.fadeModalOpen : ""}`}
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeFieldImageModal(true);
-          }}
-          onDoubleClick={(event) => event.preventDefault()}
-        >
-          <section
-            className={`${styles.fieldImageModal} ${styles.fadeModalPanel}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="field-image-modal-title"
-          >
-            <div className={styles.exportModalHeader}>
-              <div>
-                <h2 id="field-image-modal-title" className={styles.exportModalTitle}>
-                  Field Image
-                </h2>
-                <p className={styles.exportModalSubtitle}>Choose a preset or upload a custom image.</p>
-              </div>
-              <button
-                className={styles.secondaryIconButton}
-                onClick={() => closeFieldImageModal()}
-                aria-label="Close field image modal"
-                title="Close"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            <div className={styles.fieldImageModalBody}>
-              <div className={styles.fieldPresetGrid}>
-                {FIELD_IMAGE_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    className={`${styles.fieldPresetButton} ${selectedFieldPresetId === preset.id ? styles.fieldPresetActive : ""}`}
-                    onClick={() => selectFieldPreset(preset)}
-                  >
-                    <span className={styles.fieldPresetPreview}>
-                      <Image src={preset.src} alt="" fill sizes="8rem" className={styles.fieldPresetImage} />
-                    </span>
-                    <span>{preset.name}</span>
-                  </button>
-                ))}
-              </div>
-              <input
-                ref={fieldImageInputRef}
-                className={styles.hiddenFileInput}
-                type="file"
-                accept="image/*"
-                onChange={handleFieldImageUpload}
-              />
-              <button className={styles.uploadFieldButton} onClick={() => fieldImageInputRef.current?.click()}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="17 8 12 3 7 8"></polyline>
-                  <line x1="12" y1="3" x2="12" y2="15"></line>
-                </svg>
-                Upload Custom Field
-              </button>
-            </div>
-          </section>
-        </div>
+        <FieldImageModal
+          isVisible={isFieldImageModalVisible}
+          selectedFieldPresetId={selectedFieldPresetId}
+          fileInputRef={fieldImageInputRef}
+          onClose={closeFieldImageModal}
+          onSelectPreset={selectFieldPreset}
+          onUpload={handleFieldImageUpload}
+        />
       )}
 
       {kotlinExport && (
-        <div
-          className={styles.modalBackdrop}
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setKotlinExport(null);
-          }}
-        >
-          <section
-            className={styles.exportModal}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="export-modal-title"
-          >
-            <div className={styles.exportModalHeader}>
-              <div>
-                <h2 id="export-modal-title" className={styles.exportModalTitle}>
-                  {kotlinExport.fileName}
-                </h2>
-                <p className={styles.exportModalSubtitle}>{kotlinExport.subtitle}</p>
-              </div>
-              <button
-                className={styles.secondaryIconButton}
-                onClick={() => setKotlinExport(null)}
-                aria-label="Close export modal"
-                title="Close"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-
-            <textarea
-              ref={exportTextAreaRef}
-              className={styles.exportCode}
-              value={kotlinExport.contents}
-              readOnly
-              spellCheck={false}
-              aria-label="Generated Kotlin class file contents"
-            />
-
-            <div className={styles.exportModalActions}>
-              <span className={styles.copyStatus} aria-live="polite">
-                {didCopyExport ? "Copied" : "Select or copy the class text"}
-              </span>
-              <button className={styles.copyButton} onClick={handleCopyKotlinExport}>
-                Copy
-              </button>
-            </div>
-          </section>
-        </div>
+        <KotlinExportModal
+          kotlinExport={kotlinExport}
+          didCopyExport={didCopyExport}
+          textAreaRef={exportTextAreaRef}
+          onClose={() => setKotlinExport(null)}
+          onCopy={handleCopyKotlinExport}
+        />
       )}
     </main>
   );
