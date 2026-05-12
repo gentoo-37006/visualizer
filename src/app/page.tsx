@@ -578,28 +578,30 @@ export default function PathPlannerPage() {
         currentPose = { ...currentPose, heading: pathStartHeading };
       }
 
-      const profile = createMotionProfile(
-        distance,
-        motionLimits.maxVelocity,
-        motionLimits.acceleration,
-        motionLimits.brakeAcceleration
-      );
-      const duration = Math.max(getMotionProfileDuration(profile), 0.001);
+      if (distance > 0.001) {
+        const profile = createMotionProfile(
+          distance,
+          motionLimits.maxVelocity,
+          motionLimits.acceleration,
+          motionLimits.brakeAcceleration
+        );
+        const duration = Math.max(getMotionProfileDuration(profile), 0.001);
 
-      segments.push({
-        kind: "path",
-        startTime: elapsedTime,
-        duration,
-        point,
-        samples,
-        cumulativeDistances,
-        profile,
-      });
-      elapsedTime += duration;
-      currentPose = {
-        ...(samples[samples.length - 1] ?? currentPose),
-        color: point.color,
-      };
+        segments.push({
+          kind: "path",
+          startTime: elapsedTime,
+          duration,
+          point,
+          samples,
+          cumulativeDistances,
+          profile,
+        });
+        elapsedTime += duration;
+        currentPose = {
+          ...(samples[samples.length - 1] ?? currentPose),
+          color: point.color,
+        };
+      }
     });
 
     return { segments, totalTime: elapsedTime };
@@ -702,9 +704,21 @@ export default function PathPlannerPage() {
   }, [playbackTimeline.segments, playbackTimeline.totalTime]);
 
   const robotSvgFrame = useMemo(() => {
-    const center = toSvgPixelCoords(playbackPose.nx, playbackPose.ny, fieldSize);
-    const width = (robotConstants.width / FIELD_SIZE_INCHES) * (fieldSize.width - FIELD_BORDER_WIDTH * 2);
-    const height = (robotConstants.length / FIELD_SIZE_INCHES) * (fieldSize.height - FIELD_BORDER_WIDTH * 2);
+    const safeNx = Number.isFinite(playbackPose.nx) ? clamp01(playbackPose.nx) : 0.5;
+    const safeNy = Number.isFinite(playbackPose.ny) ? clamp01(playbackPose.ny) : 0.5;
+    const safeRobotWidth =
+      Number.isFinite(robotConstants.width) && robotConstants.width > 0
+        ? robotConstants.width
+        : DEFAULT_ROBOT_CONSTANTS.width;
+    const safeRobotLength =
+      Number.isFinite(robotConstants.length) && robotConstants.length > 0
+        ? robotConstants.length
+        : DEFAULT_ROBOT_CONSTANTS.length;
+    const center = toSvgPixelCoords(safeNx, safeNy, fieldSize);
+    const innerFieldWidth = Math.max(1, fieldSize.width - FIELD_BORDER_WIDTH * 2);
+    const innerFieldHeight = Math.max(1, fieldSize.height - FIELD_BORDER_WIDTH * 2);
+    const width = (safeRobotWidth / FIELD_SIZE_INCHES) * innerFieldWidth;
+    const height = (safeRobotLength / FIELD_SIZE_INCHES) * innerFieldHeight;
     const x = snapSvgPixel(center.x - width / 2);
     const y = snapSvgPixel(center.y - height / 2);
     const snappedWidth = Math.max(1, snapSvgPixel(width));
@@ -1289,6 +1303,7 @@ export default function PathPlannerPage() {
   };
 
   const updatePoint = (index: number, nx: number, ny: number) => {
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, nx, ny, poseName: index === 0 ? undefined : point.poseName } : point
@@ -1297,6 +1312,7 @@ export default function PathPlannerPage() {
   };
 
   const updateControlPoint = (pathIndex: number, controlIndex: number, nx: number, ny: number) => {
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => {
         if (i !== pathIndex) return point;
@@ -1631,12 +1647,14 @@ export default function PathPlannerPage() {
   };
 
   const getPointerNormalized = (e: ReactPointerEvent<SVGSVGElement> | globalThis.PointerEvent | globalThis.MouseEvent) => {
-    if (!svgRef.current) return { nx: 0, ny: 0 };
+    if (!svgRef.current) return null;
     const rect = svgRef.current.getBoundingClientRect();
     const fieldWidth = rect.width - POINT_DIAMETER - FIELD_BORDER_WIDTH * 2;
     const fieldHeight = rect.height - POINT_DIAMETER - FIELD_BORDER_WIDTH * 2;
+    if (fieldWidth <= 0 || fieldHeight <= 0) return null;
     let nx = (e.clientX - rect.left - POINT_RADIUS - FIELD_BORDER_WIDTH) / fieldWidth;
     let ny = (e.clientY - rect.top - POINT_RADIUS - FIELD_BORDER_WIDTH) / fieldHeight;
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
 
     nx = Math.max(0, Math.min(1, nx));
     ny = Math.max(0, Math.min(1, ny));
@@ -1692,13 +1710,17 @@ export default function PathPlannerPage() {
 
   const handlePointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (isDragging && activeTarget !== null) {
-      const { nx, ny } = getPointerNormalized(e);
+      const normalized = getPointerNormalized(e);
+      if (!normalized) return;
+      const { nx, ny } = normalized;
       updateTargetPosition(activeTarget, nx, ny);
       return;
     }
 
     if (!svgRef.current) return;
-    const { nx, ny } = getPointerNormalized(e);
+    const normalized = getPointerNormalized(e);
+    if (!normalized) return;
+    const { nx, ny } = normalized;
     setHoverTarget(getHitTarget(nx, ny));
   };
 
@@ -1717,7 +1739,9 @@ export default function PathPlannerPage() {
     event.preventDefault();
     if (performance.now() < suppressFieldDoubleClickUntilRef.current) return;
     if (isDragging) return;
-    const { nx, ny } = getPointerNormalized(event.nativeEvent);
+    const normalized = getPointerNormalized(event.nativeEvent);
+    if (!normalized) return;
+    const { nx, ny } = normalized;
     if (getHitTarget(nx, ny) !== null) return;
     if (fieldImageModalCloseTimerRef.current !== null) {
       window.clearTimeout(fieldImageModalCloseTimerRef.current);
