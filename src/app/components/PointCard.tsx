@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import styles from "../page.module.css";
-import type { HeadingInterpolation, PathHeadingField } from "../plannerTypes";
+import type { HeadingInterpolation, PathActionTrigger, PathActionTriggerMode, PathHeadingField } from "../plannerTypes";
 import { isKotlinIdentifierDraft, isNumericDraft } from "../plannerUtils";
 import { ControlPointCard } from "./ControlPointCard";
 
@@ -23,6 +23,8 @@ type PointCardProps = {
   linearStartT: number;
   linearEndT: number;
   controlPoints: Array<{ id: string; x: number; y: number }>;
+  actionTriggers?: PathActionTrigger[];
+  actionsExpanded: boolean;
   controlPointCount: number;
   controlsExpanded: boolean;
   isActive: boolean;
@@ -37,11 +39,21 @@ type PointCardProps = {
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
+  onPathActionTriggerChange?: (
+    triggerId: string,
+    field: "mode" | "actionName" | "t",
+    value: string
+  ) => void;
+  onToggleActionsExpanded?: () => void;
+  onAddPathAction?: () => void;
+  onRemovePathActionTrigger?: (triggerId: string) => void;
   onToggleLocked: () => void;
   onToggleHidden: (hideOthers: boolean) => void;
   onToggleControlsExpanded?: () => void;
   onAddControlPoint?: () => void;
   onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
+  onRemoveControlPoint?: (controlIndex: number) => void;
+  onReorderControlPoint?: (fromIndex: number, toIndex: number) => void;
   onControlPointEditStart: () => void;
   onControlPointEditCommit: () => void;
   canDelete: boolean;
@@ -65,6 +77,8 @@ export function PointCard({
   linearStartT,
   linearEndT,
   controlPoints,
+  actionTriggers = [],
+  actionsExpanded,
   controlPointCount,
   controlsExpanded,
   isActive,
@@ -79,11 +93,17 @@ export function PointCard({
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
+  onPathActionTriggerChange,
+  onToggleActionsExpanded,
+  onAddPathAction,
+  onRemovePathActionTrigger,
   onToggleLocked,
   onToggleHidden,
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlPointChange,
+  onRemoveControlPoint,
+  onReorderControlPoint,
   onControlPointEditStart,
   onControlPointEditCommit,
   canDelete,
@@ -94,6 +114,10 @@ export function PointCard({
   const [draftY, setDraftY] = useState("");
   const [draftHeading, setDraftHeading] = useState("");
   const [draftPathHeading, setDraftPathHeading] = useState("");
+  const [editingActionTrigger, setEditingActionTrigger] = useState<string | null>(null);
+  const [draftActionT, setDraftActionT] = useState("");
+  const [draggingControlIndex, setDraggingControlIndex] = useState<number | null>(null);
+  const [dragOverControlIndex, setDragOverControlIndex] = useState<number | null>(null);
   const [draftName, setDraftName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameBeforeEdit, setNameBeforeEdit] = useState("");
@@ -165,6 +189,61 @@ export function PointCard({
 
   const handleVisibilityClick = (event: MouseEvent<HTMLButtonElement>) => {
     onToggleHidden(event.shiftKey);
+  };
+
+  const sortedActionTriggers = [...actionTriggers].sort((a, b) => a.t - b.t);
+
+  const handleControlCardPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    event.currentTarget.draggable = !Boolean(target.closest("input, select, button, textarea"));
+  };
+
+  const restoreControlCardDragging = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.draggable = true;
+  };
+
+  const stopParentCardDrag = (event: PointerEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
+  const handleControlDragStart = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    setDraggingControlIndex(controlIndex);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(controlIndex));
+  };
+
+  const handleControlDragOver = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
+    if (draggingControlIndex === null) return;
+    event.stopPropagation();
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (draggingControlIndex === controlIndex) {
+      if (dragOverControlIndex !== null) setDragOverControlIndex(null);
+      return;
+    }
+    setDragOverControlIndex(controlIndex);
+  };
+
+  const clearControlDragState = () => {
+    setDraggingControlIndex(null);
+    setDragOverControlIndex(null);
+  };
+
+  const handleControlDrop = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    event.preventDefault();
+    if (draggingControlIndex !== null && draggingControlIndex !== controlIndex) {
+      onReorderControlPoint?.(draggingControlIndex, controlIndex);
+    }
+    event.currentTarget.draggable = true;
+    clearControlDragState();
+  };
+
+  const handleControlDragEnd = (event: DragEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    event.currentTarget.draggable = true;
+    clearControlDragState();
   };
 
   const handleNameFocus = () => {
@@ -444,6 +523,123 @@ export function PointCard({
         )}
       </div>
       {index > 0 && (
+        <div className={styles.pathActionsPanel}>
+          <div className={styles.pathActionsHeader}>
+            <button
+              className={styles.pathActionsToggle}
+              onClick={onToggleActionsExpanded}
+              aria-expanded={actionsExpanded}
+            >
+              <svg
+                className={`${styles.chevronIcon} ${actionsExpanded ? styles.chevronOpen : ""}`}
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+              <span>Path Actions ({sortedActionTriggers.length})</span>
+            </button>
+            <button className={styles.addPathActionButton} onClick={onAddPathAction}>
+              <span aria-hidden="true">+</span>
+              Add
+            </button>
+          </div>
+          {actionsExpanded && sortedActionTriggers.length > 0 && (
+            <div className={styles.pathActionsBody}>
+              {sortedActionTriggers.map((trigger, triggerIndex) => (
+                <div
+                  className={styles.pathActionCard}
+                  key={trigger.id}
+                  data-card-drag-block="true"
+                  onPointerDownCapture={stopParentCardDrag}
+                >
+                  <div className={styles.pathActionTitleRow}>
+                    <input
+                      className={styles.pathActionNameInput}
+                      maxLength={24}
+                      value={trigger.actionName}
+                      placeholder={`Action ${triggerIndex + 1}`}
+                      onChange={(event) =>
+                        onPathActionTriggerChange?.(trigger.id, "actionName", event.target.value.toUpperCase())
+                      }
+                      aria-label={`Path action ${triggerIndex + 1} name`}
+                    />
+                    <span className={styles.deleteAction}>
+                      <button
+                        className={`${styles.iconButton} ${styles.deleteButton} ${canDelete ? styles.deleteArmed : ""}`}
+                        onClick={(event) => {
+                          if (!event.shiftKey) return;
+                          onRemovePathActionTrigger?.(trigger.id);
+                        }}
+                        aria-label={`Remove path action ${triggerIndex + 1}`}
+                        aria-describedby={!canDelete ? `path-action-delete-tooltip-${index}-${trigger.id}` : undefined}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          <line x1="10" y1="11" x2="10" y2="17"></line>
+                          <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                      </button>
+                      {!canDelete && (
+                        <span
+                          id={`path-action-delete-tooltip-${index}-${trigger.id}`}
+                          className={styles.deleteTooltip}
+                          role="tooltip"
+                        >
+                          Hold Shift to delete
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className={styles.pathActionInputs}>
+                    <div className={styles.actionTriggerTGroup}>
+                      <label className={styles.inputLabel}>T</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={styles.inputField}
+                        value={editingActionTrigger === trigger.id ? draftActionT : trigger.t.toFixed(1)}
+                        placeholder="0.0"
+                        onFocus={() => {
+                          setEditingActionTrigger(trigger.id);
+                          setDraftActionT(trigger.t.toFixed(1));
+                        }}
+                        onChange={(event) => {
+                          if (!isNumericDraft(event.target.value)) return;
+                          setDraftActionT(event.target.value);
+                          onPathActionTriggerChange?.(trigger.id, "t", event.target.value);
+                        }}
+                        onBlur={() => setEditingActionTrigger(null)}
+                      />
+                    </div>
+                    <div className={styles.actionTriggerModeGroup}>
+                      <label className={styles.inputLabel}>Mode</label>
+                      <select
+                        className={styles.selectField}
+                        value={trigger.mode}
+                        onChange={(event) =>
+                          onPathActionTriggerChange?.(trigger.id, "mode", event.target.value as PathActionTriggerMode)
+                        }
+                      >
+                        <option value="start">Start</option>
+                        <option value="stop">Stop</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {index > 0 && (
         <div className={styles.controlPointsPanel}>
           <div className={styles.controlPointsHeader}>
             <button
@@ -474,15 +670,34 @@ export function PointCard({
           {controlsExpanded && controlPoints.length > 0 && (
             <div className={styles.controlPointsBody}>
               {controlPoints.map((controlPoint, controlIndex) => (
-                <ControlPointCard
+                <div
                   key={controlPoint.id}
-                  index={controlIndex}
-                  x={controlPoint.x}
-                  y={controlPoint.y}
-                  onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
-                  onEditStart={onControlPointEditStart}
-                  onEditCommit={onControlPointEditCommit}
-                />
+                  className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${draggingControlIndex !== controlIndex && dragOverControlIndex === controlIndex ? styles.pointCardDropTarget : ""} ${draggingControlIndex === controlIndex ? styles.pointCardDragging : ""}`}
+                  data-card-drag-block="true"
+                  draggable
+                  onPointerDownCapture={(event) => {
+                    stopParentCardDrag(event);
+                    handleControlCardPointerDown(event);
+                  }}
+                  onPointerUpCapture={restoreControlCardDragging}
+                  onPointerCancel={restoreControlCardDragging}
+                  onDragStart={(event) => handleControlDragStart(controlIndex, event)}
+                  onDragEnter={(event) => handleControlDragOver(controlIndex, event)}
+                  onDragOver={(event) => handleControlDragOver(controlIndex, event)}
+                  onDrop={(event) => handleControlDrop(controlIndex, event)}
+                  onDragEnd={handleControlDragEnd}
+                >
+                  <ControlPointCard
+                    index={controlIndex}
+                    x={controlPoint.x}
+                    y={controlPoint.y}
+                    onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
+                    onEditStart={onControlPointEditStart}
+                    onEditCommit={onControlPointEditCommit}
+                    canDelete={canDelete}
+                    onDelete={() => onRemoveControlPoint?.(controlIndex)}
+                  />
+                </div>
               ))}
             </div>
           )}

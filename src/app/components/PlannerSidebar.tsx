@@ -10,6 +10,7 @@ import type {
 import type { RobotConstants, SavedPose } from "../kotlinAutonFile";
 import type {
   AutonActionMode,
+  AutonAlliance,
   AutonSequenceItem,
   DragTarget,
   HeadingInterpolation,
@@ -28,6 +29,7 @@ type PlannerSidebarProps = {
   sidebarPage: SidebarPage;
   points: Point[];
   sequenceItems: AutonSequenceItem[];
+  autonAlliance: AutonAlliance;
   savedPoses: SavedPose[];
   robotConstants: RobotConstants;
   motionParameterDrafts: Record<keyof MotionParameters, string>;
@@ -46,6 +48,7 @@ type PlannerSidebarProps = {
   pointsListRef: RefObject<HTMLDivElement | null>;
   onUndo: () => void;
   onRedo: () => void;
+  onAutonAllianceChange: (alliance: AutonAlliance) => void;
   onImportConstantsClick: () => void;
   onImportPosesClick: () => void;
   onSelectAutonClick: () => void;
@@ -72,11 +75,22 @@ type PlannerSidebarProps = {
   onRenamePath: (index: number, name: string) => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onToggleActionsExpanded: (index: number) => void;
+  onAddPathAction: (index: number) => void;
+  onPathActionTriggerChange: (
+    index: number,
+    triggerId: string,
+    field: "mode" | "actionName" | "t",
+    value: string
+  ) => void;
+  onRemovePathActionTrigger: (index: number, triggerId: string) => void;
   onToggleLocked: (index: number) => void;
   onToggleHidden: (index: number, hideOthers: boolean) => void;
   onToggleControlsExpanded: (index: number) => void;
   onAddControlPoint: (index: number) => void;
   onControlCoordChange: (pathIndex: number, controlIndex: number, axis: "x" | "y", value: string) => void;
+  onRemoveControlPoint: (pathIndex: number, controlIndex: number) => void;
+  onReorderControlPoint: (pathIndex: number, fromIndex: number, toIndex: number) => void;
   onRemovePoint: (index: number) => void;
   onActionNameChange: (id: string, name: string) => void;
   onActionModeChange: (id: string, mode: AutonActionMode) => void;
@@ -93,6 +107,7 @@ export function PlannerSidebar({
   sidebarPage,
   points,
   sequenceItems,
+  autonAlliance,
   savedPoses,
   robotConstants,
   motionParameterDrafts,
@@ -111,6 +126,7 @@ export function PlannerSidebar({
   pointsListRef,
   onUndo,
   onRedo,
+  onAutonAllianceChange,
   onImportConstantsClick,
   onImportPosesClick,
   onSelectAutonClick,
@@ -137,11 +153,17 @@ export function PlannerSidebar({
   onRenamePath,
   onPathInterpolationChange,
   onPathHeadingChange,
+  onToggleActionsExpanded,
+  onAddPathAction,
+  onPathActionTriggerChange,
+  onRemovePathActionTrigger,
   onToggleLocked,
   onToggleHidden,
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlCoordChange,
+  onRemoveControlPoint,
+  onReorderControlPoint,
   onRemovePoint,
   onActionNameChange,
   onActionModeChange,
@@ -237,6 +259,15 @@ export function PlannerSidebar({
 
       {sidebarPage === "auton" ? (
         <>
+          <div className={styles.autonSettingsRow}>
+            <button
+              className={`${styles.allianceToggleButton} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
+              onClick={() => onAutonAllianceChange(autonAlliance === "BLUE" ? "RED" : "BLUE")}
+              aria-pressed={autonAlliance === "RED"}
+            >
+              {autonAlliance === "BLUE" ? "Blue Alliance" : "Red Alliance"}
+            </button>
+          </div>
           <div
             ref={pointsListRef}
             className={styles.pointsList}
@@ -332,11 +363,17 @@ export function PlannerSidebar({
                     onNameEditCommit={onNameEditCommit}
                     onPathInterpolationChange={onPathInterpolationChange}
                     onPathHeadingChange={onPathHeadingChange}
+                    onToggleActionsExpanded={onToggleActionsExpanded}
+                    onAddPathAction={onAddPathAction}
+                    onPathActionTriggerChange={onPathActionTriggerChange}
+                    onRemovePathActionTrigger={onRemovePathActionTrigger}
                     onToggleLocked={onToggleLocked}
                     onToggleHidden={onToggleHidden}
                     onToggleControlsExpanded={onToggleControlsExpanded}
                     onAddControlPoint={onAddControlPoint}
                     onControlCoordChange={onControlCoordChange}
+                    onRemoveControlPoint={onRemoveControlPoint}
+                    onReorderControlPoint={onReorderControlPoint}
                     onRemovePoint={onRemovePoint}
                   />
                 </SequenceDragWrapper>
@@ -477,6 +514,7 @@ function StartPoseCard({
       linearStartT={point.linearStartT ?? 0}
       linearEndT={point.linearEndT ?? 1}
       controlPoints={[]}
+      actionsExpanded={false}
       controlPointCount={0}
       controlsExpanded={false}
       isActive={targetPathIndex(hoverTarget) === 0 || targetPathIndex(activeTarget) === 0}
@@ -512,11 +550,22 @@ type PathPointCardProps = {
   onNameEditCommit: () => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onToggleActionsExpanded: (index: number) => void;
+  onAddPathAction: (index: number) => void;
+  onPathActionTriggerChange: (
+    index: number,
+    triggerId: string,
+    field: "mode" | "actionName" | "t",
+    value: string
+  ) => void;
+  onRemovePathActionTrigger: (index: number, triggerId: string) => void;
   onToggleLocked: (index: number) => void;
   onToggleHidden: (index: number, hideOthers: boolean) => void;
   onToggleControlsExpanded: (index: number) => void;
   onAddControlPoint: (index: number) => void;
   onControlCoordChange: (pathIndex: number, controlIndex: number, axis: "x" | "y", value: string) => void;
+  onRemoveControlPoint: (pathIndex: number, controlIndex: number) => void;
+  onReorderControlPoint: (pathIndex: number, fromIndex: number, toIndex: number) => void;
   onRemovePoint: (index: number) => void;
 };
 
@@ -534,11 +583,17 @@ function PathPointCard({
   onNameEditCommit,
   onPathInterpolationChange,
   onPathHeadingChange,
+  onToggleActionsExpanded,
+  onAddPathAction,
+  onPathActionTriggerChange,
+  onRemovePathActionTrigger,
   onToggleLocked,
   onToggleHidden,
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlCoordChange,
+  onRemoveControlPoint,
+  onReorderControlPoint,
   onRemovePoint,
 }: PathPointCardProps) {
   const coords = toFieldCoords(point.nx, point.ny);
@@ -563,6 +618,8 @@ function PathPointCard({
         id: controlPoint.id,
         ...toFieldCoords(controlPoint.nx, controlPoint.ny),
       }))}
+      actionTriggers={point.actionTriggers ?? []}
+      actionsExpanded={point.actionsExpanded ?? true}
       controlPointCount={(point.controlPoints ?? []).length}
       controlsExpanded={point.controlsExpanded ?? true}
       isActive={targetPathIndex(hoverTarget) === index || targetPathIndex(activeTarget) === index}
@@ -574,11 +631,19 @@ function PathPointCard({
       onNameEditCommit={onNameEditCommit}
       onInterpolationChange={(mode) => onPathInterpolationChange(index, mode)}
       onPathHeadingChange={(field, value) => onPathHeadingChange(index, field, value)}
+      onToggleActionsExpanded={() => onToggleActionsExpanded(index)}
+      onAddPathAction={() => onAddPathAction(index)}
+      onPathActionTriggerChange={(triggerId, field, value) =>
+        onPathActionTriggerChange(index, triggerId, field, value)
+      }
+      onRemovePathActionTrigger={(triggerId) => onRemovePathActionTrigger(index, triggerId)}
       onToggleLocked={() => onToggleLocked(index)}
       onToggleHidden={(hideOthers) => onToggleHidden(index, hideOthers)}
       onToggleControlsExpanded={() => onToggleControlsExpanded(index)}
       onAddControlPoint={() => onAddControlPoint(index)}
       onControlPointChange={(controlIndex, axis, value) => onControlCoordChange(index, controlIndex, axis, value)}
+      onRemoveControlPoint={(controlIndex) => onRemoveControlPoint(index, controlIndex)}
+      onReorderControlPoint={(fromIndex, toIndex) => onReorderControlPoint(index, fromIndex, toIndex)}
       onControlPointEditStart={onPositionEditStart}
       onControlPointEditCommit={onPositionEditCommit}
       canDelete={isShiftPressed}

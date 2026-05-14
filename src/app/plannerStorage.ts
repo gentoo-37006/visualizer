@@ -1,19 +1,29 @@
 import {
+  DEFAULT_AUTON_ALLIANCE,
   DEFAULT_ROBOT_CONSTANTS,
   stripStartPosePrefix,
   type RobotConstants,
   type SavedPose,
 } from "./kotlinAutonFile";
-import type { MotionParameters } from "./plannerTypes";
+import type { AutonAlliance, MotionParameters } from "./plannerTypes";
 
 export const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
 export const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
 export const MOTION_PARAMETERS_STORAGE_KEY = "auton-path-planner:motion-parameters";
+export const AUTON_SETTINGS_STORAGE_KEY = "auton-path-planner:auton-settings";
 
 export const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
   maxAngularVelocity: 180,
   maxForwardAcceleration: 60,
   maxLateralAcceleration: 60,
+};
+
+export type AutonSettings = {
+  alliance: AutonAlliance;
+};
+
+export const DEFAULT_AUTON_SETTINGS: AutonSettings = {
+  alliance: DEFAULT_AUTON_ALLIANCE,
 };
 
 const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
@@ -93,5 +103,27 @@ export const loadMotionParameters = () => {
   } catch {
     window.localStorage.removeItem(MOTION_PARAMETERS_STORAGE_KEY);
     return DEFAULT_MOTION_PARAMETERS;
+  }
+};
+
+const isAutonSettings = (value: unknown): value is AutonSettings =>
+  typeof value === "object" &&
+  value !== null &&
+  ((value as AutonSettings).alliance === "BLUE" || (value as AutonSettings).alliance === "RED");
+
+export const loadAutonSettings = () => {
+  if (typeof window === "undefined") return DEFAULT_AUTON_SETTINGS;
+
+  const storedAutonSettings = window.localStorage.getItem(AUTON_SETTINGS_STORAGE_KEY);
+  if (!storedAutonSettings) return DEFAULT_AUTON_SETTINGS;
+
+  try {
+    const parsedAutonSettings: unknown = JSON.parse(storedAutonSettings);
+    return isAutonSettings(parsedAutonSettings)
+      ? { ...DEFAULT_AUTON_SETTINGS, ...parsedAutonSettings }
+      : DEFAULT_AUTON_SETTINGS;
+  } catch {
+    window.localStorage.removeItem(AUTON_SETTINGS_STORAGE_KEY);
+    return DEFAULT_AUTON_SETTINGS;
   }
 };

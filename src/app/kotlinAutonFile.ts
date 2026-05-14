@@ -1,5 +1,12 @@
 import { INITIAL_POINT_ID } from "./plannerConstants";
-import type { AutonActionMode, AutonSequenceItem, HeadingInterpolation, Point } from "./plannerTypes";
+import type {
+  AutonActionMode,
+  AutonAlliance,
+  AutonSequenceItem,
+  HeadingInterpolation,
+  PathActionTrigger,
+  Point,
+} from "./plannerTypes";
 import {
   generateId,
   normalizeHeading,
@@ -13,10 +20,12 @@ const DEFAULT_ROBOT_WIDTH = 16;
 const DEFAULT_ROBOT_LENGTH = 16;
 const POSE_MATCH_EPSILON = 0.05;
 const START_POSE_PREFIX = "START_";
+export const DEFAULT_AUTON_ALLIANCE: AutonAlliance = "BLUE";
 
 export type ParsedKotlinAuton = {
   points: Point[];
   sequenceItems: AutonSequenceItem[];
+  alliance: AutonAlliance;
 };
 
 export type SavedPose = {
@@ -258,13 +267,36 @@ const formatActionCall = (item: AutonSequenceItem) => {
   return `    .${item.mode}(Actions.${actionName})`;
 };
 
+const formatPathActionTrigger = (trigger: PathActionTrigger) => {
+  const actionName = trigger.actionName.trim() || "ACTION";
+  return `\n            .${trigger.mode}At(${formatKotlinNumber(trigger.t)}, Actions.${actionName})`;
+};
+
+const formatFollowPathCall = (pathName: string, point?: Point) => {
+  const triggers = [...(point?.actionTriggers ?? [])].sort((a, b) => a.t - b.t);
+  if (triggers.length === 0) return `    .followPath(${pathName})`;
+
+  return `    .followPath(
+        ${pathName}${triggers.map(formatPathActionTrigger).join("")}
+    )`;
+};
+
+const parseAutonAlliance = (contents: string): AutonAlliance => {
+  const createForMatch = contents.match(/\.createFor\s*\(\s*Alliance\.(BLUE|RED)\s*\)/);
+  const constructorMatch = contents.match(/:\s*Auto\s*\(\s*Alliance\.(BLUE|RED)\s*\)/);
+  return (createForMatch?.[1] ?? constructorMatch?.[1] ?? DEFAULT_AUTON_ALLIANCE) as AutonAlliance;
+};
+
 export const serializePathPlannerKotlin = (
   points: Point[],
   savedPoses: SavedPose[] = [],
-  sequenceItems: AutonSequenceItem[] = []
+  sequenceItems: AutonSequenceItem[] = [],
+  options: { alliance?: AutonAlliance } = {}
 ) => {
+  const alliance = options.alliance ?? DEFAULT_AUTON_ALLIANCE;
   const pathPoints = points.slice(1);
   const pathNameByPointId = createPathNameByPointId(points);
+  const pointById = new Map(points.map((point) => [point.id, point]));
   const pathNames = pathPoints.map((point, pathIndex) => pathNameByPointId.get(point.id) ?? `path${pathIndex + 1}`);
   const pathDeclarations = pathPoints
     .map((point, pathIndex) => {
@@ -299,14 +331,14 @@ ${poses.map((pose) => `    ${pose},`).join("\n")}
     .map((item) => {
       if (item.kind === "action") return formatActionCall(item);
       const pathName = pathNameByPointId.get(item.pointId);
-      return pathName ? `    .followPath(${pathName})` : "";
+      return pathName ? formatFollowPathCall(pathName, pointById.get(item.pointId)) : "";
     })
     .filter(Boolean)
     .join("\n");
 
   return `${pathDeclarations || "// Add paths in the editor before exporting."}
 
-return builder${builderCalls ? `\n${builderCalls}` : ""}`;
+return sequence.createFor(Alliance.${alliance})${builderCalls ? `\n${builderCalls}` : ""}`;
 };
 
 const findMatchingParen = (contents: string, openParenIndex: number) => {
@@ -368,7 +400,7 @@ const parseKotlinPose = (arg: string, savedPoses: SavedPose[]): ParsedPoseRefere
 
 export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[] = []): ParsedKotlinAuton | null => {
   type ParsedBuilderCall =
-    | { kind: "path"; pathName: string }
+    | { kind: "path"; pathName: string; triggers: PathActionTrigger[] }
     | {
         kind: "action";
         id: string;
@@ -431,34 +463,68 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     pathRegex.lastIndex = closeParenIndex + 1;
   }
 
-  const builderCalls: ParsedBuilderCall[] = [...contents.matchAll(/\.(followPath|start|stop|run)\s*\(([^)]*)\)/g)].map((match): ParsedBuilderCall | null => {
-    const method = match[1];
-    const args = splitTopLevelArgs(match[2]);
+  const builderCalls: ParsedBuilderCall[] = [];
+  const builderCallRegex = /\.(followPath|start|stop|run)\s*\(/g;
+  let builderCallMatch: RegExpExecArray | null;
+
+  while ((builderCallMatch = builderCallRegex.exec(contents)) !== null) {
+    const method = builderCallMatch[1];
+    const openParenIndex = contents.indexOf("(", builderCallMatch.index);
+    const closeParenIndex = findMatchingParen(contents, openParenIndex);
+    if (closeParenIndex < 0) continue;
+
+    const callContents = contents.slice(openParenIndex + 1, closeParenIndex);
+    const args = splitTopLevelArgs(callContents);
     if (method === "followPath") {
-      const pathName = args[0]?.match(/\b([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
-      return pathName ? ({ kind: "path" as const, pathName }) : null;
+      const pathName = callContents.match(/\b([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
+      if (pathName) {
+        const triggers: PathActionTrigger[] = [...callContents.matchAll(/\.(startAt|stopAt)\s*\(([^)]*)\)/g)]
+          .map((triggerMatch) => {
+            const triggerArgs = splitTopLevelArgs(triggerMatch[2]);
+            const t = Number.parseFloat(triggerArgs[0] ?? "0");
+            const actionName = triggerArgs[1]?.match(/\bActions\.([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1] ?? "ACTION";
+            return {
+              id: generateId(),
+              mode: triggerMatch[1] === "startAt" ? "start" as const : "stop" as const,
+              t: Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0,
+              actionName,
+            };
+          });
+        builderCalls.push({ kind: "path", pathName, triggers });
+      }
+      builderCallRegex.lastIndex = closeParenIndex + 1;
+      continue;
     }
 
     const actionName = args[0]?.match(/\bActions\.([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
-    if (!actionName) return null;
+    if (!actionName) {
+      builderCallRegex.lastIndex = closeParenIndex + 1;
+      continue;
+    }
 
     const mode = method as AutonActionMode;
     const timeout = mode === "run" ? Number.parseFloat(args[1] ?? "0") : 0;
-    return {
+    builderCalls.push({
       kind: "action" as const,
       id: generateId(),
       name: actionName,
       mode,
       timeout: Number.isFinite(timeout) ? timeout : 0,
-    };
-  }).filter((call): call is ParsedBuilderCall => call !== null);
+    });
+    builderCallRegex.lastIndex = closeParenIndex + 1;
+  }
   const followOrder = builderCalls
-    .filter((call): call is { kind: "path"; pathName: string } => call.kind === "path")
+    .filter((call): call is { kind: "path"; pathName: string; triggers: PathActionTrigger[] } => call.kind === "path")
     .map((call) => call.pathName);
   const orderedPaths =
     followOrder.length > 0
       ? followOrder.map((name) => pathDefinitions.get(name)).filter((path): path is ParsedPath => Boolean(path))
       : [...pathDefinitions.values()];
+  const triggersByPathName = new Map(
+    builderCalls
+      .filter((call): call is { kind: "path"; pathName: string; triggers: PathActionTrigger[] } => call.kind === "path")
+      .map((call) => [call.pathName, call.triggers])
+  );
 
   if (orderedPaths.length === 0) return null;
 
@@ -509,6 +575,8 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
         poseName: pose.poseName,
       })),
       controlsExpanded: controlPoses.length > 0,
+      actionsExpanded: (triggersByPathName.get(path.name) ?? []).length > 0,
+      actionTriggers: [...(triggersByPathName.get(path.name) ?? [])].sort((a, b) => a.t - b.t),
     });
   });
 
@@ -522,5 +590,11 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
         .filter((item): item is AutonSequenceItem => item !== null)
     : importedPoints.slice(1).map((point) => ({ id: generateId(), kind: "path" as const, pointId: point.id }));
 
-  return importedPoints.length > 1 ? { points: importedPoints, sequenceItems } : null;
+  return importedPoints.length > 1
+    ? {
+        points: importedPoints,
+        sequenceItems,
+        alliance: parseAutonAlliance(contents),
+      }
+    : null;
 };

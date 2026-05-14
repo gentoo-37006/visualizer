@@ -23,6 +23,7 @@ import {
   parseRobotConstantsKotlin,
   parseSavedPosesKotlin,
   stripStartPosePrefix,
+  DEFAULT_AUTON_ALLIANCE,
   DEFAULT_ROBOT_CONSTANTS,
   type RobotConstants,
   type SavedPose,
@@ -37,11 +38,13 @@ import {
 } from "./plannerConstants";
 import type {
   AutonActionMode,
+  AutonAlliance,
   AutonSequenceItem,
   DragTarget,
   FieldSize,
   HeadingInterpolation,
   MotionParameters,
+  PathActionTriggerMode,
   PathHeadingField,
   PlannerSnapshot,
   Point,
@@ -50,6 +53,7 @@ import {
   controlPointHitRadius,
   createDefaultHeadingValues,
   generateId,
+  isKotlinIdentifierDraft,
   isNumericDraft,
   mainPointHitRadius,
   normalizeHeading,
@@ -68,9 +72,11 @@ import {
 } from "./playback";
 import {
   DEFAULT_MOTION_PARAMETERS,
+  AUTON_SETTINGS_STORAGE_KEY,
   MOTION_PARAMETERS_STORAGE_KEY,
   ROBOT_CONSTANTS_STORAGE_KEY,
   SAVED_POSES_STORAGE_KEY,
+  loadAutonSettings,
   loadMotionParameters,
   loadRobotConstants,
   loadSavedPoses,
@@ -95,6 +101,7 @@ export default function PathPlannerPage() {
   const [kotlinExport, setKotlinExport] = useState<{ fileName: string; subtitle: string; contents: string } | null>(null);
   const [didCopyExport, setDidCopyExport] = useState(false);
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
+  const [autonAlliance, setAutonAlliance] = useState<AutonAlliance>(DEFAULT_AUTON_ALLIANCE);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
   const [motionParameters, setMotionParameters] = useState<MotionParameters>(DEFAULT_MOTION_PARAMETERS);
   const [motionParameterDrafts, setMotionParameterDrafts] = useState({
@@ -293,8 +300,10 @@ export default function PathPlannerPage() {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const storedMotionParameters = loadMotionParameters();
+      const storedAutonSettings = loadAutonSettings();
       const storedFieldImageId = window.localStorage.getItem(FIELD_IMAGE_STORAGE_KEY);
       const storedFieldImage = FIELD_IMAGE_PRESETS.find((field) => field.id === storedFieldImageId);
+      setAutonAlliance(storedAutonSettings.alliance);
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
       setMotionParameters(storedMotionParameters);
@@ -392,6 +401,15 @@ export default function PathPlannerPage() {
       ...currentDrafts,
       [key]: motionParameters[key].toFixed(1),
     }));
+  };
+
+  const saveAutonSettings = (alliance: AutonAlliance) => {
+    window.localStorage.setItem(AUTON_SETTINGS_STORAGE_KEY, JSON.stringify({ alliance }));
+  };
+
+  const handleAutonAllianceChange = (alliance: AutonAlliance) => {
+    setAutonAlliance(alliance);
+    saveAutonSettings(alliance);
   };
 
   const handlePlaybackToggle = () => {
@@ -548,7 +566,7 @@ export default function PathPlannerPage() {
 
   const isEditableDragTarget = (target: EventTarget | null) =>
     target instanceof HTMLElement &&
-    Boolean(target.closest("input, select, textarea, [contenteditable='true']"));
+    Boolean(target.closest("input, select, textarea, [contenteditable='true'], [data-card-drag-block='true']"));
 
   const handleSequenceCardPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.currentTarget.draggable = !isEditableDragTarget(event.target);
@@ -741,6 +759,15 @@ export default function PathPlannerPage() {
     );
   };
 
+  const handleToggleActionsExpanded = (index: number) => {
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, actionsExpanded: !(point.actionsExpanded ?? true) } : point
+      )
+    );
+  };
+
   const handleAddControlPoint = (index: number) => {
     pushCurrentSnapshot();
     setPlannerPoints((currentPoints) =>
@@ -783,6 +810,48 @@ export default function PathPlannerPage() {
 
     const { nx, ny } = toNormalizedCoords(newX, newY);
     updateControlPoint(pathIndex, controlIndex, nx, ny);
+  };
+
+  const handleRemoveControlPoint = (pathIndex: number, controlIndex: number) => {
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, pointIndex) =>
+        pointIndex === pathIndex
+          ? {
+              ...point,
+              controlPoints: (point.controlPoints ?? []).filter((_, index) => index !== controlIndex),
+            }
+          : point
+      )
+    );
+    if (activeTarget?.kind === "control" && activeTarget.pathIndex === pathIndex && activeTarget.controlIndex === controlIndex) {
+      setActiveTarget(null);
+    }
+    if (hoverTarget?.kind === "control" && hoverTarget.pathIndex === pathIndex && hoverTarget.controlIndex === controlIndex) {
+      setHoverTarget(null);
+    }
+  };
+
+  const handleReorderControlPoint = (pathIndex: number, fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, pointIndex) => {
+        if (pointIndex !== pathIndex) return point;
+        const controlPoints = [...(point.controlPoints ?? [])];
+        if (
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= controlPoints.length ||
+          toIndex >= controlPoints.length
+        ) {
+          return point;
+        }
+        const [movedControlPoint] = controlPoints.splice(fromIndex, 1);
+        controlPoints.splice(toIndex, 0, movedControlPoint);
+        return { ...point, controlPoints };
+      })
+    );
   };
 
   const handleCoordChange = (index: number, axis: "x" | "y", value: string) => {
@@ -893,6 +962,58 @@ export default function PathPlannerPage() {
     );
   };
 
+  const handleAddPathAction = (index: number) => {
+    pushCurrentSnapshot();
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index
+          ? {
+              ...point,
+              actionTriggers: [
+                ...(point.actionTriggers ?? []),
+                { id: generateId(), mode: "start", t: 0, actionName: "ACTION" },
+              ],
+              actionsExpanded: true,
+            }
+          : point
+      )
+    );
+  };
+
+  const handlePathActionTriggerChange = (
+    index: number,
+    triggerId: string,
+    field: "mode" | "actionName" | "t",
+    value: string
+  ) => {
+    if (field === "actionName" && !isKotlinIdentifierDraft(value)) return;
+    if (field === "t" && !isNumericDraft(value)) return;
+
+    const nextPoints = pointsRef.current.map((point, pointIndex) => {
+      if (pointIndex !== index) return point;
+      const nextTriggers = (point.actionTriggers ?? []).map((trigger) => {
+        if (trigger.id !== triggerId) return trigger;
+        if (field === "mode") return { ...trigger, mode: value as PathActionTriggerMode };
+        if (field === "t") return { ...trigger, t: clamp01(Number.parseFloat(value) || 0) };
+        return { ...trigger, actionName: value.toUpperCase() };
+      }).sort((a, b) => a.t - b.t);
+      return { ...point, actionTriggers: nextTriggers };
+    });
+
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
+  };
+
+  const handleRemovePathActionTrigger = (index: number, triggerId: string) => {
+    const nextPoints = pointsRef.current.map((point, pointIndex) =>
+      pointIndex === index
+        ? { ...point, actionTriggers: (point.actionTriggers ?? []).filter((trigger) => trigger.id !== triggerId) }
+        : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
+  };
+
   const handleExportKotlin = () => {
     if (sidebarPage === "poses") {
       const contents = serializeSavedPosesKotlin(savedPoses, robotConstants);
@@ -905,11 +1026,13 @@ export default function PathPlannerPage() {
       return;
     }
 
-    const contents = serializePathPlannerKotlin(points, savedPoses, getSequenceItemsWithPaths(sequenceItems, points));
+    const contents = serializePathPlannerKotlin(points, savedPoses, getSequenceItemsWithPaths(sequenceItems, points), {
+      alliance: autonAlliance,
+    });
     setDidCopyExport(false);
     setKotlinExport({
-      fileName: "Exported Path",
-      subtitle: "defineAutonSequence contents",
+      fileName: "AutonSequence.kt",
+      subtitle: "autonSequence method contents",
       contents,
     });
   };
@@ -979,6 +1102,8 @@ export default function PathPlannerPage() {
     }
 
     clearHistory();
+    setAutonAlliance(importedAuton.alliance);
+    saveAutonSettings(importedAuton.alliance);
     setPlannerSnapshot(importedAuton);
     setHoverTarget(null);
     setActiveTarget(null);
@@ -1210,6 +1335,7 @@ export default function PathPlannerPage() {
           sidebarPage={sidebarPage}
           points={points}
           sequenceItems={sequenceItems}
+          autonAlliance={autonAlliance}
           savedPoses={savedPoses}
           robotConstants={robotConstants}
           motionParameterDrafts={motionParameterDrafts}
@@ -1228,6 +1354,7 @@ export default function PathPlannerPage() {
           pointsListRef={pointsListRef}
           onUndo={handleUndo}
           onRedo={handleRedo}
+          onAutonAllianceChange={handleAutonAllianceChange}
           onImportConstantsClick={handleImportConstantsClick}
           onImportPosesClick={handleImportPosesClick}
           onSelectAutonClick={handleSelectAutonClick}
@@ -1254,11 +1381,17 @@ export default function PathPlannerPage() {
           onRenamePath={handleRenamePath}
           onPathInterpolationChange={handlePathInterpolationChange}
           onPathHeadingChange={handlePathHeadingChange}
+          onToggleActionsExpanded={handleToggleActionsExpanded}
+          onAddPathAction={handleAddPathAction}
+          onPathActionTriggerChange={handlePathActionTriggerChange}
+          onRemovePathActionTrigger={handleRemovePathActionTrigger}
           onToggleLocked={handleToggleLocked}
           onToggleHidden={handleToggleHidden}
           onToggleControlsExpanded={handleToggleControlsExpanded}
           onAddControlPoint={handleAddControlPoint}
           onControlCoordChange={handleControlCoordChange}
+          onRemoveControlPoint={handleRemoveControlPoint}
+          onReorderControlPoint={handleReorderControlPoint}
           onRemovePoint={handleRemovePoint}
           onActionNameChange={handleActionNameChange}
           onActionModeChange={handleActionModeChange}

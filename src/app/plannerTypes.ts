@@ -8,6 +8,15 @@ export type ControlPoint = {
 export type HeadingInterpolation = "constant" | "linear" | "tangential";
 export type PathHeadingField = "constant" | "start" | "end" | "startT" | "endT";
 export type AutonActionMode = "start" | "run" | "stop";
+export type AutonAlliance = "BLUE" | "RED";
+export type PathActionTriggerMode = "start" | "stop";
+
+export type PathActionTrigger = {
+  id: string;
+  mode: PathActionTriggerMode;
+  t: number;
+  actionName: string;
+};
 
 export type Point = {
   id: string;
@@ -26,7 +35,9 @@ export type Point = {
   linearEndT?: number;
   controlPoints?: ControlPoint[];
   controlsExpanded?: boolean;
+  actionsExpanded?: boolean;
   poseName?: string;
+  actionTriggers?: PathActionTrigger[];
 };
 
 export type AutonActionItem = {

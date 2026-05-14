@@ -7,6 +7,7 @@ const clonePoints = (source: Point[]) =>
   source.map((point) => ({
     ...point,
     controlPoints: point.controlPoints?.map((controlPoint) => ({ ...controlPoint })),
+    actionTriggers: point.actionTriggers?.map((trigger) => ({ ...trigger })),
   }));
 
 const cloneSequenceItems = (source: AutonSequenceItem[]) => source.map((item) => ({ ...item }));
