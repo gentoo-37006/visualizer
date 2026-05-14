@@ -657,7 +657,7 @@ function StartPosesPanel({ savedPoses }: { savedPoses: SavedPose[] }) {
     <div className={styles.pointsList}>
       {savedPoses.length > 0 ? (
         savedPoses.map((pose) => (
-          <div className={styles.poseCard} key={pose.name}>
+          <div className={`${styles.poseCard} ${styles.startPoseListCard}`} key={pose.name}>
             <div className={styles.poseName}>{pose.name}</div>
             <div className={styles.poseCoordRow}>
               <div className={styles.inputGroup}>
@@ -697,7 +697,7 @@ function ConstantsPanel({
 }: ConstantsPanelProps) {
   return (
     <div className={styles.pointsList}>
-      <div className={styles.poseCard}>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
         <div className={styles.poseName}>Robot Dimensions</div>
         <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
           <div className={styles.inputGroup}>
@@ -710,7 +710,7 @@ function ConstantsPanel({
           </div>
         </div>
       </div>
-      <div className={styles.poseCard}>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
         <div className={styles.poseName}>Braking Acceleration</div>
         <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
           <div className={styles.inputGroup}>
@@ -723,7 +723,7 @@ function ConstantsPanel({
           </div>
         </div>
       </div>
-      <div className={styles.poseCard}>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
         <div className={styles.poseName}>Max Velocity</div>
         <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
           <div className={styles.inputGroup}>
@@ -770,7 +770,7 @@ function EditableMotionParameterCard({
   onFormatMotionParameter,
 }: EditableMotionParameterCardProps) {
   return (
-    <div className={styles.poseCard}>
+    <div className={`${styles.poseCard} ${styles.constantsCard}`}>
       <div className={styles.poseName}>{title}</div>
       <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
         {parameters.map(([key, label]) => (

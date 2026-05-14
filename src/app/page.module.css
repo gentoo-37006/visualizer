@@ -193,6 +193,16 @@
   padding: 1rem;
 }
 
+.constantsCard {
+  border-left: 0;
+  border: 1px solid var(--border);
+}
+
+.startPoseListCard {
+  border-left: 0;
+  border: 1px solid var(--border);
+}
+
 .poseName {
   color: var(--text-primary);
   font-size: 0.875rem;
