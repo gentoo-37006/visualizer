@@ -282,9 +282,10 @@ const formatFollowPathCall = (pathName: string, point?: Point) => {
 };
 
 const parseAutonAlliance = (contents: string): AutonAlliance => {
+  const autonSequenceMatch = contents.match(/\bautonSequence\s*\(\s*Alliance\.(BLUE|RED)\s*\)/);
   const createForMatch = contents.match(/\.createFor\s*\(\s*Alliance\.(BLUE|RED)\s*\)/);
   const constructorMatch = contents.match(/:\s*Auto\s*\(\s*Alliance\.(BLUE|RED)\s*\)/);
-  return (createForMatch?.[1] ?? constructorMatch?.[1] ?? DEFAULT_AUTON_ALLIANCE) as AutonAlliance;
+  return (autonSequenceMatch?.[1] ?? createForMatch?.[1] ?? constructorMatch?.[1] ?? DEFAULT_AUTON_ALLIANCE) as AutonAlliance;
 };
 
 export const serializePathPlannerKotlin = (
@@ -338,7 +339,7 @@ ${poses.map((pose) => `    ${pose},`).join("\n")}
 
   return `${pathDeclarations || "// Add paths in the editor before exporting."}
 
-return sequence.createFor(Alliance.${alliance})${builderCalls ? `\n${builderCalls}` : ""}`;
+autonSequence(Alliance.${alliance})${builderCalls ? `\n${builderCalls}` : ""}`;
 };
 
 const findMatchingParen = (contents: string, openParenIndex: number) => {
