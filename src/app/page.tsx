@@ -82,9 +82,17 @@ import {
   loadSavedPoses,
 } from "./plannerStorage";
 import {
-  DEFAULT_FIELD_IMAGE,
+  clearCustomFieldImage,
+  createCustomFieldImage,
+  DEFAULT_FIELD_IMAGE_SELECTION,
   FIELD_IMAGE_PRESETS,
-  FIELD_IMAGE_STORAGE_KEY,
+  loadCustomFieldImage,
+  loadFieldImageSelection,
+  resolveFieldImageSrc,
+  saveCustomFieldImage,
+  saveFieldImageSelection,
+  type CustomFieldImage,
+  type FieldImageSelection,
 } from "./fieldImages";
 import styles from "./page.module.css";
 
@@ -113,8 +121,12 @@ export default function PathPlannerPage() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [areActionsHidden, setAreActionsHidden] = useState(false);
-  const [fieldImageSrc, setFieldImageSrc] = useState<string>(DEFAULT_FIELD_IMAGE.src);
-  const [selectedFieldPresetId, setSelectedFieldPresetId] = useState<string>(DEFAULT_FIELD_IMAGE.id);
+  const [fieldImageSelection, setFieldImageSelection] = useState<FieldImageSelection>(
+    DEFAULT_FIELD_IMAGE_SELECTION
+  );
+  const [customFieldImage, setCustomFieldImage] = useState<CustomFieldImage | null>(null);
+  const [fieldImageUploadError, setFieldImageUploadError] = useState<string | null>(null);
+  const [isFieldImageUploading, setIsFieldImageUploading] = useState(false);
   const [isFieldImageModalOpen, setIsFieldImageModalOpen] = useState(false);
   const [isFieldImageModalVisible, setIsFieldImageModalVisible] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
@@ -301,16 +313,19 @@ export default function PathPlannerPage() {
     const frame = requestAnimationFrame(() => {
       const storedMotionParameters = loadMotionParameters();
       const storedAutonSettings = loadAutonSettings();
-      const storedFieldImageId = window.localStorage.getItem(FIELD_IMAGE_STORAGE_KEY);
-      const storedFieldImage = FIELD_IMAGE_PRESETS.find((field) => field.id === storedFieldImageId);
+      const storedCustomFieldImage = loadCustomFieldImage();
+      const storedFieldImageSelection = loadFieldImageSelection();
       setAutonAlliance(storedAutonSettings.alliance);
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
       setMotionParameters(storedMotionParameters);
-      if (storedFieldImage) {
-        setFieldImageSrc(storedFieldImage.src);
-        setSelectedFieldPresetId(storedFieldImage.id);
-      }
+      setCustomFieldImage(storedCustomFieldImage);
+      // A stored custom selection is meaningless if the image itself is gone.
+      setFieldImageSelection(
+        storedFieldImageSelection.kind === "custom" && !storedCustomFieldImage
+          ? DEFAULT_FIELD_IMAGE_SELECTION
+          : storedFieldImageSelection
+      );
       setMotionParameterDrafts({
         maxAngularVelocity: String(storedMotionParameters.maxAngularVelocity),
         maxForwardAcceleration: String(storedMotionParameters.maxForwardAcceleration),
@@ -1288,25 +1303,52 @@ export default function PathPlannerPage() {
     }, 160);
   };
 
-  const selectFieldPreset = (preset: typeof FIELD_IMAGE_PRESETS[number]) => {
-    setFieldImageSrc(preset.src);
-    setSelectedFieldPresetId(preset.id);
-    window.localStorage.setItem(FIELD_IMAGE_STORAGE_KEY, preset.id);
+  const fieldImageSrc = resolveFieldImageSrc(fieldImageSelection, customFieldImage);
+
+  const applyFieldImageSelection = (selection: FieldImageSelection) => {
+    setFieldImageSelection(selection);
+    saveFieldImageSelection(selection);
   };
 
-  const handleFieldImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const selectFieldPreset = (preset: typeof FIELD_IMAGE_PRESETS[number]) => {
+    setFieldImageUploadError(null);
+    applyFieldImageSelection({ kind: "preset", id: preset.id });
+  };
+
+  const selectCustomFieldImage = () => {
+    if (!customFieldImage) return;
+    setFieldImageUploadError(null);
+    applyFieldImageSelection({ kind: "custom" });
+  };
+
+  const removeCustomFieldImage = () => {
+    clearCustomFieldImage();
+    setCustomFieldImage(null);
+    setFieldImageUploadError(null);
+    if (fieldImageSelection.kind === "custom") {
+      applyFieldImageSelection(DEFAULT_FIELD_IMAGE_SELECTION);
+    }
+  };
+
+  const handleFieldImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result !== "string") return;
-      setFieldImageSrc(reader.result);
-      setSelectedFieldPresetId("custom");
-      window.localStorage.removeItem(FIELD_IMAGE_STORAGE_KEY);
-    });
-    reader.readAsDataURL(file);
+    setFieldImageUploadError(null);
+    setIsFieldImageUploading(true);
+    try {
+      const uploadedFieldImage = await createCustomFieldImage(file);
+      saveCustomFieldImage(uploadedFieldImage);
+      setCustomFieldImage(uploadedFieldImage);
+      applyFieldImageSelection({ kind: "custom" });
+    } catch (error) {
+      setFieldImageUploadError(
+        error instanceof Error ? error.message : "That image could not be loaded."
+      );
+    } finally {
+      setIsFieldImageUploading(false);
+    }
   };
 
   return (
@@ -1420,10 +1462,15 @@ export default function PathPlannerPage() {
       {isFieldImageModalOpen && (
         <FieldImageModal
           isVisible={isFieldImageModalVisible}
-          selectedFieldPresetId={selectedFieldPresetId}
+          selection={fieldImageSelection}
+          customFieldImage={customFieldImage}
+          uploadError={fieldImageUploadError}
+          isUploading={isFieldImageUploading}
           fileInputRef={fieldImageInputRef}
           onClose={closeFieldImageModal}
           onSelectPreset={selectFieldPreset}
+          onSelectCustom={selectCustomFieldImage}
+          onRemoveCustom={removeCustomFieldImage}
           onUpload={handleFieldImageUpload}
         />
       )}

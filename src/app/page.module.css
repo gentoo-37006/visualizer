@@ -921,6 +921,62 @@
   object-fit: fill;
 }
 
+.customFieldPresetSlot {
+  position: relative;
+  min-width: 0;
+  display: flex;
+}
+
+.customFieldPresetSlot .fieldPresetButton {
+  width: 100%;
+}
+
+.customFieldPresetName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeCustomFieldButton {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: rgba(17, 24, 39, 0.78);
+  color: white;
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.customFieldPresetSlot:hover .removeCustomFieldButton,
+.removeCustomFieldButton:focus-visible {
+  opacity: 1;
+}
+
+.removeCustomFieldButton:hover {
+  background: #ef4444;
+}
+
+.fieldImageError {
+  margin: 0;
+  color: #f87171;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.uploadFieldButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .uploadFieldButton {
   width: 100%;
   display: flex;
