@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import styles from "../page.module.css";
 import type { HeadingInterpolation, PathActionTrigger, PathActionTriggerMode, PathHeadingField } from "../plannerTypes";
 import { isKotlinIdentifierDraft, isNumericDraft } from "../plannerUtils";
@@ -22,12 +22,14 @@ type PointCardProps = {
   endHeading: number;
   linearStartT: number;
   linearEndT: number;
+  tangentReversed?: boolean;
   controlPoints: Array<{ id: string; x: number; y: number }>;
   actionTriggers?: PathActionTrigger[];
   actionsExpanded: boolean;
   controlPointCount: number;
   controlsExpanded: boolean;
   isActive: boolean;
+  cardSubheader?: ReactNode;
   onChange: (axis: "x" | "y", val: string) => void;
   startPoseOptions?: Array<{ name: string }>;
   onStartPoseSelect?: (name: string) => void;
@@ -39,6 +41,7 @@ type PointCardProps = {
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
+  onTangentReversedChange?: (tangentReversed: boolean) => void;
   onPathActionTriggerChange?: (
     triggerId: string,
     field: "mode" | "actionName" | "t",
@@ -76,12 +79,14 @@ export function PointCard({
   endHeading,
   linearStartT,
   linearEndT,
+  tangentReversed = false,
   controlPoints,
   actionTriggers = [],
   actionsExpanded,
   controlPointCount,
   controlsExpanded,
   isActive,
+  cardSubheader,
   onChange,
   startPoseOptions = [],
   onStartPoseSelect,
@@ -93,6 +98,7 @@ export function PointCard({
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
+  onTangentReversedChange,
   onPathActionTriggerChange,
   onToggleActionsExpanded,
   onAddPathAction,
@@ -117,7 +123,15 @@ export function PointCard({
   const [editingActionTrigger, setEditingActionTrigger] = useState<string | null>(null);
   const [draftActionT, setDraftActionT] = useState("");
   const [draggingControlIndex, setDraggingControlIndex] = useState<number | null>(null);
-  const [dragOverControlIndex, setDragOverControlIndex] = useState<number | null>(null);
+  const [controlDropGapIndex, setControlDropGapIndex] = useState<number | null>(null);
+  const controlPointsBodyRef = useRef<HTMLDivElement>(null);
+  const controlPointerDragRef = useRef<{
+    pointerId: number;
+    index: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
   const [draftName, setDraftName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameBeforeEdit, setNameBeforeEdit] = useState("");
@@ -193,58 +207,90 @@ export function PointCard({
 
   const sortedActionTriggers = [...actionTriggers].sort((a, b) => a.t - b.t);
 
-  const handleControlCardPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+  const handleControlCardPointerDown = (controlIndex: number, event: PointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    event.currentTarget.draggable = !Boolean(target.closest("input, select, button, textarea"));
-  };
-
-  const restoreControlCardDragging = (event: PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.draggable = true;
+    if (event.button !== 0 || target.closest("input, select, button, textarea")) return;
+    event.preventDefault();
+    controlPointerDragRef.current = {
+      pointerId: event.pointerId,
+      index: controlIndex,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const stopParentCardDrag = (event: PointerEvent<HTMLElement>) => {
     event.stopPropagation();
-  };
-
-  const handleControlDragStart = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    setDraggingControlIndex(controlIndex);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(controlIndex));
-  };
-
-  const handleControlDragOver = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
-    if (draggingControlIndex === null) return;
-    event.stopPropagation();
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    if (draggingControlIndex === controlIndex) {
-      if (dragOverControlIndex !== null) setDragOverControlIndex(null);
-      return;
+    const target = event.target as HTMLElement;
+    if (
+      !target.closest("input, select, button, textarea, a, [role='button'], [contenteditable='true']") &&
+      document.activeElement instanceof HTMLElement
+    ) {
+      document.activeElement.blur();
     }
-    setDragOverControlIndex(controlIndex);
+  };
+
+  const controlGapAtPointer = (clientY: number) => {
+    const cards = controlPointsBodyRef.current?.querySelectorAll<HTMLElement>("[data-control-index]");
+    if (!cards?.length) return null;
+
+    for (const card of cards) {
+      const index = Number.parseInt(card.dataset.controlIndex ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      const rect = card.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return index;
+    }
+
+    const lastCard = cards[cards.length - 1];
+    const lastIndex = Number.parseInt(lastCard.dataset.controlIndex ?? "", 10);
+    return Number.isFinite(lastIndex) ? lastIndex + 1 : null;
+  };
+
+  const controlIndexForDropGap = (fromIndex: number, gapIndex: number) =>
+    gapIndex > fromIndex ? gapIndex - 1 : gapIndex;
+
+  const handleControlPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const drag = controlPointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (!drag.active) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+      drag.active = true;
+      window.getSelection()?.removeAllRanges();
+      setDraggingControlIndex(drag.index);
+      setControlDropGapIndex(null);
+    }
+    event.preventDefault();
+    const gapIndex = controlGapAtPointer(event.clientY);
+    setControlDropGapIndex(gapIndex);
   };
 
   const clearControlDragState = () => {
     setDraggingControlIndex(null);
-    setDragOverControlIndex(null);
+    setControlDropGapIndex(null);
   };
 
-  const handleControlDrop = (controlIndex: number, event: DragEvent<HTMLDivElement>) => {
+  const finishControlPointerDrag = (event: PointerEvent<HTMLDivElement>, shouldCommit: boolean) => {
     event.stopPropagation();
-    event.preventDefault();
-    if (draggingControlIndex !== null && draggingControlIndex !== controlIndex) {
-      onReorderControlPoint?.(draggingControlIndex, controlIndex);
+    const drag = controlPointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    event.currentTarget.draggable = true;
+    controlPointerDragRef.current = null;
+    const gapIndex = shouldCommit && drag.active ? controlGapAtPointer(event.clientY) : null;
+    const targetIndex = gapIndex === null ? null : controlIndexForDropGap(drag.index, gapIndex);
+    if (targetIndex !== null && targetIndex !== drag.index) {
+      onReorderControlPoint?.(drag.index, targetIndex);
+    }
     clearControlDragState();
   };
 
-  const handleControlDragEnd = (event: DragEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    event.currentTarget.draggable = true;
-    clearControlDragState();
-  };
+  const handleControlPointerUp = (event: PointerEvent<HTMLDivElement>) => finishControlPointerDrag(event, true);
+  const handleControlPointerCancel = (event: PointerEvent<HTMLDivElement>) => finishControlPointerDrag(event, false);
 
   const handleNameFocus = () => {
     onNameEditStart();
@@ -281,6 +327,9 @@ export function PointCard({
               if (!isKotlinIdentifierDraft(e.target.value)) return;
               setDraftName(e.target.value);
               onRename?.(e.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
             }}
             onBlur={handleNameBlur}
             aria-label={`Rename path ${index}`}
@@ -359,6 +408,7 @@ export function PointCard({
           )}
         </div>
       </div>
+      {cardSubheader}
       <div className={styles.coordRow}>
         {index === 0 && (
           <div className={`${styles.selectGroup} ${styles.startPoseSelectGroup}`}>
@@ -519,6 +569,18 @@ export function PointCard({
                 </div>
               </>
             )}
+            {headingMode === "tangential" && (
+              <div className={styles.selectGroup}>
+                <label className={styles.inputLabel}>Direction</label>
+                <button
+                  className={`${styles.selectField} ${styles.headingDirectionButton}`}
+                  onClick={() => onTangentReversedChange?.(!tangentReversed)}
+                  aria-pressed={tangentReversed}
+                >
+                  {tangentReversed ? "Reversed" : "Forward"}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -557,7 +619,7 @@ export function PointCard({
                   className={styles.pathActionCard}
                   key={trigger.id}
                   data-card-drag-block="true"
-                  onPointerDownCapture={stopParentCardDrag}
+                  onPointerDown={stopParentCardDrag}
                 >
                   <div className={styles.pathActionTitleRow}>
                     <input
@@ -568,6 +630,9 @@ export function PointCard({
                       onChange={(event) =>
                         onPathActionTriggerChange?.(trigger.id, "actionName", event.target.value.toUpperCase())
                       }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
                       aria-label={`Path action ${triggerIndex + 1} name`}
                     />
                     <span className={styles.deleteAction}>
@@ -668,24 +733,20 @@ export function PointCard({
             </button>
           </div>
           {controlsExpanded && controlPoints.length > 0 && (
-            <div className={styles.controlPointsBody}>
+            <div ref={controlPointsBodyRef} className={styles.controlPointsBody}>
               {controlPoints.map((controlPoint, controlIndex) => (
                 <div
                   key={controlPoint.id}
-                  className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${draggingControlIndex !== controlIndex && dragOverControlIndex === controlIndex ? styles.pointCardDropTarget : ""} ${draggingControlIndex === controlIndex ? styles.pointCardDragging : ""}`}
+                  className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${draggingControlIndex !== null && controlDropGapIndex === controlIndex ? styles.pointCardDropBefore : ""} ${draggingControlIndex !== null && controlIndex === controlPoints.length - 1 && controlDropGapIndex === controlIndex + 1 ? styles.pointCardDropAfter : ""} ${draggingControlIndex === controlIndex ? styles.pointCardDragging : ""}`}
                   data-card-drag-block="true"
-                  draggable
-                  onPointerDownCapture={(event) => {
+                  data-control-index={controlIndex}
+                  onPointerDown={(event) => {
                     stopParentCardDrag(event);
-                    handleControlCardPointerDown(event);
+                    handleControlCardPointerDown(controlIndex, event);
                   }}
-                  onPointerUpCapture={restoreControlCardDragging}
-                  onPointerCancel={restoreControlCardDragging}
-                  onDragStart={(event) => handleControlDragStart(controlIndex, event)}
-                  onDragEnter={(event) => handleControlDragOver(controlIndex, event)}
-                  onDragOver={(event) => handleControlDragOver(controlIndex, event)}
-                  onDrop={(event) => handleControlDrop(controlIndex, event)}
-                  onDragEnd={handleControlDragEnd}
+                  onPointerMove={handleControlPointerMove}
+                  onPointerUp={handleControlPointerUp}
+                  onPointerCancel={handleControlPointerCancel}
                 >
                   <ControlPointCard
                     index={controlIndex}

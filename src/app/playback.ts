@@ -250,6 +250,7 @@ export const buildPlaybackTimeline = (
         const dx = (nextSample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
         const dy = (previousSample.ny - nextSample.ny) * FIELD_SIZE_INCHES;
         heading = normalizeHeading((Math.atan2(dx, dy) * 180) / Math.PI);
+        if (point.tangentReversed) heading = normalizeHeading(heading + 180);
       }
 
       return { nx: sample.nx, ny: sample.ny, heading };

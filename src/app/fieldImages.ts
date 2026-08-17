@@ -1,5 +1,5 @@
-export const FIELD_IMAGE_STORAGE_KEY = "auton-path-planner:field-image";
-export const CUSTOM_FIELD_IMAGE_STORAGE_KEY = "auton-path-planner:custom-field-image";
+export const FIELD_IMAGE_STORAGE_KEY = "auton-visualizer:field-image";
+export const CUSTOM_FIELD_IMAGE_STORAGE_KEY = "auton-visualizer:custom-field-image";
 
 export const FIELD_IMAGE_PRESETS = [
   { id: "decode", name: "Decode", src: "/fields/decode.webp" },

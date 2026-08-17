@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -57,12 +56,12 @@ import {
   isNumericDraft,
   mainPointHitRadius,
   normalizeHeading,
-  randomColor,
   targetPathIndex,
   toFieldCoords,
   toNormalizedCoords,
   toSvgPixelCoords,
 } from "./plannerUtils";
+import { seededColor } from "./plannerColors";
 import {
   buildPlaybackTimeline,
   clamp01,
@@ -98,6 +97,7 @@ import styles from "./page.module.css";
 
 const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
+const FIELD_BACKGROUND_DOUBLE_CLICK_MS = 500;
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function PathPlannerPage() {
@@ -106,8 +106,8 @@ export default function PathPlannerPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
-  const [kotlinExport, setKotlinExport] = useState<{ fileName: string; subtitle: string; contents: string } | null>(null);
-  const [didCopyExport, setDidCopyExport] = useState(false);
+  const [kotlinExport, setKotlinExport] = useState<{ contents: string } | null>(null);
+  const [isKotlinExportVisible, setIsKotlinExportVisible] = useState(false);
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
   const [autonAlliance, setAutonAlliance] = useState<AutonAlliance>(DEFAULT_AUTON_ALLIANCE);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
@@ -131,7 +131,7 @@ export default function PathPlannerPage() {
   const [isFieldImageModalVisible, setIsFieldImageModalVisible] = useState(false);
   const [sidebarPage, setSidebarPage] = useState<SidebarPage>("auton");
   const [draggingPathIndex, setDraggingPathIndex] = useState<number | null>(null);
-  const [dragOverPathIndex, setDragOverPathIndex] = useState<number | null>(null);
+  const [pathDropGapIndex, setPathDropGapIndex] = useState<number | null>(null);
 
   const fieldRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -142,10 +142,19 @@ export default function PathPlannerPage() {
   const exportTextAreaRef = useRef<HTMLTextAreaElement>(null);
   const pointsListRef = useRef<HTMLDivElement>(null);
   const dragStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
-  const suppressFieldDoubleClickUntilRef = useRef(0);
-  const fieldImageModalCloseTimerRef = useRef<number | null>(null);
+  const lastFieldBackgroundClickAtRef = useRef<number | null>(null);
+  const didPointerDownOnFieldBackgroundRef = useRef(false);
+  const shouldFieldImageModalBeVisibleRef = useRef(false);
+  const shouldKotlinExportBeVisibleRef = useRef(false);
   const cardDragScrollSpeedRef = useRef(0);
   const cardDragScrollFrameRef = useRef<number | null>(null);
+  const sequencePointerDragRef = useRef<{
+    pointerId: number;
+    index: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
   const {
     points,
     sequenceItems,
@@ -275,23 +284,35 @@ export default function PathPlannerPage() {
   }, [handleUndo, handleRedo, kotlinExport]);
 
   useEffect(() => {
-    if (!kotlinExport) return;
+    if (!kotlinExport && !isFieldImageModalOpen) return;
 
-    const frame = requestAnimationFrame(() => {
-      exportTextAreaRef.current?.focus();
-      exportTextAreaRef.current?.select();
-    });
+    const frame = kotlinExport
+      ? requestAnimationFrame(() => {
+          exportTextAreaRef.current?.focus();
+        })
+      : null;
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setKotlinExport(null);
+      if (event.key !== "Escape") return;
+
+      if (kotlinExport) {
+        shouldKotlinExportBeVisibleRef.current = false;
+        setIsKotlinExportVisible(false);
+        return;
+      }
+
+      lastFieldBackgroundClickAtRef.current = null;
+      didPointerDownOnFieldBackgroundRef.current = false;
+      shouldFieldImageModalBeVisibleRef.current = false;
+      setIsFieldImageModalVisible(false);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      cancelAnimationFrame(frame);
+      if (frame !== null) cancelAnimationFrame(frame);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [kotlinExport]);
+  }, [isFieldImageModalOpen, kotlinExport]);
 
   useEffect(() => {
     const field = fieldRef.current;
@@ -338,16 +359,15 @@ export default function PathPlannerPage() {
   }, []);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setPlannerPoints((currentPoints) =>
-        currentPoints.map((point) =>
-          point.id === INITIAL_POINT_ID ? { ...point, color: randomColor() } : point
-        )
-      );
-    });
+    const resetFieldBackgroundClick = (event: globalThis.PointerEvent) => {
+      const didStartOnFieldBackground = event.target === svgRef.current;
+      didPointerDownOnFieldBackgroundRef.current = didStartOnFieldBackground;
+      if (!didStartOnFieldBackground) lastFieldBackgroundClickAtRef.current = null;
+    };
 
-    return () => cancelAnimationFrame(frame);
-  }, [setPlannerPoints]);
+    document.addEventListener("pointerdown", resetFieldBackgroundClick, true);
+    return () => document.removeEventListener("pointerdown", resetFieldBackgroundClick, true);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -444,7 +464,7 @@ export default function PathPlannerPage() {
         name: `path${points.length}`,
         nx: seed.nx,
         ny: seed.ny,
-        color: randomColor(),
+        color: seededColor(pointId),
         locked: false,
         hidden: false,
         ...createDefaultHeadingValues(),
@@ -575,32 +595,101 @@ export default function PathPlannerPage() {
 
   const clearPathCardDragState = () => {
     setDraggingPathIndex(null);
-    setDragOverPathIndex(null);
+    setPathDropGapIndex(null);
     stopCardDragAutoScroll();
   };
 
   const isEditableDragTarget = (target: EventTarget | null) =>
-    target instanceof HTMLElement &&
-    Boolean(target.closest("input, select, textarea, [contenteditable='true'], [data-card-drag-block='true']"));
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        "input, select, button, textarea, a, [role='button'], [contenteditable='true'], [data-card-drag-block='true']"
+      )
+    );
 
-  const handleSequenceCardPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.currentTarget.draggable = !isEditableDragTarget(event.target);
-  };
+  const sequenceGapAtPointer = (clientY: number) => {
+    const cards = pointsListRef.current?.querySelectorAll<HTMLElement>("[data-sequence-index]");
+    if (!cards?.length) return null;
 
-  const restoreSequenceCardDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.currentTarget.draggable = true;
-  };
-
-  const handlePathCardDragStart = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    if (index < 0 || isEditableDragTarget(event.target)) {
-      event.preventDefault();
-      return;
+    for (const card of cards) {
+      const index = Number.parseInt(card.dataset.sequenceIndex ?? "", 10);
+      if (!Number.isFinite(index)) continue;
+      const rect = card.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return index;
     }
 
-    setDraggingPathIndex(index);
-    setDragOverPathIndex(null);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", sequenceItemsRef.current[index]?.id ?? "");
+    const lastCard = cards[cards.length - 1];
+    const lastIndex = Number.parseInt(lastCard.dataset.sequenceIndex ?? "", 10);
+    return Number.isFinite(lastIndex) ? lastIndex + 1 : null;
+  };
+
+  const sequenceIndexForDropGap = (fromIndex: number, gapIndex: number) =>
+    gapIndex > fromIndex ? gapIndex - 1 : gapIndex;
+
+  const handleSequenceCardPointerDown = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || index < 0 || isEditableDragTarget(event.target)) return;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    event.preventDefault();
+    sequencePointerDragRef.current = {
+      pointerId: event.pointerId,
+      index,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleSequenceCardPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = sequencePointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (!drag.active) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+      drag.active = true;
+      window.getSelection()?.removeAllRanges();
+      setDraggingPathIndex(drag.index);
+      setPathDropGapIndex(null);
+    }
+
+    event.preventDefault();
+    const gapIndex = sequenceGapAtPointer(event.clientY);
+    setPathDropGapIndex(gapIndex);
+    updateCardDragAutoScrollFromPointer(event.clientY);
+  };
+
+  const finishSequencePointerDrag = (event: ReactPointerEvent<HTMLDivElement>, shouldCommit: boolean) => {
+    const drag = sequencePointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    sequencePointerDragRef.current = null;
+
+    const gapIndex = shouldCommit && drag.active ? sequenceGapAtPointer(event.clientY) : null;
+    const targetIndex = gapIndex === null ? null : sequenceIndexForDropGap(drag.index, gapIndex);
+    if (targetIndex !== null && targetIndex !== drag.index) {
+      const nextSequenceItems = reorderSequenceItems(sequenceItemsRef.current, drag.index, targetIndex);
+      const nextPoints = orderPointsFromSequence(pointsRef.current, nextSequenceItems);
+      pushCurrentSnapshotIfChanged(nextPoints, nextSequenceItems);
+      setPlannerPoints(nextPoints);
+      setPlannerSequenceItems(nextSequenceItems);
+      setHoverTarget(null);
+      setActiveTarget(null);
+      setIsDragging(false);
+    }
+    clearPathCardDragState();
+  };
+
+  const handleSequenceCardPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    finishSequencePointerDrag(event, true);
+  };
+
+  const handleSequenceCardPointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    finishSequencePointerDrag(event, false);
   };
 
   const handleRemoveAction = (itemId: string) => {
@@ -632,55 +721,6 @@ export default function PathPlannerPage() {
     );
   };
 
-  const handlePathCardDragOver = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    if (index < 0 || draggingPathIndex === null) return;
-    if (draggingPathIndex === index) {
-      if (dragOverPathIndex !== null) setDragOverPathIndex(null);
-      updateCardDragAutoScrollFromPointer(event.clientY);
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    if (dragOverPathIndex !== index) setDragOverPathIndex(index);
-    updateCardDragAutoScrollFromPointer(event.clientY);
-  };
-
-  const handlePathCardDrop = (index: number, event: ReactDragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    if (draggingPathIndex === null || index < 0 || draggingPathIndex === index) {
-      clearPathCardDragState();
-      return;
-    }
-
-    const nextSequenceItems = reorderSequenceItems(sequenceItemsRef.current, draggingPathIndex, index);
-    if (nextSequenceItems === sequenceItemsRef.current) {
-      clearPathCardDragState();
-      return;
-    }
-
-    const nextPoints = orderPointsFromSequence(pointsRef.current, nextSequenceItems);
-    pushCurrentSnapshotIfChanged(nextPoints, nextSequenceItems);
-    setPlannerPoints(nextPoints);
-    setPlannerSequenceItems(nextSequenceItems);
-    setHoverTarget(null);
-    setActiveTarget(null);
-    setIsDragging(false);
-    clearPathCardDragState();
-  };
-
-  const handlePointsListDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (draggingPathIndex === null) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-    updateCardDragAutoScrollFromPointer(event.clientY);
-  };
-
-  const handlePointsListDragLeave = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (draggingPathIndex === null) return;
-    const nextTarget = event.relatedTarget as Node | null;
-    if (nextTarget && event.currentTarget.contains(nextTarget)) return;
-    stopCardDragAutoScroll();
-  };
 
   useEffect(() => {
     return () => {
@@ -1032,24 +1072,35 @@ export default function PathPlannerPage() {
   const handleExportKotlin = () => {
     if (sidebarPage === "poses") {
       const contents = serializeSavedPosesKotlin(savedPoses, robotConstants);
-      setDidCopyExport(false);
-      setKotlinExport({
-        fileName: "Poses.kt",
-        subtitle: "Start pose declarations",
-        contents,
-      });
+      shouldKotlinExportBeVisibleRef.current = true;
+      setKotlinExport({ contents });
+      setIsKotlinExportVisible(true);
       return;
     }
 
     const contents = serializePathPlannerKotlin(points, savedPoses, getSequenceItemsWithPaths(sequenceItems, points), {
       alliance: autonAlliance,
     });
-    setDidCopyExport(false);
-    setKotlinExport({
-      fileName: "AutonSequence.kt",
-      subtitle: "autonSequence method contents",
-      contents,
-    });
+    shouldKotlinExportBeVisibleRef.current = true;
+    setKotlinExport({ contents });
+    setIsKotlinExportVisible(true);
+  };
+
+  const handlePathTangentReversedChange = (index: number, tangentReversed: boolean) => {
+    const nextPoints = pointsRef.current.map((point, i) =>
+      i === index ? { ...point, tangentReversed } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, i) =>
+        i === index ? { ...point, tangentReversed } : point
+      )
+    );
+  };
+
+  const closeKotlinExport = () => {
+    shouldKotlinExportBeVisibleRef.current = false;
+    setIsKotlinExportVisible(false);
   };
 
   const handleCopyKotlinExport = async () => {
@@ -1058,9 +1109,8 @@ export default function PathPlannerPage() {
     exportTextAreaRef.current?.select();
     try {
       await navigator.clipboard.writeText(kotlinExport.contents);
-      setDidCopyExport(true);
     } catch {
-      setDidCopyExport(false);
+      exportTextAreaRef.current?.focus();
     }
   };
 
@@ -1112,7 +1162,7 @@ export default function PathPlannerPage() {
   const importKotlinContents = (contents: string) => {
     const importedAuton = parsePathPlannerKotlin(contents, savedPoses);
     if (!importedAuton || importedAuton.points.length === 0) {
-      window.alert("This Kotlin file does not contain an Auton Path Planner export.");
+      window.alert("This Kotlin file does not contain an Auton Visualizer export.");
       return;
     }
 
@@ -1273,34 +1323,47 @@ export default function PathPlannerPage() {
     }
   };
 
-  const handleFieldDoubleClick = (event: ReactMouseEvent<SVGSVGElement>) => {
-    event.preventDefault();
-    if (performance.now() < suppressFieldDoubleClickUntilRef.current) return;
-    if (isDragging) return;
-    const normalized = getPointerNormalized(event.nativeEvent);
-    if (!normalized) return;
-    const { nx, ny } = normalized;
-    if (getHitTarget(nx, ny) !== null) return;
-    if (fieldImageModalCloseTimerRef.current !== null) {
-      window.clearTimeout(fieldImageModalCloseTimerRef.current);
-      fieldImageModalCloseTimerRef.current = null;
+  const handleFieldClick = (event: ReactMouseEvent<SVGSVGElement>) => {
+    const didStartOnFieldBackground = didPointerDownOnFieldBackgroundRef.current;
+    didPointerDownOnFieldBackgroundRef.current = false;
+
+    if (!didStartOnFieldBackground || isDragging || event.target !== event.currentTarget) {
+      lastFieldBackgroundClickAtRef.current = null;
+      return;
     }
+
+    const normalized = getPointerNormalized(event.nativeEvent);
+    if (!normalized) {
+      lastFieldBackgroundClickAtRef.current = null;
+      return;
+    }
+
+    const { nx, ny } = normalized;
+    if (getHitTarget(nx, ny) !== null) {
+      lastFieldBackgroundClickAtRef.current = null;
+      return;
+    }
+
+    const lastClickAt = lastFieldBackgroundClickAtRef.current;
+    const isSecondFieldBackgroundClick =
+      lastClickAt !== null && event.timeStamp - lastClickAt <= FIELD_BACKGROUND_DOUBLE_CLICK_MS;
+
+    if (!isSecondFieldBackgroundClick) {
+      lastFieldBackgroundClickAtRef.current = event.timeStamp;
+      return;
+    }
+
+    lastFieldBackgroundClickAtRef.current = null;
+    event.preventDefault();
+    shouldFieldImageModalBeVisibleRef.current = true;
     setIsFieldImageModalOpen(true);
-    requestAnimationFrame(() => setIsFieldImageModalVisible(true));
+    setIsFieldImageModalVisible(true);
   };
 
-  const closeFieldImageModal = (suppressNextFieldDoubleClick = false) => {
-    if (suppressNextFieldDoubleClick) {
-      suppressFieldDoubleClickUntilRef.current = performance.now() + 450;
-    }
+  const closeFieldImageModal = () => {
+    lastFieldBackgroundClickAtRef.current = null;
+    shouldFieldImageModalBeVisibleRef.current = false;
     setIsFieldImageModalVisible(false);
-    if (fieldImageModalCloseTimerRef.current !== null) {
-      window.clearTimeout(fieldImageModalCloseTimerRef.current);
-    }
-    fieldImageModalCloseTimerRef.current = window.setTimeout(() => {
-      setIsFieldImageModalOpen(false);
-      fieldImageModalCloseTimerRef.current = null;
-    }, 160);
   };
 
   const fieldImageSrc = resolveFieldImageSrc(fieldImageSelection, customFieldImage);
@@ -1369,7 +1432,7 @@ export default function PathPlannerPage() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
-        onDoubleClick={handleFieldDoubleClick}
+        onClick={handleFieldClick}
       />
 
       <div className={styles.sidebarColumn}>
@@ -1389,7 +1452,7 @@ export default function PathPlannerPage() {
           areActionsHidden={areActionsHidden}
           hasActions={hasActions}
           draggingPathIndex={draggingPathIndex}
-          dragOverPathIndex={dragOverPathIndex}
+          pathDropGapIndex={pathDropGapIndex}
           importInputRef={importInputRef}
           posesInputRef={posesInputRef}
           constantsInputRef={constantsInputRef}
@@ -1404,15 +1467,10 @@ export default function PathPlannerPage() {
           onImportKotlin={handleImportKotlin}
           onImportPoses={handleImportPoses}
           onImportConstants={handleImportConstants}
-          onPointsListDragOver={handlePointsListDragOver}
-          onPointsListDragLeave={handlePointsListDragLeave}
-          onStopCardDragAutoScroll={stopCardDragAutoScroll}
-          onSequenceCardPointerDownCapture={handleSequenceCardPointerDownCapture}
-          onRestoreSequenceCardDragging={restoreSequenceCardDragging}
-          onPathCardDragStart={handlePathCardDragStart}
-          onPathCardDragOver={handlePathCardDragOver}
-          onPathCardDrop={handlePathCardDrop}
-          onClearPathCardDragState={clearPathCardDragState}
+          onSequenceCardPointerDown={handleSequenceCardPointerDown}
+          onSequenceCardPointerMove={handleSequenceCardPointerMove}
+          onSequenceCardPointerUp={handleSequenceCardPointerUp}
+          onSequenceCardPointerCancel={handleSequenceCardPointerCancel}
           onCoordChange={handleCoordChange}
           onStartPoseSelect={handleStartPoseSelect}
           onPositionEditStart={beginPositionEdit}
@@ -1423,6 +1481,7 @@ export default function PathPlannerPage() {
           onRenamePath={handleRenamePath}
           onPathInterpolationChange={handlePathInterpolationChange}
           onPathHeadingChange={handlePathHeadingChange}
+          onPathTangentReversedChange={handlePathTangentReversedChange}
           onToggleActionsExpanded={handleToggleActionsExpanded}
           onAddPathAction={handleAddPathAction}
           onPathActionTriggerChange={handlePathActionTriggerChange}
@@ -1468,6 +1527,9 @@ export default function PathPlannerPage() {
           isUploading={isFieldImageUploading}
           fileInputRef={fieldImageInputRef}
           onClose={closeFieldImageModal}
+          onFadeOutComplete={() => {
+            if (!shouldFieldImageModalBeVisibleRef.current) setIsFieldImageModalOpen(false);
+          }}
           onSelectPreset={selectFieldPreset}
           onSelectCustom={selectCustomFieldImage}
           onRemoveCustom={removeCustomFieldImage}
@@ -1477,10 +1539,13 @@ export default function PathPlannerPage() {
 
       {kotlinExport && (
         <KotlinExportModal
+          isVisible={isKotlinExportVisible}
           kotlinExport={kotlinExport}
-          didCopyExport={didCopyExport}
           textAreaRef={exportTextAreaRef}
-          onClose={() => setKotlinExport(null)}
+          onClose={closeKotlinExport}
+          onFadeOutComplete={() => {
+            if (!shouldKotlinExportBeVisibleRef.current) setKotlinExport(null);
+          }}
           onCopy={handleCopyKotlinExport}
         />
       )}

@@ -8,15 +8,6 @@ import type { ControlPoint, DragTarget, FieldSize, HeadingInterpolation } from "
 
 export const generateId = () => Math.random().toString(36).substr(2, 9);
 
-export const randomColor = () => {
-  const min = 120;
-  const range = 256 - min;
-  const r = Math.floor(Math.random() * range) + min;
-  const g = Math.floor(Math.random() * range) + min;
-  const b = Math.floor(Math.random() * range) + min;
-  return `rgb(${r}, ${g}, ${b})`;
-};
-
 export const toFieldCoords = (nx: number, ny: number) => {
   const x = (nx - 0.5) * FIELD_SIZE_INCHES;
   const y = (0.5 - ny) * FIELD_SIZE_INCHES;
@@ -48,6 +39,7 @@ export const createDefaultHeadingValues = () => ({
   endHeading: 0,
   linearStartT: 0,
   linearEndT: 1,
+  tangentReversed: false,
   controlPoints: [] as ControlPoint[],
   controlsExpanded: true,
 });

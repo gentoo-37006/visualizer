@@ -1,4 +1,4 @@
-const CACHE_NAME = "auton-path-planner-v4";
+const CACHE_NAME = "auton-visualizer-v5";
 const APP_SHELL_URLS = [
   "/favicon.ico",
   "/fields/decode.webp",

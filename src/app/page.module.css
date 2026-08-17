@@ -113,14 +113,39 @@
 }
 
 .secondaryIconButton:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  filter: brightness(0.72);
 }
 
 .activeIconButton {
   border-color: var(--primary);
   color: var(--primary);
   background: rgba(59, 130, 246, 0.12);
+}
+
+.pageButtonIconSwap {
+  width: 1.125rem;
+  height: 1.125rem;
+  display: grid;
+  place-items: center;
+}
+
+.pageButtonIconSwap > svg {
+  grid-area: 1 / 1;
+  transition: none;
+}
+
+.pageButtonActionIcon {
+  opacity: 0;
+}
+
+.activeIconButton:hover .pageButtonDefaultIcon,
+.activeIconButton:focus-visible .pageButtonDefaultIcon {
+  opacity: 0;
+}
+
+.activeIconButton:hover .pageButtonActionIcon,
+.activeIconButton:focus-visible .pageButtonActionIcon {
+  opacity: 1;
 }
 
 .secondaryIconButton:disabled,
@@ -133,6 +158,7 @@
 .secondaryIconButton[aria-disabled="true"]:hover {
   border-color: var(--border);
   color: var(--text-primary);
+  filter: none;
 }
 
 .hiddenFileInput {
@@ -145,31 +171,56 @@
   padding: 1rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 16px;
 }
 
 .pointCardDragWrapper {
+  --drop-indicator-offset: 9px;
+  position: relative;
   border-radius: var(--border-radius);
 }
 
 .pointCardDraggable {
-  cursor: grab;
+  cursor: default;
 }
 
-.pointCardDraggable:active {
-  cursor: grabbing;
+.pointCardDropBefore::before,
+.pointCardDropAfter::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  left: 4px;
+  right: 4px;
+  height: 0;
+  border-top: 2px solid var(--primary);
+  border-radius: 999px;
+  pointer-events: none;
 }
 
-.pointCardDropTarget {
-  outline: 2px dashed var(--primary);
-  outline-offset: 2px;
+.pointCardDropBefore::before {
+  top: calc(-1 * var(--drop-indicator-offset));
+}
+
+.pointCardDropAfter::after {
+  bottom: calc(-1 * var(--drop-indicator-offset));
 }
 
 .pointCardDragging {
+  cursor: grabbing;
+}
+
+.pointCardDragging > * {
   opacity: 0.65;
 }
 
+.pointsList:has(.pointCardDragging),
+.pointsList:has(.pointCardDragging) * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 .pointCard {
+  --card-control-height: 36px;
   background-color: #262626;
   border: 2px solid color-mix(in srgb, var(--point-color, var(--primary)) 55%, transparent);
   border-radius: var(--border-radius);
@@ -250,6 +301,7 @@
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-primary);
+  user-select: none;
 }
 
 .pathNameInput {
@@ -265,14 +317,6 @@
   padding: 0;
 }
 
-.pathNameInput:focus {
-  background: var(--background);
-  border-color: var(--primary);
-  padding: 0.25rem;
-  margin-left: -0.25rem;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-}
-
 .actionNameInput {
   width: 24ch;
   max-width: 24ch;
@@ -285,15 +329,6 @@
   font-weight: 600;
   padding: 0;
 }
-
-.actionNameInput:focus {
-  background: var(--background);
-  border-color: #f97316;
-  padding: 0.25rem;
-  margin-left: -0.25rem;
-  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
-}
-
 
 .cardActions {
   display: flex;
@@ -454,45 +489,26 @@
   flex: 0 0 7.25rem;
 }
 
-.autonSettingsRow {
+.startPoseAllianceRow {
   display: flex;
   justify-content: flex-start;
-  padding: 1rem 1.25rem 0;
-  margin-bottom: 0.875rem;
+  margin-bottom: 0.75rem;
 }
 
 .allianceToggleButton {
-  border: 1px solid transparent;
-  border-radius: 4px;
   color: white;
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.875rem;
-  font-weight: 700;
-  min-height: 2.25rem;
-  padding: 0.5rem 0.875rem;
+  height: var(--card-control-height);
   text-align: left;
-  transition: var(--transition);
 }
 
-.blueAllianceButton {
+.allianceToggleButton.blueAllianceButton {
   background: rgba(37, 99, 235, 0.88);
-  border-color: rgba(147, 197, 253, 0.55);
 }
 
-.blueAllianceButton:hover {
-  background: rgb(37, 99, 235);
-  border-color: #bfdbfe;
-}
-
-.redAllianceButton {
+.allianceToggleButton.redAllianceButton {
   background: rgba(220, 38, 38, 0.88);
-  border-color: rgba(252, 165, 165, 0.55);
-}
-
-.redAllianceButton:hover {
-  background: rgb(220, 38, 38);
-  border-color: #fecaca;
 }
 
 .startPoseSelectGroup {
@@ -508,20 +524,29 @@
 }
 
 .inputField {
+  height: var(--card-control-height);
   background-color: var(--background);
   border: 1px solid var(--border);
   color: var(--text-primary);
+  outline: none;
   padding: 0.5rem;
   border-radius: 4px;
   font-size: 0.875rem;
   transition: var(--transition);
   width: 100%;
+}
+
+.inputField:read-only {
+  caret-color: transparent;
+  cursor: text;
 }
 
 .selectField {
+  height: var(--card-control-height);
   background-color: var(--background);
   border: 1px solid var(--border);
   color: var(--text-primary);
+  outline: none;
   padding: 0.5rem;
   border-radius: 4px;
   font-size: 0.875rem;
@@ -529,9 +554,10 @@
   width: 100%;
 }
 
-.inputField:focus, .selectField:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+.headingDirectionButton {
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
 }
 
 .controlPointsPanel {
@@ -703,7 +729,11 @@
   margin-top: 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 10px;
+}
+
+.controlPointsBody .pointCardDragWrapper {
+  --drop-indicator-offset: 6px;
 }
 
 .addControlPointButton {
@@ -748,6 +778,7 @@
   color: var(--text-primary);
   font-size: 0.8125rem;
   font-weight: 600;
+  user-select: none;
 }
 
 .controlPointInputs {
@@ -834,25 +865,31 @@
 
 .fadeModalBackdrop {
   opacity: 0;
-  transition: opacity 0.16s ease-out;
 }
 
 .fadeModalOpen {
-  opacity: 1;
+  animation: fadeModalIn 80ms ease-out forwards;
 }
 
-.fadeModalPanel {
-  transform: translateY(0.25rem) scale(0.98);
-  transition: transform 0.16s ease-out;
+.fadeModalClosing {
+  animation: fadeModalOut 80ms ease-in forwards;
+  pointer-events: none;
 }
 
-.fadeModalOpen .fadeModalPanel {
-  transform: translateY(0) scale(1);
+@keyframes fadeModalIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeModalOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .exportModal {
   width: min(52rem, 100%);
-  max-height: min(44rem, calc(100vh - 2rem));
+  height: min(56rem, calc(100vh - 2rem));
+  max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -998,7 +1035,7 @@
 
 .exportModalHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1rem 0.875rem;
@@ -1019,50 +1056,107 @@
   line-height: 1.3;
 }
 
-.exportCode {
+.exportCodeShell {
+  position: relative;
   flex: 1;
   min-height: 22rem;
   width: 100%;
-  resize: vertical;
-  background: #111827;
-  border: 0;
+  background: var(--background);
   border-bottom: 1px solid var(--border);
-  color: #e5e7eb;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  overflow: hidden;
+}
+
+.exportCode,
+.exportCodeHighlight {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  font-family: var(--font-jetbrains-mono), "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 0.8125rem;
   line-height: 1.5;
-  outline: none;
   padding: 1rem;
   white-space: pre;
+  tab-size: 4;
 }
 
-.exportModalActions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding: 0.875rem 1rem 1rem;
+.exportCodeHighlight {
+  z-index: 2;
+  overflow: hidden;
+  color: #bcbec4;
+  pointer-events: none;
 }
 
-.copyStatus {
-  margin-right: auto;
-  color: var(--text-secondary);
-  font-size: 0.8125rem;
+.exportCodeHighlight code {
+  font: inherit;
+}
+
+.exportCode {
+  z-index: 1;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: #bcbec4;
+  outline: none;
+  -webkit-text-fill-color: transparent;
+}
+
+.exportCode::selection {
+  background: #214283;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.kotlinKeyword {
+  color: #cf8e6d;
+}
+
+.kotlinString {
+  color: #6aab73;
+}
+
+.kotlinNumber {
+  color: #2aacb8;
+}
+
+.kotlinComment {
+  color: #7a7e85;
+}
+
+.kotlinAnnotation {
+  color: #b3ae60;
+}
+
+.kotlinConstant {
+  color: #c77dbb;
+}
+
+.kotlinAllianceConstant {
+  color: #c77dbb;
+  font-style: italic;
 }
 
 .copyButton {
-  min-width: 5.5rem;
-  background: var(--primary);
-  color: white;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 700;
-  padding: 0.625rem 1rem;
+  padding: 0;
   transition: var(--transition);
 }
 
 .copyButton:hover {
-  background: var(--primary-hover);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .playbackSidebar {
@@ -1172,7 +1266,7 @@
     max-height: calc(100vh - 1rem);
   }
 
-  .exportCode {
+  .exportCodeShell {
     min-height: 18rem;
   }
 }

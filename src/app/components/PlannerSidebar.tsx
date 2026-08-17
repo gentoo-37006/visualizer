@@ -2,7 +2,6 @@
 
 import type {
   ChangeEvent,
-  DragEvent as ReactDragEvent,
   PointerEvent as ReactPointerEvent,
   RefObject,
   ReactNode,
@@ -25,6 +24,24 @@ import { PointCard } from "./PointCard";
 
 export type SidebarPage = "auton" | "poses" | "constants";
 
+const UploadPageIcon = () => (
+  <svg
+    className={styles.pageButtonActionIcon}
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+    <polyline points="17 8 12 3 7 8"></polyline>
+    <line x1="12" y1="3" x2="12" y2="15"></line>
+  </svg>
+);
+
 type PlannerSidebarProps = {
   sidebarPage: SidebarPage;
   points: Point[];
@@ -41,7 +58,7 @@ type PlannerSidebarProps = {
   areActionsHidden: boolean;
   hasActions: boolean;
   draggingPathIndex: number | null;
-  dragOverPathIndex: number | null;
+  pathDropGapIndex: number | null;
   importInputRef: RefObject<HTMLInputElement | null>;
   posesInputRef: RefObject<HTMLInputElement | null>;
   constantsInputRef: RefObject<HTMLInputElement | null>;
@@ -56,15 +73,10 @@ type PlannerSidebarProps = {
   onImportKotlin: (event: ChangeEvent<HTMLInputElement>) => void;
   onImportPoses: (event: ChangeEvent<HTMLInputElement>) => void;
   onImportConstants: (event: ChangeEvent<HTMLInputElement>) => void;
-  onPointsListDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onPointsListDragLeave: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onStopCardDragAutoScroll: () => void;
-  onSequenceCardPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onRestoreSequenceCardDragging: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onPathCardDragStart: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onPathCardDragOver: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onPathCardDrop: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onClearPathCardDragState: () => void;
+  onSequenceCardPointerDown: (index: number, event: ReactPointerEvent<HTMLDivElement>) => void;
+  onSequenceCardPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onSequenceCardPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onSequenceCardPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCoordChange: (index: number, axis: "x" | "y", value: string) => void;
   onStartPoseSelect: (name: string) => void;
   onPositionEditStart: () => void;
@@ -75,6 +87,7 @@ type PlannerSidebarProps = {
   onRenamePath: (index: number, name: string) => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
   onAddPathAction: (index: number) => void;
   onPathActionTriggerChange: (
@@ -119,7 +132,7 @@ export function PlannerSidebar({
   areActionsHidden,
   hasActions,
   draggingPathIndex,
-  dragOverPathIndex,
+  pathDropGapIndex,
   importInputRef,
   posesInputRef,
   constantsInputRef,
@@ -134,15 +147,10 @@ export function PlannerSidebar({
   onImportKotlin,
   onImportPoses,
   onImportConstants,
-  onPointsListDragOver,
-  onPointsListDragLeave,
-  onStopCardDragAutoScroll,
-  onSequenceCardPointerDownCapture,
-  onRestoreSequenceCardDragging,
-  onPathCardDragStart,
-  onPathCardDragOver,
-  onPathCardDrop,
-  onClearPathCardDragState,
+  onSequenceCardPointerDown,
+  onSequenceCardPointerMove,
+  onSequenceCardPointerUp,
+  onSequenceCardPointerCancel,
   onCoordChange,
   onStartPoseSelect,
   onPositionEditStart,
@@ -153,6 +161,7 @@ export function PlannerSidebar({
   onRenamePath,
   onPathInterpolationChange,
   onPathHeadingChange,
+  onPathTangentReversedChange,
   onToggleActionsExpanded,
   onAddPathAction,
   onPathActionTriggerChange,
@@ -175,6 +184,14 @@ export function PlannerSidebar({
   onUpdateMotionParameter,
   onFormatMotionParameter,
 }: PlannerSidebarProps) {
+  const displayedSequenceItems = sequenceItems.length > 0
+    ? sequenceItems
+    : points.slice(1).map((point) => ({ id: `fallback-${point.id}`, kind: "path" as const, pointId: point.id }));
+  const lastVisibleSequenceIndex = displayedSequenceItems.reduce<number | null>((lastIndex, item, sequenceIndex) => {
+    if (item.kind === "action") return areActionsHidden ? lastIndex : sequenceIndex;
+    return points.some((point) => point.id === item.pointId) ? sequenceIndex : lastIndex;
+  }, null);
+
   return (
     <aside className={styles.sidebar}>
       <div className={styles.sidebarHeader}>
@@ -205,12 +222,20 @@ export function PlannerSidebar({
               aria-label="Import Constants"
               title={sidebarPage === "constants" ? "Import Constants" : "Constants"}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v20"></path>
-                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path>
-                <path d="M19 12h3"></path>
-                <path d="M2 12h3"></path>
-              </svg>
+              <span className={styles.pageButtonIconSwap}>
+                <svg className={styles.pageButtonDefaultIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="4" x2="4" y1="21" y2="14"></line>
+                  <line x1="4" x2="4" y1="10" y2="3"></line>
+                  <line x1="12" x2="12" y1="21" y2="12"></line>
+                  <line x1="12" x2="12" y1="8" y2="3"></line>
+                  <line x1="20" x2="20" y1="21" y2="16"></line>
+                  <line x1="20" x2="20" y1="12" y2="3"></line>
+                  <line x1="1" x2="7" y1="14" y2="14"></line>
+                  <line x1="9" x2="15" y1="8" y2="8"></line>
+                  <line x1="17" x2="23" y1="16" y2="16"></line>
+                </svg>
+                <UploadPageIcon />
+              </span>
             </button>
             <button
               className={`${styles.secondaryIconButton} ${sidebarPage === "poses" ? styles.activeIconButton : ""}`}
@@ -218,12 +243,13 @@ export function PlannerSidebar({
               aria-label="Import Poses"
               title={sidebarPage === "poses" ? "Import Start Poses" : "Start Poses"}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="6" cy="18" r="2"></circle>
-                <circle cx="18" cy="6" r="2"></circle>
-                <path d="M8 18c4 0 4-12 8-12"></path>
-                <path d="M12 10h.01"></path>
-              </svg>
+              <span className={styles.pageButtonIconSwap}>
+                <svg className={styles.pageButtonDefaultIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"></path>
+                  <circle cx="12" cy="10" r="2.5"></circle>
+                </svg>
+                <UploadPageIcon />
+              </span>
             </button>
             <button
               className={`${styles.secondaryIconButton} ${sidebarPage === "auton" ? styles.activeIconButton : ""}`}
@@ -231,11 +257,15 @@ export function PlannerSidebar({
               aria-label="Select Auton"
               title={sidebarPage === "auton" ? "Select Auton" : "Path Editor"}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>
-                <path d="M14 2v6h6"></path>
-                <path d="m9 15 2 2 4-4"></path>
-              </svg>
+              <span className={styles.pageButtonIconSwap}>
+                <svg className={styles.pageButtonDefaultIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="6" cy="18" r="2"></circle>
+                  <circle cx="18" cy="6" r="2"></circle>
+                  <path d="M8 18c4 0 4-12 8-12"></path>
+                  <path d="M12 10h.01"></path>
+                </svg>
+                <UploadPageIcon />
+              </span>
             </button>
             <button
               className={styles.secondaryIconButton}
@@ -245,9 +275,10 @@ export function PlannerSidebar({
               title={sidebarPage === "constants" ? "Export unavailable for robot constants" : sidebarPage === "poses" ? "Export Poses" : "Export Kotlin"}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="17 8 12 3 7 8"></polyline>
-                <line x1="12" y1="3" x2="12" y2="15"></line>
+                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <polyline points="10 13 8 15 10 17"></polyline>
+                <polyline points="14 13 16 15 14 17"></polyline>
               </svg>
             </button>
             <input ref={importInputRef} className={styles.hiddenFileInput} type="file" accept=".kt,text/x-kotlin,text/plain" onChange={onImportKotlin} />
@@ -259,21 +290,9 @@ export function PlannerSidebar({
 
       {sidebarPage === "auton" ? (
         <>
-          <div className={styles.autonSettingsRow}>
-            <button
-              className={`${styles.allianceToggleButton} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
-              onClick={() => onAutonAllianceChange(autonAlliance === "BLUE" ? "RED" : "BLUE")}
-              aria-pressed={autonAlliance === "RED"}
-            >
-              {autonAlliance === "BLUE" ? "Blue Alliance" : "Red Alliance"}
-            </button>
-          </div>
           <div
             ref={pointsListRef}
             className={styles.pointsList}
-            onDragOver={onPointsListDragOver}
-            onDragLeave={onPointsListDragLeave}
-            onDrop={onStopCardDragAutoScroll}
           >
             {points[0] && (
               <StartPoseCard
@@ -282,6 +301,8 @@ export function PlannerSidebar({
                 hoverTarget={hoverTarget}
                 activeTarget={activeTarget}
                 isShiftPressed={isShiftPressed}
+                autonAlliance={autonAlliance}
+                onAutonAllianceChange={onAutonAllianceChange}
                 onCoordChange={onCoordChange}
                 onStartPoseSelect={onStartPoseSelect}
                 onPositionEditStart={onPositionEditStart}
@@ -292,11 +313,12 @@ export function PlannerSidebar({
                 onToggleLocked={onToggleLocked}
               />
             )}
-            {(sequenceItems.length > 0
-              ? sequenceItems
-              : points.slice(1).map((point) => ({ id: `fallback-${point.id}`, kind: "path" as const, pointId: point.id }))
-            ).map((item, sequenceIndex) => {
-              const isDragOverTarget = draggingPathIndex !== null && draggingPathIndex !== sequenceIndex && dragOverPathIndex === sequenceIndex;
+            {displayedSequenceItems.map((item, sequenceIndex) => {
+              const isDropBefore = draggingPathIndex !== null && pathDropGapIndex === sequenceIndex;
+              const isDropAfter =
+                draggingPathIndex !== null &&
+                sequenceIndex === lastVisibleSequenceIndex &&
+                pathDropGapIndex === sequenceIndex + 1;
               const isBeingDragged = draggingPathIndex === sequenceIndex;
 
               if (item.kind === "action") {
@@ -306,15 +328,13 @@ export function PlannerSidebar({
                   <SequenceDragWrapper
                     key={item.id}
                     sequenceIndex={sequenceIndex}
-                    isDragOverTarget={isDragOverTarget}
+                    isDropBefore={isDropBefore}
+                    isDropAfter={isDropAfter}
                     isBeingDragged={isBeingDragged}
-                    onPointerDownCapture={onSequenceCardPointerDownCapture}
-                    onPointerUpCapture={onRestoreSequenceCardDragging}
-                    onPointerCancel={onRestoreSequenceCardDragging}
-                    onDragStart={onPathCardDragStart}
-                    onDragOver={onPathCardDragOver}
-                    onDrop={onPathCardDrop}
-                    onDragEnd={onClearPathCardDragState}
+                    onPointerDown={onSequenceCardPointerDown}
+                    onPointerMove={onSequenceCardPointerMove}
+                    onPointerUp={onSequenceCardPointerUp}
+                    onPointerCancel={onSequenceCardPointerCancel}
                   >
                     <ActionCard
                       name={item.name}
@@ -325,6 +345,7 @@ export function PlannerSidebar({
                       onTimeoutChange={(timeout) => onActionTimeoutChange(item.id, timeout)}
                       onEditStart={onNameEditStart}
                       onEditCommit={onNameEditCommit}
+                      canDelete={isShiftPressed}
                       onDelete={() => onRemoveAction(item.id)}
                     />
                   </SequenceDragWrapper>
@@ -339,15 +360,13 @@ export function PlannerSidebar({
                 <SequenceDragWrapper
                   key={item.id}
                   sequenceIndex={sequenceIndex}
-                  isDragOverTarget={isDragOverTarget}
+                  isDropBefore={isDropBefore}
+                  isDropAfter={isDropAfter}
                   isBeingDragged={isBeingDragged}
-                  onPointerDownCapture={onSequenceCardPointerDownCapture}
-                  onPointerUpCapture={onRestoreSequenceCardDragging}
-                  onPointerCancel={onRestoreSequenceCardDragging}
-                  onDragStart={onPathCardDragStart}
-                  onDragOver={onPathCardDragOver}
-                  onDrop={onPathCardDrop}
-                  onDragEnd={onClearPathCardDragState}
+                  onPointerDown={onSequenceCardPointerDown}
+                  onPointerMove={onSequenceCardPointerMove}
+                  onPointerUp={onSequenceCardPointerUp}
+                  onPointerCancel={onSequenceCardPointerCancel}
                 >
                   <PathPointCard
                     point={point}
@@ -363,6 +382,7 @@ export function PlannerSidebar({
                     onNameEditCommit={onNameEditCommit}
                     onPathInterpolationChange={onPathInterpolationChange}
                     onPathHeadingChange={onPathHeadingChange}
+                    onPathTangentReversedChange={onPathTangentReversedChange}
                     onToggleActionsExpanded={onToggleActionsExpanded}
                     onAddPathAction={onAddPathAction}
                     onPathActionTriggerChange={onPathActionTriggerChange}
@@ -422,42 +442,35 @@ export function PlannerSidebar({
 
 type SequenceDragWrapperProps = {
   sequenceIndex: number;
-  isDragOverTarget: boolean;
+  isDropBefore: boolean;
+  isDropAfter: boolean;
   isBeingDragged: boolean;
   children: ReactNode;
-  onPointerDownCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerUpCapture: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerDown: (index: number, event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onDragStart: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onDragOver: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onDrop: (index: number, event: ReactDragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
 };
 
 function SequenceDragWrapper({
   sequenceIndex,
-  isDragOverTarget,
+  isDropBefore,
+  isDropAfter,
   isBeingDragged,
   children,
-  onPointerDownCapture,
-  onPointerUpCapture,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
   onPointerCancel,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
 }: SequenceDragWrapperProps) {
   return (
     <div
-      className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDragOverTarget ? styles.pointCardDropTarget : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
-      draggable
-      onPointerDownCapture={onPointerDownCapture}
-      onPointerUpCapture={onPointerUpCapture}
+      className={`${styles.pointCardDragWrapper} ${styles.pointCardDraggable} ${isDropBefore ? styles.pointCardDropBefore : ""} ${isDropAfter ? styles.pointCardDropAfter : ""} ${isBeingDragged ? styles.pointCardDragging : ""}`}
+      data-sequence-index={sequenceIndex}
+      onPointerDown={(event) => onPointerDown(sequenceIndex, event)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
-      onDragStart={(event) => onDragStart(sequenceIndex, event)}
-      onDragOver={(event) => onDragOver(sequenceIndex, event)}
-      onDrop={(event) => onDrop(sequenceIndex, event)}
-      onDragEnd={onDragEnd}
     >
       {children}
     </div>
@@ -470,6 +483,8 @@ type StartPoseCardProps = {
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
   isShiftPressed: boolean;
+  autonAlliance: AutonAlliance;
+  onAutonAllianceChange: (alliance: AutonAlliance) => void;
   onCoordChange: (index: number, axis: "x" | "y", value: string) => void;
   onStartPoseSelect: (name: string) => void;
   onPositionEditStart: () => void;
@@ -486,6 +501,8 @@ function StartPoseCard({
   hoverTarget,
   activeTarget,
   isShiftPressed,
+  autonAlliance,
+  onAutonAllianceChange,
   onCoordChange,
   onStartPoseSelect,
   onPositionEditStart,
@@ -518,6 +535,20 @@ function StartPoseCard({
       controlPointCount={0}
       controlsExpanded={false}
       isActive={targetPathIndex(hoverTarget) === 0 || targetPathIndex(activeTarget) === 0}
+      cardSubheader={
+        <div className={styles.startPoseAllianceRow}>
+          <div className={styles.selectGroup}>
+            <span className={styles.inputLabel}>Alliance</span>
+            <button
+              className={`${styles.selectField} ${styles.allianceToggleButton} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
+              onClick={() => onAutonAllianceChange(autonAlliance === "BLUE" ? "RED" : "BLUE")}
+              aria-pressed={autonAlliance === "RED"}
+            >
+              {autonAlliance === "BLUE" ? "Blue" : "Red"}
+            </button>
+          </div>
+        </div>
+      }
       onChange={(axis, value) => onCoordChange(0, axis, value)}
       startPoseOptions={savedPoses}
       onStartPoseSelect={onStartPoseSelect}
@@ -550,6 +581,7 @@ type PathPointCardProps = {
   onNameEditCommit: () => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
   onAddPathAction: (index: number) => void;
   onPathActionTriggerChange: (
@@ -583,6 +615,7 @@ function PathPointCard({
   onNameEditCommit,
   onPathInterpolationChange,
   onPathHeadingChange,
+  onPathTangentReversedChange,
   onToggleActionsExpanded,
   onAddPathAction,
   onPathActionTriggerChange,
@@ -614,6 +647,7 @@ function PathPointCard({
       endHeading={point.endHeading ?? 0}
       linearStartT={point.linearStartT ?? 0}
       linearEndT={point.linearEndT ?? 1}
+      tangentReversed={point.tangentReversed ?? false}
       controlPoints={(point.controlPoints ?? []).map((controlPoint) => ({
         id: controlPoint.id,
         ...toFieldCoords(controlPoint.nx, controlPoint.ny),
@@ -631,6 +665,7 @@ function PathPointCard({
       onNameEditCommit={onNameEditCommit}
       onInterpolationChange={(mode) => onPathInterpolationChange(index, mode)}
       onPathHeadingChange={(field, value) => onPathHeadingChange(index, field, value)}
+      onTangentReversedChange={(tangentReversed) => onPathTangentReversedChange(index, tangentReversed)}
       onToggleActionsExpanded={() => onToggleActionsExpanded(index)}
       onAddPathAction={() => onAddPathAction(index)}
       onPathActionTriggerChange={(triggerId, field, value) =>

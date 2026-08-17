@@ -10,7 +10,7 @@
   --danger: #ef4444;
   --danger-hover: #dc2626;
   --border-radius: 8px;
-  --transition: all 0.2s ease-in-out;
+  --transition: none;
 }
 
 * {

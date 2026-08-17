@@ -7,10 +7,10 @@ import {
 } from "./kotlinAutonFile";
 import type { AutonAlliance, MotionParameters } from "./plannerTypes";
 
-export const SAVED_POSES_STORAGE_KEY = "auton-path-planner:saved-poses";
-export const ROBOT_CONSTANTS_STORAGE_KEY = "auton-path-planner:robot-constants";
-export const MOTION_PARAMETERS_STORAGE_KEY = "auton-path-planner:motion-parameters";
-export const AUTON_SETTINGS_STORAGE_KEY = "auton-path-planner:auton-settings";
+export const SAVED_POSES_STORAGE_KEY = "auton-visualizer:saved-poses";
+export const ROBOT_CONSTANTS_STORAGE_KEY = "auton-visualizer:robot-constants";
+export const MOTION_PARAMETERS_STORAGE_KEY = "auton-visualizer:motion-parameters";
+export const AUTON_SETTINGS_STORAGE_KEY = "auton-visualizer:auton-settings";
 
 export const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
   maxAngularVelocity: 180,

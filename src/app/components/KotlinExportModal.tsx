@@ -1,33 +1,39 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import styles from "../page.module.css";
+import { KotlinSyntaxHighlight } from "./KotlinSyntaxHighlight";
 
 type KotlinExport = {
-  fileName: string;
-  subtitle: string;
   contents: string;
 };
 
 type KotlinExportModalProps = {
+  isVisible: boolean;
   kotlinExport: KotlinExport;
-  didCopyExport: boolean;
   textAreaRef: RefObject<HTMLTextAreaElement | null>;
   onClose: () => void;
+  onFadeOutComplete: () => void;
   onCopy: () => void;
 };
 
 export function KotlinExportModal({
+  isVisible,
   kotlinExport,
-  didCopyExport,
   textAreaRef,
   onClose,
+  onFadeOutComplete,
   onCopy,
 }: KotlinExportModalProps) {
+  const syntaxHighlightRef = useRef<HTMLPreElement>(null);
+
   return (
     <div
-      className={styles.modalBackdrop}
+      className={`${styles.modalBackdrop} ${styles.fadeModalBackdrop} ${isVisible ? styles.fadeModalOpen : styles.fadeModalClosing}`}
       role="presentation"
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget && !isVisible) onFadeOutComplete();
+      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -39,42 +45,41 @@ export function KotlinExportModal({
         aria-labelledby="export-modal-title"
       >
         <div className={styles.exportModalHeader}>
-          <div>
-            <h2 id="export-modal-title" className={styles.exportModalTitle}>
-              {kotlinExport.fileName}
-            </h2>
-            <p className={styles.exportModalSubtitle}>{kotlinExport.subtitle}</p>
-          </div>
+          <h2 id="export-modal-title" className={styles.exportModalTitle}>
+            Export Auton Sequence
+          </h2>
           <button
-            className={styles.secondaryIconButton}
-            onClick={onClose}
-            aria-label="Close export modal"
-            title="Close"
+            className={styles.copyButton}
+            onClick={onCopy}
+            aria-label="Copy generated Kotlin"
+            title="Copy"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
+              <rect width="14" height="14" x="8" y="8" rx="2"></rect>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
             </svg>
           </button>
         </div>
 
-        <textarea
-          ref={textAreaRef}
-          className={styles.exportCode}
-          value={kotlinExport.contents}
-          readOnly
-          spellCheck={false}
-          aria-label="Generated Kotlin class file contents"
-        />
-
-        <div className={styles.exportModalActions}>
-          <span className={styles.copyStatus} aria-live="polite">
-            {didCopyExport ? "Copied" : "Select or copy the class text"}
-          </span>
-          <button className={styles.copyButton} onClick={onCopy}>
-            Copy
-          </button>
+        <div className={styles.exportCodeShell}>
+          <pre ref={syntaxHighlightRef} className={styles.exportCodeHighlight} aria-hidden="true">
+            <code><KotlinSyntaxHighlight contents={kotlinExport.contents} /></code>
+          </pre>
+          <textarea
+            ref={textAreaRef}
+            className={styles.exportCode}
+            value={kotlinExport.contents}
+            readOnly
+            spellCheck={false}
+            aria-label="Generated Kotlin class file contents"
+            onScroll={(event) => {
+              if (!syntaxHighlightRef.current) return;
+              syntaxHighlightRef.current.scrollTop = event.currentTarget.scrollTop;
+              syntaxHighlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
+            }}
+          />
         </div>
+
       </section>
     </div>
   );

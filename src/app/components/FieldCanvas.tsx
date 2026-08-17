@@ -33,7 +33,7 @@ type FieldCanvasProps = {
   onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerLeave: () => void;
-  onDoubleClick: (event: ReactMouseEvent<SVGSVGElement>) => void;
+  onClick: (event: ReactMouseEvent<SVGSVGElement>) => void;
 };
 
 export function FieldCanvas({
@@ -52,7 +52,7 @@ export function FieldCanvas({
   onPointerMove,
   onPointerUp,
   onPointerLeave,
-  onDoubleClick,
+  onClick,
 }: FieldCanvasProps) {
   return (
     <div className={styles.fieldWrapper}>
@@ -74,7 +74,7 @@ export function FieldCanvas({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onPointerLeave={onPointerLeave}
-          onDoubleClick={onDoubleClick}
+          onClick={onClick}
           style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "grab" : "default") }}
           viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
         >

@@ -33,6 +33,7 @@ export type Point = {
   endHeading?: number;
   linearStartT?: number;
   linearEndT?: number;
+  tangentReversed?: boolean;
   controlPoints?: ControlPoint[];
   controlsExpanded?: boolean;
   actionsExpanded?: boolean;

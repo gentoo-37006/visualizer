@@ -10,10 +10,10 @@ import type {
 import {
   generateId,
   normalizeHeading,
-  randomColor,
   toFieldCoords,
   toNormalizedCoords,
 } from "./plannerUtils";
+import { seededColor } from "./plannerColors";
 
 const formatKotlinNumber = (value: number) => value.toFixed(1);
 const DEFAULT_ROBOT_WIDTH = 16;
@@ -316,7 +316,9 @@ export const serializePathPlannerKotlin = (
         headingMode === "linear"
           ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)}${shouldExportLinearT ? `, ${formatKotlinNumber(linearStartT)}, ${formatKotlinNumber(linearEndT)}` : ""})`
           : headingMode === "tangential"
-            ? "tangentHeading()"
+            ? point.tangentReversed
+              ? "reversedTangentHeading()"
+              : "tangentHeading()"
             : `constantHeading(${formatKotlinNumber(point.constantHeading ?? 0)})`;
 
       return `val ${pathName} = Path(
@@ -418,6 +420,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     endHeading: number;
     linearStartT: number;
     linearEndT: number;
+    tangentReversed: boolean;
   };
 
   const pathDefinitions = new Map<string, ParsedPath>();
@@ -433,7 +436,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex));
     const afterPath = contents.slice(closeParenIndex + 1, closeParenIndex + 160);
     const headingMatch = afterPath.match(
-      /^\s*\.\s*(constantHeading|linearHeading|tangentHeading)\s*\(([^)]*)\)/
+      /^\s*\.\s*(constantHeading|linearHeading|tangentHeading|reversedTangentHeading)\s*\(([^)]*)\)/
     );
 
     let headingMode: HeadingInterpolation = "constant";
@@ -442,6 +445,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     let endHeading = 0;
     let linearStartT = 0;
     let linearEndT = 1;
+    let tangentReversed = false;
 
     if (headingMatch?.[1] === "linearHeading") {
       headingMode = "linear";
@@ -453,14 +457,15 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       endHeading = normalizeHeading(values[1] ?? 0);
       linearStartT = Math.max(0, Math.min(1, values[2] ?? 0));
       linearEndT = Math.max(0, Math.min(1, values[3] ?? 1));
-    } else if (headingMatch?.[1] === "tangentHeading") {
+    } else if (headingMatch?.[1] === "tangentHeading" || headingMatch?.[1] === "reversedTangentHeading") {
       headingMode = "tangential";
+      tangentReversed = headingMatch[1] === "reversedTangentHeading";
     } else if (headingMatch?.[1] === "constantHeading") {
       const value = parseFloat(headingMatch[2].trim());
       constantHeading = normalizeHeading(Number.isNaN(value) ? 0 : value);
     }
 
-    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading, linearStartT, linearEndT });
+    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading, linearStartT, linearEndT, tangentReversed });
     pathRegex.lastIndex = closeParenIndex + 1;
   }
 
@@ -535,7 +540,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       id: INITIAL_POINT_ID,
       nx: firstStart?.nx ?? 0.5,
       ny: firstStart?.ny ?? 0.5,
-      color: randomColor(),
+      color: seededColor(INITIAL_POINT_ID),
       locked: true,
       heading: firstStart?.heading ?? 0,
       poseName: firstStart?.poseName,
@@ -561,7 +566,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       nx: endPose.nx,
       ny: endPose.ny,
       poseName: endPose.poseName,
-      color: randomColor(),
+      color: seededColor(`path:${path.name}`),
       locked: false,
       headingMode: path.headingMode,
       constantHeading: path.constantHeading,
@@ -569,6 +574,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       endHeading: path.endHeading,
       linearStartT: path.linearStartT,
       linearEndT: path.linearEndT,
+      tangentReversed: path.tangentReversed,
       controlPoints: controlPoses.map((pose) => ({
         id: generateId(),
         nx: pose.nx,
