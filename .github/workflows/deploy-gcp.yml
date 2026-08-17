@@ -8,7 +8,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
-  SERVICE_NAME: auton-visualizer
+  SERVICE_NAME: auton-path-planner
 
 jobs:
   deploy:
