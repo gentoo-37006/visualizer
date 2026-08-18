@@ -1,7 +1,12 @@
-const CACHE_NAME = "auton-visualizer-v6";
+const CACHE_NAME = "auton-visualizer-v7";
 const APP_SHELL_URLS = [
   "/favicon.ico",
   "/robot.png",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-maskable-512.png",
+  "/icons/apple-touch-icon.png",
   "/fields/decode.webp",
   "/fields/intothedeep.webp",
   "/fields/centerstage.webp",
@@ -17,8 +22,10 @@ function extractLocalAssetUrls(html) {
     if (
       assetUrl.startsWith("/_next/") ||
       assetUrl.startsWith("/fields/") ||
+      assetUrl.startsWith("/icons/") ||
       assetUrl === "/robot.png" ||
-      assetUrl === "/favicon.ico"
+      assetUrl === "/favicon.ico" ||
+      assetUrl === "/manifest.webmanifest"
     ) {
       urls.add(assetUrl);
     }

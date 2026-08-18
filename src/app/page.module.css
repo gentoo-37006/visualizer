@@ -2,6 +2,7 @@
   display: flex;
   flex-direction: row;
   height: 100vh;
+  height: 100dvh; /* Mobile URL bars shrink the viewport; 100vh would clip the sidebar. */
   padding: 1rem;
   gap: 1.5rem;
   overflow: hidden;
@@ -893,8 +894,8 @@
 
 .exportModal {
   width: min(52rem, 100%);
-  height: min(56rem, calc(100vh - 2rem));
-  max-height: calc(100vh - 2rem);
+  height: min(56rem, calc(100dvh - 2rem));
+  max-height: calc(100dvh - 2rem);
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -1256,11 +1257,23 @@
   .container {
     flex-direction: column;
   }
-  
+
+  /* Stacked, the field must be sized from its width and capped, or `height: 100%`
+     lets it eat the whole column and collapses the editor to nothing. */
+  .fieldWrapper {
+    flex: 0 0 auto;
+    width: 100%;
+    height: auto;
+    max-width: min(100%, 50dvh);
+    margin-inline: auto;
+  }
+
+  /* `flex: 1` carries a 0% basis, which beat the old fixed height and left the
+     playback controls outside the container's hidden overflow. */
   .sidebarColumn {
     width: 100%;
-    height: 300px;
-    flex-shrink: 0;
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .sidebar {
@@ -1268,7 +1281,7 @@
   }
 
   .exportModal {
-    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
   }
 
   .exportCodeShell {

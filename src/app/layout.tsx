@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegistration } from "./components/ServiceWorkerRegistration";
@@ -12,6 +12,18 @@ const jetBrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Auton Visualizer",
   description: "An autonomous robotics path visualizer and planner",
+  applicationName: "Auton Visualizer",
+  appleWebApp: { capable: true, title: "Auton", statusBarStyle: "black-translucent" },
+  icons: { apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }] },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#121212",
+  width: "device-width",
+  initialScale: 1,
+  // Lets the layout reach under the notch when installed; pinch-zoom stays
+  // enabled, since the field benefits from being zoomed into.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

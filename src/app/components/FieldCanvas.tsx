@@ -62,7 +62,10 @@ export function FieldCanvas({
           alt="Field Map"
           fill
           priority
-          unoptimized={fieldImageSrc.startsWith("data:")}
+          // The service worker precaches these webp files, so going through the
+          // optimizer would download a second copy and break offline field
+          // switching, which can only serve what was precached.
+          unoptimized
           sizes="(max-width: 768px) 100vw, (max-height: 100vh) 100vh, 1000px"
           className={styles.fieldImage}
         />
