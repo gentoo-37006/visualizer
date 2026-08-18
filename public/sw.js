@@ -1,35 +1,11 @@
-const CACHE_NAME = "auton-visualizer-v5";
+const CACHE_NAME = "auton-visualizer-v6";
 const APP_SHELL_URLS = [
   "/favicon.ico",
-  "/fields/decode.webp",
   "/robot.png",
-  "/file.svg",
-  "/globe.svg",
-  "/next.svg",
-  "/vercel.svg",
-  "/window.svg",
+  "/fields/decode.webp",
+  "/fields/intothedeep.webp",
+  "/fields/centerstage.webp",
 ];
-
-async function precacheAppShell() {
-  const cache = await caches.open(CACHE_NAME);
-  await cache.addAll(APP_SHELL_URLS);
-
-  const response = await fetch("/", { cache: "reload" });
-  if (!response.ok) return;
-
-  await cache.put("/", response.clone());
-  const html = await response.text();
-  const assetUrls = extractLocalAssetUrls(html);
-  await Promise.all(
-    assetUrls.map((assetUrl) =>
-      fetch(assetUrl, { cache: "reload" })
-        .then((assetResponse) => {
-          if (assetResponse.ok) return cache.put(assetUrl, assetResponse);
-        })
-        .catch(() => {})
-    )
-  );
-}
 
 function extractLocalAssetUrls(html) {
   const urls = new Set(APP_SHELL_URLS);
@@ -51,21 +27,41 @@ function extractLocalAssetUrls(html) {
   return [...urls];
 }
 
+async function cacheAsset(cache, assetUrl, shouldRevalidate) {
+  // Assets are content-hashed, so one already in the cache is still the right
+  // one. Re-fetching them on every navigation would re-download the whole app.
+  if (!shouldRevalidate && (await cache.match(assetUrl))) return;
+
+  try {
+    const response = await fetch(assetUrl, { cache: "reload" });
+    if (response.ok) await cache.put(assetUrl, response);
+  } catch {
+    // An asset that cannot be reached now is still served from the network later.
+  }
+}
+
+async function cacheAppShellAssets(cache, html, shouldRevalidate) {
+  const assetUrls = extractLocalAssetUrls(html);
+  await Promise.all(assetUrls.map((assetUrl) => cacheAsset(cache, assetUrl, shouldRevalidate)));
+}
+
+async function precacheAppShell() {
+  const cache = await caches.open(CACHE_NAME);
+  // Not cache.addAll: one missing file there rejects the whole install and
+  // leaves the app with no offline support at all.
+  await Promise.all(APP_SHELL_URLS.map((assetUrl) => cacheAsset(cache, assetUrl, true)));
+
+  const response = await fetch("/", { cache: "reload" });
+  if (!response.ok) return;
+
+  await cache.put("/", response.clone());
+  await cacheAppShellAssets(cache, await response.text(), true);
+}
+
 async function cacheAppShellResponse(response) {
   const cache = await caches.open(CACHE_NAME);
   await cache.put("/", response.clone());
-
-  const html = await response.text();
-  const assetUrls = extractLocalAssetUrls(html);
-  await Promise.all(
-    assetUrls.map((assetUrl) =>
-      fetch(assetUrl, { cache: "reload" })
-        .then((assetResponse) => {
-          if (assetResponse.ok) return cache.put(assetUrl, assetResponse);
-        })
-        .catch(() => {})
-    )
-  );
+  await cacheAppShellAssets(cache, await response.text(), false);
 }
 
 self.addEventListener("install", (event) => {
@@ -97,10 +93,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          cacheAppShellResponse(response.clone());
+          // Only a good response may replace the offline shell, or a stray 500
+          // becomes the page every offline visit sees.
+          if (response.ok) event.waitUntil(cacheAppShellResponse(response.clone()));
           return response;
         })
-        .catch(() => caches.match("/") || Response.error())
+        .catch(async () => (await caches.match("/")) ?? Response.error())
     );
     return;
   }
@@ -110,10 +108,10 @@ self.addEventListener("fetch", (event) => {
       .then((response) => {
         if (response.ok) {
           const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
+          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone)));
         }
         return response;
       })
-      .catch(() => caches.match(request) || Response.error())
+      .catch(async () => (await caches.match(request)) ?? Response.error())
   );
 });
