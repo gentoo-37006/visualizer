@@ -11,9 +11,37 @@ env:
   SERVICE_NAME: auton-path-planner
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
   deploy:
     runs-on: ubuntu-latest
-    
+    # Cloud Run builds from source, so a broken commit would otherwise deploy
+    # before anything had a chance to fail.
+    needs: verify
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
