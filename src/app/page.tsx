@@ -75,10 +75,12 @@ import {
   MOTION_PARAMETERS_STORAGE_KEY,
   ROBOT_CONSTANTS_STORAGE_KEY,
   SAVED_POSES_STORAGE_KEY,
+  loadAutonDraft,
   loadAutonSettings,
   loadMotionParameters,
   loadRobotConstants,
   loadSavedPoses,
+  saveAutonDraft,
 } from "./plannerStorage";
 import {
   clearCustomFieldImage,
@@ -95,6 +97,7 @@ import {
 } from "./fieldImages";
 import styles from "./page.module.css";
 
+const AUTON_DRAFT_SAVE_DEBOUNCE_MS = 400;
 const CARD_DRAG_SCROLL_ZONE_HEIGHT = 88;
 const CARD_DRAG_SCROLL_MAX_SPEED = 22;
 const FIELD_BACKGROUND_DOUBLE_CLICK_MS = 500;
@@ -331,12 +334,17 @@ export default function PathPlannerPage() {
   }, [setPlannerPoints]);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
+    // Deferred past first paint, but on a timer rather than a frame: a tab that
+    // opens in the background never composites, so requestAnimationFrame would
+    // leave stored settings unloaded and unsaved until it is first focused.
+    const timeoutId = window.setTimeout(() => {
       const storedMotionParameters = loadMotionParameters();
       const storedAutonSettings = loadAutonSettings();
+      const storedAutonDraft = loadAutonDraft();
       const storedCustomFieldImage = loadCustomFieldImage();
       const storedFieldImageSelection = loadFieldImageSelection();
       setAutonAlliance(storedAutonSettings.alliance);
+      if (storedAutonDraft) setPlannerSnapshot(storedAutonDraft);
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
       setMotionParameters(storedMotionParameters);
@@ -353,10 +361,10 @@ export default function PathPlannerPage() {
         maxLateralAcceleration: String(storedMotionParameters.maxLateralAcceleration),
       });
       setDidLoadStoredSettings(true);
-    });
+    }, 0);
 
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    return () => window.clearTimeout(timeoutId);
+  }, [setPlannerSnapshot]);
 
   useEffect(() => {
     const resetFieldBackgroundClick = (event: globalThis.PointerEvent) => {
@@ -393,6 +401,17 @@ export default function PathPlannerPage() {
     if (!didLoadStoredSettings) return;
     window.localStorage.setItem(MOTION_PARAMETERS_STORAGE_KEY, JSON.stringify(motionParameters));
   }, [didLoadStoredSettings, motionParameters]);
+
+  // Dragging a point fires on every frame, so the draft is only written once the edit settles.
+  useEffect(() => {
+    if (!didLoadStoredSettings) return;
+
+    const timeoutId = window.setTimeout(() => {
+      saveAutonDraft({ points, sequenceItems: orderedSequenceItems });
+    }, AUTON_DRAFT_SAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [didLoadStoredSettings, orderedSequenceItems, points]);
 
   useEffect(() => {
     if (!isPlaybackRunning) return;
@@ -474,6 +493,21 @@ export default function PathPlannerPage() {
       ...getSequenceItemsWithPaths(sequenceItemsRef.current, pointsRef.current),
       { id: generateId(), kind: "path", pointId },
     ]);
+  };
+
+  const handleClearAuton = () => {
+    if (points.length <= 1 && orderedSequenceItems.length === 0) return;
+
+    pushCurrentSnapshot();
+    setPlannerPoints([
+      { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
+    ]);
+    setPlannerSequenceItems([]);
+    setHoverTarget(null);
+    setActiveTarget(null);
+    setIsDragging(false);
+    setPlaybackTime(0);
+    setIsPlaybackRunning(false);
   };
 
   const handleAddAction = () => {
@@ -1498,6 +1532,7 @@ export default function PathPlannerPage() {
           onActionModeChange={handleActionModeChange}
           onActionTimeoutChange={handleActionTimeoutChange}
           onRemoveAction={handleRemoveAction}
+          onClearAuton={handleClearAuton}
           onAddPoint={handleAddPoint}
           onAddAction={handleAddAction}
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}

@@ -449,6 +449,11 @@
   opacity: 1;
 }
 
+/* Keeps the hint up after an unarmed click, when the pointer may already be gone. */
+.deleteTooltipPinned {
+  opacity: 1;
+}
+
 .lockButton:hover {
   color: #facc15;
   background: rgba(250, 204, 21, 0.12);

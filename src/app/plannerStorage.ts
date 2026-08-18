@@ -5,12 +5,27 @@ import {
   type RobotConstants,
   type SavedPose,
 } from "./kotlinAutonFile";
-import type { AutonAlliance, MotionParameters } from "./plannerTypes";
+import { INITIAL_POINT_ID } from "./plannerConstants";
+import { seededColor } from "./plannerColors";
+import type {
+  AutonActionItem,
+  AutonAlliance,
+  AutonPathItem,
+  AutonSequenceItem,
+  ControlPoint,
+  HeadingInterpolation,
+  MotionParameters,
+  PathActionTrigger,
+  PlannerSnapshot,
+  Point,
+} from "./plannerTypes";
+import { generateId } from "./plannerUtils";
 
 export const SAVED_POSES_STORAGE_KEY = "auton-visualizer:saved-poses";
 export const ROBOT_CONSTANTS_STORAGE_KEY = "auton-visualizer:robot-constants";
 export const MOTION_PARAMETERS_STORAGE_KEY = "auton-visualizer:motion-parameters";
 export const AUTON_SETTINGS_STORAGE_KEY = "auton-visualizer:auton-settings";
+export const AUTON_DRAFT_STORAGE_KEY = "auton-visualizer:auton-draft";
 
 export const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
   maxAngularVelocity: 180,
@@ -125,5 +140,168 @@ export const loadAutonSettings = () => {
   } catch {
     window.localStorage.removeItem(AUTON_SETTINGS_STORAGE_KEY);
     return DEFAULT_AUTON_SETTINGS;
+  }
+};
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const sanitizeNormalized = (value: unknown) =>
+  isFiniteNumber(value) ? Math.max(0, Math.min(1, value)) : null;
+
+const sanitizeControlPoint = (value: unknown): ControlPoint | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<ControlPoint>;
+  const nx = sanitizeNormalized(candidate.nx);
+  const ny = sanitizeNormalized(candidate.ny);
+  if (nx === null || ny === null) return null;
+
+  return {
+    id: typeof candidate.id === "string" && candidate.id ? candidate.id : generateId(),
+    nx,
+    ny,
+    ...(typeof candidate.poseName === "string" ? { poseName: candidate.poseName } : {}),
+  };
+};
+
+const sanitizeActionTrigger = (value: unknown): PathActionTrigger | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<PathActionTrigger>;
+  if (candidate.mode !== "start" && candidate.mode !== "stop") return null;
+  if (typeof candidate.actionName !== "string") return null;
+
+  return {
+    id: typeof candidate.id === "string" && candidate.id ? candidate.id : generateId(),
+    mode: candidate.mode,
+    t: isFiniteNumber(candidate.t) ? Math.max(0, Math.min(1, candidate.t)) : 0,
+    actionName: candidate.actionName,
+  };
+};
+
+const sanitizeHeadingMode = (value: unknown): HeadingInterpolation | undefined =>
+  value === "constant" || value === "linear" || value === "tangential" ? value : undefined;
+
+const optionalNumber = (value: unknown) => (isFiniteNumber(value) ? { value } : null);
+
+/** Rebuilds a stored point from known fields so unexpected JSON can never reach React state. */
+const sanitizePoint = (value: unknown, index: number): Point | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<Point>;
+  const nx = sanitizeNormalized(candidate.nx);
+  const ny = sanitizeNormalized(candidate.ny);
+  if (nx === null || ny === null) return null;
+
+  const id = index === 0 ? INITIAL_POINT_ID : typeof candidate.id === "string" && candidate.id ? candidate.id : generateId();
+  const constantHeading = optionalNumber(candidate.constantHeading);
+  const startHeading = optionalNumber(candidate.startHeading);
+  const endHeading = optionalNumber(candidate.endHeading);
+  const linearStartT = sanitizeNormalized(candidate.linearStartT);
+  const linearEndT = sanitizeNormalized(candidate.linearEndT);
+  const heading = optionalNumber(candidate.heading);
+  const headingMode = sanitizeHeadingMode(candidate.headingMode);
+
+  return {
+    id,
+    nx,
+    ny,
+    color: typeof candidate.color === "string" && candidate.color ? candidate.color : seededColor(id),
+    locked: index === 0 ? true : candidate.locked === true,
+    ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+    ...(typeof candidate.poseName === "string" ? { poseName: candidate.poseName } : {}),
+    ...(candidate.hidden === true ? { hidden: true } : {}),
+    ...(heading ? { heading: heading.value } : {}),
+    ...(headingMode ? { headingMode } : {}),
+    ...(constantHeading ? { constantHeading: constantHeading.value } : {}),
+    ...(startHeading ? { startHeading: startHeading.value } : {}),
+    ...(endHeading ? { endHeading: endHeading.value } : {}),
+    ...(linearStartT !== null ? { linearStartT } : {}),
+    ...(linearEndT !== null ? { linearEndT } : {}),
+    ...(candidate.tangentReversed === true ? { tangentReversed: true } : {}),
+    ...(Array.isArray(candidate.controlPoints)
+      ? { controlPoints: candidate.controlPoints.map(sanitizeControlPoint).filter((point): point is ControlPoint => point !== null) }
+      : {}),
+    ...(typeof candidate.controlsExpanded === "boolean" ? { controlsExpanded: candidate.controlsExpanded } : {}),
+    ...(typeof candidate.actionsExpanded === "boolean" ? { actionsExpanded: candidate.actionsExpanded } : {}),
+    ...(Array.isArray(candidate.actionTriggers)
+      ? {
+          actionTriggers: candidate.actionTriggers
+            .map(sanitizeActionTrigger)
+            .filter((trigger): trigger is PathActionTrigger => trigger !== null)
+            .sort((a, b) => a.t - b.t),
+        }
+      : {}),
+  };
+};
+
+const sanitizeSequenceItem = (value: unknown, knownPointIds: Set<string>): AutonSequenceItem | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const candidate = value as Partial<Omit<AutonActionItem, "kind">> &
+    Partial<Omit<AutonPathItem, "kind">> & { kind?: unknown };
+  const id = typeof candidate.id === "string" && candidate.id ? candidate.id : generateId();
+
+  if (candidate.kind === "path") {
+    return typeof candidate.pointId === "string" && knownPointIds.has(candidate.pointId)
+      ? { id, kind: "path", pointId: candidate.pointId }
+      : null;
+  }
+
+  if (candidate.kind !== "action") return null;
+  if (candidate.mode !== "start" && candidate.mode !== "run" && candidate.mode !== "stop") return null;
+
+  return {
+    id,
+    kind: "action",
+    name: typeof candidate.name === "string" ? candidate.name : "ACTION",
+    mode: candidate.mode,
+    timeout: isFiniteNumber(candidate.timeout) ? Math.max(0, candidate.timeout) : 0,
+  };
+};
+
+export const loadAutonDraft = (): PlannerSnapshot | null => {
+  if (typeof window === "undefined") return null;
+
+  const storedDraft = window.localStorage.getItem(AUTON_DRAFT_STORAGE_KEY);
+  if (!storedDraft) return null;
+
+  try {
+    const parsedDraft: unknown = JSON.parse(storedDraft);
+    if (typeof parsedDraft !== "object" || parsedDraft === null) return null;
+
+    const candidate = parsedDraft as Partial<PlannerSnapshot>;
+    if (!Array.isArray(candidate.points)) return null;
+
+    const points = candidate.points
+      .map((point, index) => sanitizePoint(point, index))
+      .filter((point): point is Point => point !== null);
+    if (points.length === 0 || points[0].id !== INITIAL_POINT_ID) return null;
+
+    // Path points can only be reordered through the sequence, so the two lists have to agree.
+    const pathPointIds = new Set(points.slice(1).map((point) => point.id));
+    const storedItems = Array.isArray(candidate.sequenceItems) ? candidate.sequenceItems : [];
+    const sequenceItems = storedItems
+      .map((item) => sanitizeSequenceItem(item, pathPointIds))
+      .filter((item): item is AutonSequenceItem => item !== null);
+    const referencedPointIds = new Set(
+      sequenceItems.filter((item) => item.kind === "path").map((item) => item.pointId)
+    );
+    points.slice(1).forEach((point) => {
+      if (referencedPointIds.has(point.id)) return;
+      sequenceItems.push({ id: generateId(), kind: "path", pointId: point.id });
+    });
+
+    return { points, sequenceItems };
+  } catch {
+    window.localStorage.removeItem(AUTON_DRAFT_STORAGE_KEY);
+    return null;
+  }
+};
+
+export const saveAutonDraft = (snapshot: PlannerSnapshot) => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(AUTON_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // A full quota (usually a large custom field image) must not break editing.
   }
 };

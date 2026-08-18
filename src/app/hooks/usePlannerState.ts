@@ -49,14 +49,14 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     });
   }, []);
 
-  const setPlannerSnapshot = (snapshot: PlannerSnapshot) => {
+  const setPlannerSnapshot = useCallback((snapshot: PlannerSnapshot) => {
     const nextPoints = clonePoints(snapshot.points);
     const nextSequenceItems = cloneSequenceItems(snapshot.sequenceItems);
     pointsRef.current = nextPoints;
     sequenceItemsRef.current = nextSequenceItems;
     setPoints(nextPoints);
     setSequenceItems(nextSequenceItems);
-  };
+  }, []);
 
   const createSnapshot = (): PlannerSnapshot => ({
     points: clonePoints(pointsRef.current),
@@ -122,7 +122,7 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     editStartSnapshotRef.current = null;
     nameEditStartSnapshotRef.current = null;
     onRestore?.();
-  }, [onRestore]);
+  }, [onRestore, setPlannerSnapshot]);
 
   const handleUndo = useCallback(() => {
     const previousSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
