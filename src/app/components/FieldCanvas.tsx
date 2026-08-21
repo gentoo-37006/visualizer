@@ -151,6 +151,39 @@ export function FieldCanvas({
             );
           })}
 
+          {/* Above the paths so the robot reads against them, but below the point and
+              control markers: the robot's middle is fully opaque and five times a
+              marker's width, so drawing it last hides whichever handle it is sitting
+              on — at rest that is always the start pose. */}
+          {hasMeasuredField && (
+            <g transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}>
+              <image
+                href="/robot.png"
+                x={robotSvgFrame.x}
+                y={robotSvgFrame.y}
+                width={robotSvgFrame.width}
+                height={robotSvgFrame.height}
+                preserveAspectRatio="none"
+                opacity="0.92"
+                pointerEvents="none"
+              />
+              {isRobotOutOfBounds && (
+                <rect
+                  x={robotSvgFrame.x}
+                  y={robotSvgFrame.y}
+                  width={robotSvgFrame.width}
+                  height={robotSvgFrame.height}
+                  fill="rgba(239, 68, 68, 0.25)"
+                  stroke="#ef4444"
+                  strokeWidth="2"
+                  pointerEvents="none"
+                >
+                  <title>The robot is through the field wall at this point in the path</title>
+                </rect>
+              )}
+            </g>
+          )}
+
           {hasMeasuredField && points.map((point, index) => {
             if (!isPointVisible(index)) return null;
             const { x, y } = toSvgPixelCoords(point.nx, point.ny, fieldSize);
@@ -221,34 +254,6 @@ export function FieldCanvas({
                 </g>
               );
             })
-          )}
-          {hasMeasuredField && (
-            <g transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}>
-              <image
-                href="/robot.png"
-                x={robotSvgFrame.x}
-                y={robotSvgFrame.y}
-                width={robotSvgFrame.width}
-                height={robotSvgFrame.height}
-                preserveAspectRatio="none"
-                opacity="0.92"
-                pointerEvents="none"
-              />
-              {isRobotOutOfBounds && (
-                <rect
-                  x={robotSvgFrame.x}
-                  y={robotSvgFrame.y}
-                  width={robotSvgFrame.width}
-                  height={robotSvgFrame.height}
-                  fill="rgba(239, 68, 68, 0.25)"
-                  stroke="#ef4444"
-                  strokeWidth="2"
-                  pointerEvents="none"
-                >
-                  <title>The robot is through the field wall at this point in the path</title>
-                </rect>
-              )}
-            </g>
           )}
         </svg>
       </div>
