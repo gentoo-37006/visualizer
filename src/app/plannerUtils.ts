@@ -101,9 +101,10 @@ const NEW_POINT_EDGE_MARGIN_INCHES = 6;
 
 /**
  * Picks where a newly added path should land. Dropping it on the previous point
- * would hide it underneath and make it impossible to grab, so it continues in
- * the direction the auton was already travelling, turning away from the wall
- * when that direction would run off the field.
+ * makes the new path a zero-length segment: no line is drawn, the marker lands
+ * exactly on the old one and hides it, and nothing on the field shows a path was
+ * added at all. It instead continues in the direction the auton was already
+ * travelling, turning away from the wall when that would run off the field.
  */
 export const nextPointPlacement = (points: Array<{ nx: number; ny: number }>) => {
   const previous = points[points.length - 1] ?? { nx: 0.5, ny: 0.5 };
