@@ -412,8 +412,11 @@ export const isRobotInsideField = (
   const centerX = (clamp01(pose.nx) - 0.5) * FIELD_SIZE_INCHES;
   const centerY = (0.5 - clamp01(pose.ny)) * FIELD_SIZE_INCHES;
   const headingRadians = (pose.heading * Math.PI) / 180;
-  const halfWidth = Math.abs(robotWidth) / 2;
-  const halfLength = Math.abs(robotLength) / 2;
+  // A dimension that never parsed is no reason to call every pose illegal, so
+  // fall back to checking the centre alone.
+  const safeDimension = (value: number) => (Number.isFinite(value) ? Math.abs(value) : 0);
+  const halfWidth = safeDimension(robotWidth) / 2;
+  const halfLength = safeDimension(robotLength) / 2;
   // Heading 0 faces +y, so forward is (sin, cos) and lateral is a quarter turn from it.
   const forwardX = Math.sin(headingRadians);
   const forwardY = Math.cos(headingRadians);

@@ -274,6 +274,11 @@ describe("robot footprint against the field walls", () => {
     expect(isRobotInsideField({ ...nearWall, heading: 0 }, square.width, square.length)).toBe(true);
   });
 
+  it("checks the centre alone when a dimension never parsed", () => {
+    expect(isRobotInsideField({ nx: 0.5, ny: 0.5, heading: 0 }, Number.NaN, Number.NaN)).toBe(true);
+    expect(isRobotInsideField({ nx: 1, ny: 0.5, heading: 0 }, Number.NaN, Number.NaN)).toBe(true);
+  });
+
   it("uses length along the heading and width across it", () => {
     const longRobot = { width: 12, length: 30 };
     const pose = { nx: 60 / 144 + 0.5, ny: 0.5, heading: 0 };
