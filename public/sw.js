@@ -90,11 +90,41 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Everything under /_next/static/ is addressed by a content hash, so a cached
+// copy can never be the wrong one and a network round trip can only cost time —
+// which is exactly what a venue's wifi has none of. The rest stays network-first
+// because those URLs are stable across builds: a new season's field image
+// replaces the old one at the same path.
+function isImmutableAsset(url) {
+  return url.pathname.startsWith("/_next/static/");
+}
+
+async function serveFromCacheFirst(event, request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const responseClone = response.clone();
+      event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone)));
+    }
+    return response;
+  } catch {
+    return Response.error();
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  if (isImmutableAsset(url)) {
+    event.respondWith(serveFromCacheFirst(event, request));
+    return;
+  }
 
   if (request.mode === "navigate") {
     event.respondWith(
