@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { AUTON_DRAFT_STORAGE_KEY, loadAutonDraft, saveAutonDraft } from "../plannerStorage";
+import {
+  AUTON_DRAFT_STORAGE_KEY,
+  MAX_HISTORY_DEPTH,
+  limitHistoryDepth,
+  loadAutonDraft,
+  saveAutonDraft,
+} from "../plannerStorage";
 import { INITIAL_POINT_ID } from "../plannerConstants";
 import type { PlannerSnapshot } from "../plannerTypes";
 
@@ -144,6 +150,51 @@ describe("auton draft persistence", () => {
     const draft = loadAutonDraft();
     expect(draft?.points[0].id).toBe(INITIAL_POINT_ID);
     expect(draft?.points[0].locked).toBe(true);
+  });
+
+  it("keeps history bounded so a long session cannot outgrow the quota", () => {
+    const short = [1, 2, 3];
+    expect(limitHistoryDepth(short)).toBe(short);
+
+    const overlong = Array.from({ length: MAX_HISTORY_DEPTH + 25 }, (_, index) => index);
+    const trimmed = limitHistoryDepth(overlong);
+
+    expect(trimmed).toHaveLength(MAX_HISTORY_DEPTH);
+    // The oldest entries go, so the most recent undo steps survive.
+    expect(trimmed[trimmed.length - 1]).toBe(overlong[overlong.length - 1]);
+    expect(trimmed[0]).toBe(25);
+  });
+
+  it("trims a stored draft whose history predates the cap", () => {
+    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+    store({ ...current, undoStack: Array.from({ length: MAX_HISTORY_DEPTH + 10 }, () => current) });
+
+    expect(loadAutonDraft()?.undoStack).toHaveLength(MAX_HISTORY_DEPTH);
+  });
+
+  it("gives up history rather than the auton when the draft will not fit", () => {
+    const writes: string[] = [];
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        localStorage: {
+          getItem: () => null,
+          removeItem: () => {},
+          setItem: (_key: string, value: string) => {
+            writes.push(value);
+            // Only the first, history-carrying write is too big to store.
+            if (writes.length === 1) throw new Error("QuotaExceededError");
+          },
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+    saveAutonDraft({ ...current, undoStack: [current], redoStack: [current] });
+
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(writes[1])).toEqual(current);
   });
 
   it("does not throw when storage refuses the write", () => {

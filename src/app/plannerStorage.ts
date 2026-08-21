@@ -28,6 +28,16 @@ export const MOTION_PARAMETERS_STORAGE_KEY = "auton-visualizer:motion-parameters
 export const AUTON_SETTINGS_STORAGE_KEY = "auton-visualizer:auton-settings";
 export const AUTON_DRAFT_STORAGE_KEY = "auton-visualizer:auton-draft";
 
+/**
+ * Deep enough that no real editing session runs out of undo, and shallow enough
+ * that history cannot grow until the draft stops fitting in local storage — a
+ * quota failure is silent, so it would cost the whole saved auton.
+ */
+export const MAX_HISTORY_DEPTH = 100;
+
+export const limitHistoryDepth = <T,>(stack: T[]) =>
+  stack.length > MAX_HISTORY_DEPTH ? stack.slice(stack.length - MAX_HISTORY_DEPTH) : stack;
+
 export const DEFAULT_MOTION_PARAMETERS: MotionParameters = {
   maxAngularVelocity: 180,
   maxForwardAcceleration: 60,
@@ -300,10 +310,14 @@ export const loadAutonDraft = (): PersistedPlannerDraft | null => {
     const candidate = parsedDraft as { undoStack?: unknown; redoStack?: unknown };
     const sanitizeHistoryStack = (stack: unknown) =>
       Array.isArray(stack)
-        ? stack
-            .map(sanitizePlannerSnapshot)
-            .filter((entry): entry is PlannerSnapshot => entry !== null)
+        ? limitHistoryDepth(
+            stack
+              .map(sanitizePlannerSnapshot)
+              .filter((entry): entry is PlannerSnapshot => entry !== null)
+          )
         : undefined;
+    // Trims a draft written before the cap existed, so it shrinks on first load
+    // rather than only once the next edit pushes onto it.
     const undoStack = sanitizeHistoryStack(candidate.undoStack);
     const redoStack = sanitizeHistoryStack(candidate.redoStack);
 
@@ -323,7 +337,17 @@ export const saveAutonDraft = (snapshot: PersistedPlannerDraft) => {
 
   try {
     window.localStorage.setItem(AUTON_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+    return;
   } catch {
     // A full quota (usually a large custom field image) must not break editing.
+  }
+
+  // History is the bulk of a draft and the part worth least: losing undo beats
+  // losing the auton, so try again with just the routine itself.
+  try {
+    const { points, sequenceItems } = snapshot;
+    window.localStorage.setItem(AUTON_DRAFT_STORAGE_KEY, JSON.stringify({ points, sequenceItems }));
+  } catch {
+    // Nothing else to give up; the draft stays in memory for this session.
   }
 };

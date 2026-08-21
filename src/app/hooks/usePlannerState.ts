@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { limitHistoryDepth } from "../plannerStorage";
 import type { AutonSequenceItem, PlannerSnapshot, Point } from "../plannerTypes";
 
 const clonePoints = (source: Point[]) =>
@@ -64,8 +65,8 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   }, []);
 
   const setPlannerHistory = useCallback((undoSnapshots: PlannerSnapshot[], redoSnapshots: PlannerSnapshot[]) => {
-    const nextUndoStack = undoSnapshots.map(cloneSnapshot);
-    const nextRedoStack = redoSnapshots.map(cloneSnapshot);
+    const nextUndoStack = limitHistoryDepth(undoSnapshots.map(cloneSnapshot));
+    const nextRedoStack = limitHistoryDepth(redoSnapshots.map(cloneSnapshot));
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = nextRedoStack;
     setUndoStack(nextUndoStack);
@@ -94,7 +95,7 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   const pushUndoSnapshot = (snapshot: PlannerSnapshot | null) => {
     if (!snapshot || areSnapshotsEqual(snapshot, createSnapshot())) return;
 
-    const nextUndoStack = [...undoStackRef.current, snapshot];
+    const nextUndoStack = limitHistoryDepth([...undoStackRef.current, snapshot]);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = [];
     setUndoStack(nextUndoStack);
@@ -103,7 +104,7 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
 
   const pushCurrentSnapshot = () => {
     const currentSnapshot = createSnapshot();
-    const nextUndoStack = [...undoStackRef.current, currentSnapshot];
+    const nextUndoStack = limitHistoryDepth([...undoStackRef.current, currentSnapshot]);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = [];
     setUndoStack(nextUndoStack);
@@ -160,7 +161,7 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     const previousSnapshot = undoStackRef.current[undoStackRef.current.length - 1];
     if (!previousSnapshot) return;
 
-    const nextRedoStack = [...redoStackRef.current, createSnapshot()];
+    const nextRedoStack = limitHistoryDepth([...redoStackRef.current, createSnapshot()]);
     const nextUndoStack = undoStackRef.current.slice(0, -1);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = nextRedoStack;
@@ -173,7 +174,7 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     const nextSnapshot = redoStackRef.current[redoStackRef.current.length - 1];
     if (!nextSnapshot) return;
 
-    const nextUndoStack = [...undoStackRef.current, createSnapshot()];
+    const nextUndoStack = limitHistoryDepth([...undoStackRef.current, createSnapshot()]);
     const nextRedoStack = redoStackRef.current.slice(0, -1);
     undoStackRef.current = nextUndoStack;
     redoStackRef.current = nextRedoStack;
