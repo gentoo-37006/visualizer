@@ -83,15 +83,6 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
     arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
 
-  const clearHistory = () => {
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setUndoStack([]);
-    setRedoStack([]);
-    editStartSnapshotRef.current = null;
-    nameEditStartSnapshotRef.current = null;
-  };
-
   const pushUndoSnapshot = (snapshot: PlannerSnapshot | null) => {
     if (!snapshot || areSnapshotsEqual(snapshot, createSnapshot())) return;
 
@@ -197,7 +188,6 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     setPlannerSnapshot,
     setPlannerHistory,
     createSnapshot,
-    clearHistory,
     pushUndoSnapshot,
     pushCurrentSnapshot,
     pushCurrentSnapshotIfChanged,
