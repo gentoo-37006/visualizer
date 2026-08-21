@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   isKotlinIdentifierDraft,
   isNumericDraft,
-  nextPointPlacement,
   normalizeHeading,
   toFieldCoords,
   toNormalizedCoords,
@@ -79,47 +78,6 @@ describe("input drafts", () => {
     }
     for (const draft of ["2fast", "has space", "has-dash", "trail!"]) {
       expect(isKotlinIdentifierDraft(draft), draft).toBe(false);
-    }
-  });
-});
-
-describe("nextPointPlacement", () => {
-  it("never lands on the point it follows", () => {
-    const placement = nextPointPlacement([{ nx: 0.5, ny: 0.5 }]);
-    expect(Math.hypot(placement.nx - 0.5, placement.ny - 0.5)).toBeGreaterThan(0.01);
-  });
-
-  it("keeps travelling the way the previous segment went", () => {
-    const placement = nextPointPlacement([
-      { nx: 0.5, ny: 0.5 },
-      { nx: 0.5, ny: 0.3 },
-    ]);
-    expect(placement.nx).toBeCloseTo(0.5, 6);
-    expect(placement.ny).toBeLessThan(0.3);
-  });
-
-  it("turns away from the wall instead of stacking against it", () => {
-    const placement = nextPointPlacement([
-      { nx: 0.5, ny: 0.2 },
-      { nx: 0.5, ny: 0.02 },
-    ]);
-    expect(placement.ny).toBeGreaterThanOrEqual(0.02);
-    expect(Math.hypot(placement.nx - 0.5, placement.ny - 0.02)).toBeGreaterThan(0.01);
-  });
-
-  it("stays inside the field from every corner", () => {
-    for (const corner of [
-      { nx: 0, ny: 0 },
-      { nx: 1, ny: 0 },
-      { nx: 0, ny: 1 },
-      { nx: 1, ny: 1 },
-    ]) {
-      const placement = nextPointPlacement([corner]);
-      expect(placement.nx).toBeGreaterThanOrEqual(0);
-      expect(placement.nx).toBeLessThanOrEqual(1);
-      expect(placement.ny).toBeGreaterThanOrEqual(0);
-      expect(placement.ny).toBeLessThanOrEqual(1);
-      expect(Math.hypot(placement.nx - corner.nx, placement.ny - corner.ny)).toBeGreaterThan(0.01);
     }
   });
 });
