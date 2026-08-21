@@ -57,13 +57,16 @@ export const stripStartPosePrefix = (name: string) =>
 const withStartPosePrefix = (name: string) =>
   name.startsWith(START_POSE_PREFIX) ? name : `${START_POSE_PREFIX}${name}`;
 
+// Stand-ins for a typical FTC drivetrain, used until the team imports their own
+// tuned constants. Zeroes would be read as "no limit" by the motion profile and
+// silently fall back to 1 in/s, which makes every playback estimate nonsense.
 export const DEFAULT_ROBOT_CONSTANTS: RobotConstants = {
   width: DEFAULT_ROBOT_WIDTH,
   length: DEFAULT_ROBOT_LENGTH,
-  forwardBrakeStrength: 0,
-  lateralBrakeStrength: 0,
-  maxForwardVelocity: 0,
-  maxLateralVelocity: 0,
+  forwardBrakeStrength: 35,
+  lateralBrakeStrength: 70,
+  maxForwardVelocity: 60,
+  maxLateralVelocity: 45,
 };
 
 const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: string }, savedPoses: SavedPose[]) => {

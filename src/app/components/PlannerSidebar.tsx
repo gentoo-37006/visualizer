@@ -7,7 +7,7 @@ import type {
   RefObject,
   ReactNode,
 } from "react";
-import type { RobotConstants, SavedPose } from "../kotlinAutonFile";
+import { DEFAULT_ROBOT_CONSTANTS, type RobotConstants, type SavedPose } from "../kotlinAutonFile";
 import type {
   AutonActionMode,
   AutonAlliance,
@@ -762,8 +762,19 @@ function ConstantsPanel({
   onUpdateMotionParameter,
   onFormatMotionParameter,
 }: ConstantsPanelProps) {
+  // Nothing else on this panel distinguishes a measured value from a placeholder,
+  // so say it outright rather than letting stand-ins read as the team's own tuning.
+  const isUsingDefaultConstants = (Object.keys(DEFAULT_ROBOT_CONSTANTS) as Array<keyof RobotConstants>).every(
+    (key) => robotConstants[key] === DEFAULT_ROBOT_CONSTANTS[key]
+  );
+
   return (
     <div className={styles.pointsList}>
+      {isUsingDefaultConstants && (
+        <div className={styles.emptyState}>
+          Showing typical values. Import your Constants.kt to plan against the real robot.
+        </div>
+      )}
       <div className={`${styles.poseCard} ${styles.constantsCard}`}>
         <div className={styles.poseName}>Robot Dimensions</div>
         <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
