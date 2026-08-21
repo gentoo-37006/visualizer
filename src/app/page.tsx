@@ -55,6 +55,7 @@ import {
   isKotlinIdentifierDraft,
   isNumericDraft,
   mainPointHitRadius,
+  nextPointPlacement,
   normalizeHeading,
   targetPathIndex,
   toFieldCoords,
@@ -506,15 +507,15 @@ export default function PathPlannerPage() {
 
   const handleAddPoint = () => {
     pushCurrentSnapshot();
-    const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
+    const placement = nextPointPlacement(points);
     const pointId = generateId();
     setPlannerPoints([
       ...points,
       {
         id: pointId,
         name: `path${points.length}`,
-        nx: seed.nx,
-        ny: seed.ny,
+        nx: placement.nx,
+        ny: placement.ny,
         color: seededColor(pointId),
         locked: false,
         hidden: false,
