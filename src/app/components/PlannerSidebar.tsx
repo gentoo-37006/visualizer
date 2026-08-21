@@ -111,6 +111,7 @@ type PlannerSidebarProps = {
   onActionTimeoutChange: (id: string, timeout: string) => void;
   onRemoveAction: (id: string) => void;
   pathDurations: Map<string, number>;
+  outOfBoundsPointIds: Set<string>;
   onClearAuton: () => void;
   onAddPoint: () => void;
   onAddAction: () => void;
@@ -182,6 +183,7 @@ export function PlannerSidebar({
   onActionTimeoutChange,
   onRemoveAction,
   pathDurations,
+  outOfBoundsPointIds,
   onClearAuton,
   onAddPoint,
   onAddAction,
@@ -406,6 +408,7 @@ export function PlannerSidebar({
                     point={point}
                     index={pointIndex}
                     duration={pathDurations.get(point.id)}
+                    isOutOfBounds={outOfBoundsPointIds.has(point.id)}
                     hoverTarget={hoverTarget}
                     activeTarget={activeTarget}
                     isShiftPressed={isShiftPressed}
@@ -606,6 +609,7 @@ type PathPointCardProps = {
   point: Point;
   index: number;
   duration?: number;
+  isOutOfBounds?: boolean;
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
   isShiftPressed: boolean;
@@ -641,6 +645,7 @@ function PathPointCard({
   point,
   index,
   duration,
+  isOutOfBounds,
   hoverTarget,
   activeTarget,
   isShiftPressed,
@@ -671,6 +676,7 @@ function PathPointCard({
     <PointCard
       index={index}
       duration={duration}
+      isOutOfBounds={isOutOfBounds}
       name={point.name ?? `path${index}`}
       poseName={point.poseName}
       color={point.color}

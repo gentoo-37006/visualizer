@@ -9,6 +9,7 @@ import { ControlPointCard } from "./ControlPointCard";
 type PointCardProps = {
   index: number;
   duration?: number;
+  isOutOfBounds?: boolean;
   name: string;
   poseName?: string;
   color: string;
@@ -67,6 +68,7 @@ type PointCardProps = {
 export function PointCard({
   index,
   duration,
+  isOutOfBounds = false,
   name,
   poseName,
   color,
@@ -336,6 +338,20 @@ export function PointCard({
             onBlur={handleNameBlur}
             aria-label={`Rename path ${index}`}
           />
+        )}
+        {isOutOfBounds && (
+          <span
+            className={styles.pathWarning}
+            role="img"
+            aria-label="The robot leaves the field on this path"
+            title="The robot leaves the field on this path"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </span>
         )}
         {duration !== undefined && (
           <span className={styles.pathDuration} title="Estimated time this path takes, including the turn onto its start heading">

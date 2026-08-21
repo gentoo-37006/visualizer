@@ -67,8 +67,10 @@ import {
   buildPlaybackTimeline,
   clamp01,
   createPlaybackTrackBackground,
+  getOutOfBoundsPointIds,
   getPathDurationsByPointId,
   getPlaybackPoseAtTime,
+  isRobotInsideField,
   snapSvgPixel,
 } from "./playback";
 import {
@@ -233,6 +235,17 @@ export default function PathPlannerPage() {
         : activePlaybackSegment?.pose.color ?? points[0]?.color ?? INITIAL_POINT_COLOR;
 
   const pathDurations = useMemo(() => getPathDurationsByPointId(playbackTimeline), [playbackTimeline]);
+
+  const outOfBoundsPointIds = useMemo(
+    () => getOutOfBoundsPointIds(playbackTimeline, robotConstants.width, robotConstants.length),
+    [playbackTimeline, robotConstants.length, robotConstants.width]
+  );
+
+  const isRobotOutOfBounds = !isRobotInsideField(
+    playbackPose,
+    robotConstants.width,
+    robotConstants.length
+  );
 
   const playbackTrackBackground = useMemo(
     () => createPlaybackTrackBackground(playbackTimeline),
@@ -1512,6 +1525,7 @@ export default function PathPlannerPage() {
         isDragging={isDragging}
         hasMeasuredField={hasMeasuredField}
         robotSvgFrame={robotSvgFrame}
+        isRobotOutOfBounds={isRobotOutOfBounds}
         playbackPose={playbackPose}
         isPointVisible={isPointVisible}
         onPointerDown={handlePointerDown}
@@ -1586,6 +1600,7 @@ export default function PathPlannerPage() {
           onRemoveAction={handleRemoveAction}
           onClearAuton={handleClearAuton}
           pathDurations={pathDurations}
+          outOfBoundsPointIds={outOfBoundsPointIds}
           onAddPoint={handleAddPoint}
           onAddAction={handleAddAction}
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}

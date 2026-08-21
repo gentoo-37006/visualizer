@@ -399,6 +399,34 @@ export const getPlaybackPoseAtTime = (
   };
 };
 
+/**
+ * Whether the robot's whole footprint fits inside the field walls at a pose.
+ * Path points are clamped by their centre, so a point placed against a wall
+ * still leaves half the robot buried in it.
+ */
+export const isRobotInsideField = (
+  pose: { nx: number; ny: number; heading: number },
+  robotWidth: number,
+  robotLength: number
+) => {
+  const centerX = (clamp01(pose.nx) - 0.5) * FIELD_SIZE_INCHES;
+  const centerY = (0.5 - clamp01(pose.ny)) * FIELD_SIZE_INCHES;
+  const headingRadians = (pose.heading * Math.PI) / 180;
+  const halfWidth = Math.abs(robotWidth) / 2;
+  const halfLength = Math.abs(robotLength) / 2;
+  // Heading 0 faces +y, so forward is (sin, cos) and lateral is a quarter turn from it.
+  const forwardX = Math.sin(headingRadians);
+  const forwardY = Math.cos(headingRadians);
+  const halfBound = FIELD_SIZE_INCHES / 2;
+  // A rectangle only leaves an axis-aligned box through a corner.
+  const reachX = Math.abs(halfLength * forwardX) + Math.abs(halfWidth * forwardY);
+  const reachY = Math.abs(halfLength * forwardY) + Math.abs(halfWidth * forwardX);
+
+  return (
+    Math.abs(centerX) + reachX <= halfBound + 0.01 && Math.abs(centerY) + reachY <= halfBound + 0.01
+  );
+};
+
 /** How long an FTC match's autonomous period lasts. */
 export const AUTONOMOUS_PERIOD_SECONDS = 30;
 
@@ -433,6 +461,42 @@ export const getPathDurationsByPointId = (timeline: PlaybackTimeline) => {
   });
 
   return durations;
+};
+
+const ROTATE_BOUNDS_SAMPLE_COUNT = 16;
+
+/**
+ * Paths on which the robot clips a field wall somewhere along the way. The
+ * canvas only shows the violation at the scrubbed instant, so this is what
+ * lets the editor point at the path that needs moving.
+ */
+export const getOutOfBoundsPointIds = (
+  timeline: PlaybackTimeline,
+  robotWidth: number,
+  robotLength: number
+) => {
+  const pointIds = new Set<string>();
+  const fits = (pose: { nx: number; ny: number; heading: number }) =>
+    isRobotInsideField(pose, robotWidth, robotLength);
+
+  timeline.segments.forEach((segment) => {
+    if (segment.kind === "wait") return;
+
+    if (segment.kind === "path") {
+      if (!segment.samples.every(fits)) pointIds.add(segment.point.id);
+      return;
+    }
+
+    // Turning in place sweeps the corners out, so the endpoints alone miss it.
+    const sweptHeadings = Array.from({ length: ROTATE_BOUNDS_SAMPLE_COUNT + 1 }, (_, index) =>
+      interpolateHeading(segment.startHeading, segment.endHeading, index / ROTATE_BOUNDS_SAMPLE_COUNT)
+    );
+    if (!sweptHeadings.every((heading) => fits({ ...segment.pose, heading }))) {
+      pointIds.add(segment.point.id);
+    }
+  });
+
+  return pointIds;
 };
 
 export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {

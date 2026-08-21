@@ -28,6 +28,7 @@ type FieldCanvasProps = {
   hasMeasuredField: boolean;
   robotSvgFrame: RobotSvgFrame;
   playbackPose: PlaybackPose;
+  isRobotOutOfBounds: boolean;
   isPointVisible: (index: number) => boolean;
   onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
@@ -47,6 +48,7 @@ export function FieldCanvas({
   hasMeasuredField,
   robotSvgFrame,
   playbackPose,
+  isRobotOutOfBounds,
   isPointVisible,
   onPointerDown,
   onPointerMove,
@@ -221,17 +223,32 @@ export function FieldCanvas({
             })
           )}
           {hasMeasuredField && (
-            <image
-              href="/robot.png"
-              x={robotSvgFrame.x}
-              y={robotSvgFrame.y}
-              width={robotSvgFrame.width}
-              height={robotSvgFrame.height}
-              preserveAspectRatio="none"
-              transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}
-              opacity="0.92"
-              pointerEvents="none"
-            />
+            <g transform={`rotate(${playbackPose.heading} ${robotSvgFrame.centerX} ${robotSvgFrame.centerY})`}>
+              <image
+                href="/robot.png"
+                x={robotSvgFrame.x}
+                y={robotSvgFrame.y}
+                width={robotSvgFrame.width}
+                height={robotSvgFrame.height}
+                preserveAspectRatio="none"
+                opacity="0.92"
+                pointerEvents="none"
+              />
+              {isRobotOutOfBounds && (
+                <rect
+                  x={robotSvgFrame.x}
+                  y={robotSvgFrame.y}
+                  width={robotSvgFrame.width}
+                  height={robotSvgFrame.height}
+                  fill="rgba(239, 68, 68, 0.25)"
+                  stroke="#ef4444"
+                  strokeWidth="2"
+                  pointerEvents="none"
+                >
+                  <title>The robot is through the field wall at this point in the path</title>
+                </rect>
+              )}
+            </g>
           )}
         </svg>
       </div>

@@ -5,9 +5,11 @@ import {
   clamp01,
   createPlaybackTrackBackground,
   getAutonomousOvertime,
+  getOutOfBoundsPointIds,
   getPathDurationsByPointId,
   getPlaybackPoseAtTime,
   interpolateHeading,
+  isRobotInsideField,
   interpolateHeadingRange,
 } from "../playback";
 import { DEFAULT_ROBOT_CONSTANTS, type RobotConstants } from "../kotlinAutonFile";
@@ -245,5 +247,61 @@ describe("per-path durations", () => {
 
     expect(durations.size).toBe(1);
     expect(durations.get("a")).toBeCloseTo(timeline.totalTime - 5, 6);
+  });
+});
+
+describe("robot footprint against the field walls", () => {
+  const square = { width: 16, length: 16 };
+
+  it("fits at the centre of the field", () => {
+    expect(isRobotInsideField({ nx: 0.5, ny: 0.5, heading: 0 }, square.width, square.length)).toBe(true);
+  });
+
+  it("catches a centre parked on the wall", () => {
+    // The point itself is legal; half the robot is inside the wall.
+    expect(isRobotInsideField({ nx: 1, ny: 0.5, heading: 0 }, square.width, square.length)).toBe(false);
+    expect(isRobotInsideField({ nx: 0.5, ny: 0, heading: 0 }, square.width, square.length)).toBe(false);
+  });
+
+  it("allows a robot backed exactly up to the wall", () => {
+    // 72 - 8 inches from centre, so the near edge just touches.
+    expect(isRobotInsideField({ nx: 64 / 144 + 0.5, ny: 0.5, heading: 0 }, square.width, square.length)).toBe(true);
+  });
+
+  it("accounts for the diagonal a turned robot sweeps", () => {
+    const nearWall = { nx: 63 / 144 + 0.5, ny: 0.5, heading: 45 };
+    expect(isRobotInsideField(nearWall, square.width, square.length)).toBe(false);
+    expect(isRobotInsideField({ ...nearWall, heading: 0 }, square.width, square.length)).toBe(true);
+  });
+
+  it("uses length along the heading and width across it", () => {
+    const longRobot = { width: 12, length: 30 };
+    const pose = { nx: 60 / 144 + 0.5, ny: 0.5, heading: 0 };
+
+    // Facing up the field, only the 12in width points at the side wall.
+    expect(isRobotInsideField(pose, longRobot.width, longRobot.length)).toBe(true);
+    // Facing the wall, the 30in length does.
+    expect(isRobotInsideField({ ...pose, heading: 90 }, longRobot.width, longRobot.length)).toBe(false);
+  });
+});
+
+describe("paths that leave the field", () => {
+  const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+
+  it("stays quiet for a path that keeps the robot inside", () => {
+    const timeline = timelineFor([start, straightPath], items);
+    expect(getOutOfBoundsPointIds(timeline, 16, 16).size).toBe(0);
+  });
+
+  it("names the path that drives the robot into a wall", () => {
+    const timeline = timelineFor([start, { ...straightPath, nx: 1 }], items);
+    expect([...getOutOfBoundsPointIds(timeline, 16, 16)]).toEqual(["a"]);
+  });
+
+  it("catches a corner swept out by turning in place", () => {
+    // Backed up to the wall facing it, the robot fits; turned 45 degrees it does not.
+    const againstWall = { ...straightPath, nx: 63 / 144 + 0.5, constantHeading: 45 };
+    const timeline = timelineFor([start, againstWall], items);
+    expect(getOutOfBoundsPointIds(timeline, 16, 16).has("a")).toBe(true);
   });
 });
