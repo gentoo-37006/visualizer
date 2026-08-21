@@ -534,22 +534,23 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     });
     builderCallRegex.lastIndex = closeParenIndex + 1;
   }
-  const followOrder = builderCalls
+  // One entry per followPath call rather than per path name. A cycling auton
+  // follows the same declared path several times, and keying any of this by name
+  // collapses those calls onto whichever point was built last, so the sequence
+  // ends up driving a path the robot is not standing at the start of.
+  type FollowedPath = { path: ParsedPath; triggers: PathActionTrigger[] };
+  const followedPaths = builderCalls
     .filter((call): call is { kind: "path"; pathName: string; triggers: PathActionTrigger[] } => call.kind === "path")
-    .map((call) => call.pathName);
-  const orderedPaths =
-    followOrder.length > 0
-      ? followOrder.map((name) => pathDefinitions.get(name)).filter((path): path is ParsedPath => Boolean(path))
-      : [...pathDefinitions.values()];
-  const triggersByPathName = new Map(
-    builderCalls
-      .filter((call): call is { kind: "path"; pathName: string; triggers: PathActionTrigger[] } => call.kind === "path")
-      .map((call) => [call.pathName, call.triggers])
-  );
+    .map((call) => ({ path: pathDefinitions.get(call.pathName), triggers: call.triggers }))
+    .filter((followed): followed is FollowedPath => Boolean(followed.path));
+  const orderedPaths: FollowedPath[] =
+    followedPaths.length > 0
+      ? followedPaths
+      : [...pathDefinitions.values()].map((path) => ({ path, triggers: [] as PathActionTrigger[] }));
 
   if (orderedPaths.length === 0) return null;
 
-  const firstStart = parseKotlinPose(orderedPaths[0].args[0] ?? "", savedPoses);
+  const firstStart = parseKotlinPose(orderedPaths[0].path.args[0] ?? "", savedPoses);
   const importedPoints: Point[] = [
     {
       id: INITIAL_POINT_ID,
@@ -562,11 +563,16 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     },
   ];
 
-  const pathPointIdsByName = new Map<string, string>();
-  orderedPaths.forEach((path) => {
+  // Indexed by follow position so it stays aligned with orderedPaths, including
+  // the entries below that produce no point at all.
+  const pathPointIdsByFollowIndex: Array<string | null> = [];
+  orderedPaths.forEach(({ path, triggers }) => {
     const parsedArgs = path.args.map((arg) => parseKotlinPose(arg, savedPoses));
     const endPose = [...parsedArgs].reverse().find((pose) => pose !== null);
-    if (!endPose) return;
+    if (!endPose) {
+      pathPointIdsByFollowIndex.push(null);
+      return;
+    }
 
     const firstArgIsPose = parsedArgs[0] !== null;
     const controlPoses = parsedArgs
@@ -574,7 +580,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       .filter((pose): pose is ParsedPoseReference => pose !== null);
 
     const pointId = generateId();
-    pathPointIdsByName.set(path.name, pointId);
+    pathPointIdsByFollowIndex.push(pointId);
     importedPoints.push({
       id: pointId,
       name: path.name,
@@ -597,16 +603,21 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
         poseName: pose.poseName,
       })),
       controlsExpanded: controlPoses.length > 0,
-      actionsExpanded: (triggersByPathName.get(path.name) ?? []).length > 0,
-      actionTriggers: [...(triggersByPathName.get(path.name) ?? [])].sort((a, b) => a.t - b.t),
+      actionsExpanded: triggers.length > 0,
+      actionTriggers: [...triggers].sort((a, b) => a.t - b.t),
     });
   });
 
+  // Walks the follow calls in step with the points built above. A call naming a
+  // path that was never declared built no point, so it consumes no position.
+  let followIndex = 0;
   const sequenceItems = builderCalls.length > 0
     ? builderCalls
         .map((call): AutonSequenceItem | null => {
           if (call.kind === "action") return call;
-          const pointId = pathPointIdsByName.get(call.pathName);
+          if (!pathDefinitions.has(call.pathName)) return null;
+          const pointId = pathPointIdsByFollowIndex[followIndex] ?? null;
+          followIndex += 1;
           return pointId ? { id: generateId(), kind: "path", pointId } : null;
         })
         .filter((item): item is AutonSequenceItem => item !== null)

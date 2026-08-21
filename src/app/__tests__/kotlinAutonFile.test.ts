@@ -193,6 +193,66 @@ autonSequence(Alliance.BLUE)
     expect(roundTrip(source)).toContain("linearHeading(0.0, 90.0, 0.25, 0.75)");
   });
 
+  it("gives a path followed more than once its own point each time", () => {
+    // The usual FTC cycle: out and back, twice, reusing the declared paths.
+    const source = `val toSample = Path(Pose(0.0, 0.0), Pose(36.0, 0.0)).constantHeading(0.0)
+
+val toBasket = Path(Pose(36.0, 0.0), Pose(0.0, 24.0)).constantHeading(45.0)
+
+autonSequence(Alliance.BLUE)
+    .followPath(toSample)
+    .followPath(toBasket)
+    .followPath(toSample)
+    .followPath(toBasket)`;
+
+    const parsed = parsePathPlannerKotlin(source);
+    const pathItems = parsed!.sequenceItems.filter((item) => item.kind === "path");
+    const referenced = new Set(pathItems.map((item) => item.pointId));
+
+    expect(pathItems).toHaveLength(4);
+    // Every followPath needs its own point, or the sequence drives a path the
+    // robot is not standing at the start of.
+    expect(referenced.size).toBe(4);
+    expect(parsed!.points.slice(1).every((point) => referenced.has(point.id))).toBe(true);
+  });
+
+  it("keeps each followPath's own triggers when a path is reused", () => {
+    const source = `val loop = Path(Pose(0.0, 0.0), Pose(24.0, 0.0)).constantHeading(0.0)
+
+autonSequence(Alliance.BLUE)
+    .followPath(
+        loop
+            .startAt(0.2, Actions.FIRST)
+    )
+    .followPath(
+        loop
+            .startAt(0.8, Actions.SECOND)
+    )`;
+
+    const parsed = parsePathPlannerKotlin(source);
+    const triggerNames = parsed!.points.slice(1).map((point) =>
+      (point.actionTriggers ?? []).map((trigger) => trigger.actionName)
+    );
+
+    expect(triggerNames).toEqual([["FIRST"], ["SECOND"]]);
+  });
+
+  it("round trips a reused path without rewriting the sequence", () => {
+    const source = `val loop = Path(
+    Pose(0.0, 0.0),
+    Pose(24.0, 0.0),
+).constantHeading(0.0)
+
+autonSequence(Alliance.BLUE)
+    .followPath(loop)
+    .followPath(loop)`;
+
+    // Re-exporting must at least be stable: a second trip cannot keep mutating it.
+    const once = roundTrip(source);
+    const twice = roundTrip(once);
+    expect(twice).toBe(once);
+  });
+
   it("returns null when the constants file is missing required values", () => {
     expect(parseRobotConstantsKotlin("object Constants { const val WIDTH: Double = 18.0 }")).toBeNull();
   });
