@@ -152,6 +152,37 @@ describe("auton draft persistence", () => {
     expect(draft?.points[0].locked).toBe(true);
   });
 
+  it("drops a second sequence entry pointing at the same path", () => {
+    // Drafts saved before reused-path imports were fixed carry two follows of
+    // one point. The planner chains a path off its own point, so reordering that
+    // draft would splice the same point into the list twice.
+    store({
+      points: [startPoint, { id: "a", name: "loop", nx: 0.7, ny: 0.5, color: "#0f0", locked: false }],
+      sequenceItems: [
+        { id: "s1", kind: "path", pointId: "a" },
+        { id: "s2", kind: "path", pointId: "a" },
+      ],
+    });
+
+    const pathItems = loadAutonDraft()!.sequenceItems.filter((item) => item.kind === "path");
+    expect(pathItems).toHaveLength(1);
+    expect(pathItems[0].pointId).toBe("a");
+  });
+
+  it("still gives every path point exactly one sequence entry", () => {
+    store({
+      points: [
+        startPoint,
+        { id: "a", nx: 0.7, ny: 0.5, color: "#0f0", locked: false },
+        { id: "b", nx: 0.3, ny: 0.5, color: "#00f", locked: false },
+      ],
+      sequenceItems: [{ id: "s1", kind: "path", pointId: "b" }],
+    });
+
+    const items = loadAutonDraft()!.sequenceItems.filter((item) => item.kind === "path");
+    expect(items.map((item) => item.pointId).sort()).toEqual(["a", "b"]);
+  });
+
   it("keeps history bounded so a long session cannot outgrow the quota", () => {
     const short = [1, 2, 3];
     expect(limitHistoryDepth(short)).toBe(short);

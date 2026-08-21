@@ -244,14 +244,20 @@ const sanitizePoint = (value: unknown, index: number): Point | null => {
   };
 };
 
-const sanitizeSequenceItem = (value: unknown, knownPointIds: Set<string>): AutonSequenceItem | null => {
+/**
+ * `unclaimedPointIds` is consumed, not just read: a path point owns exactly one
+ * sequence entry, so the first entry claiming a point takes it and any later
+ * entry naming it again is dropped. Two entries on one point would otherwise
+ * splice that point into the list twice the next time the sequence is reordered.
+ */
+const sanitizeSequenceItem = (value: unknown, unclaimedPointIds: Set<string>): AutonSequenceItem | null => {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Partial<Omit<AutonActionItem, "kind">> &
     Partial<Omit<AutonPathItem, "kind">> & { kind?: unknown };
   const id = typeof candidate.id === "string" && candidate.id ? candidate.id : generateId();
 
   if (candidate.kind === "path") {
-    return typeof candidate.pointId === "string" && knownPointIds.has(candidate.pointId)
+    return typeof candidate.pointId === "string" && unclaimedPointIds.delete(candidate.pointId)
       ? { id, kind: "path", pointId: candidate.pointId }
       : null;
   }
@@ -280,10 +286,10 @@ const sanitizePlannerSnapshot = (value: unknown): PlannerSnapshot | null => {
   if (points.length === 0 || points[0].id !== INITIAL_POINT_ID) return null;
 
   // Path points can only be reordered through the sequence, so the two lists have to agree.
-  const pathPointIds = new Set(points.slice(1).map((point) => point.id));
+  const unclaimedPointIds = new Set(points.slice(1).map((point) => point.id));
   const storedItems = Array.isArray(candidate.sequenceItems) ? candidate.sequenceItems : [];
   const sequenceItems = storedItems
-    .map((item) => sanitizeSequenceItem(item, pathPointIds))
+    .map((item) => sanitizeSequenceItem(item, unclaimedPointIds))
     .filter((item): item is AutonSequenceItem => item !== null);
   const referencedPointIds = new Set(
     sequenceItems.filter((item) => item.kind === "path").map((item) => item.pointId)
