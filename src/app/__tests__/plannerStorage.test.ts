@@ -165,6 +165,26 @@ describe("auton draft persistence", () => {
     expect(trimmed[0]).toBe(25);
   });
 
+  it("slides the window one step at a time, the way editing pushes onto it", () => {
+    let stack: string[] = [];
+    for (let step = 1; step <= MAX_HISTORY_DEPTH; step++) {
+      stack = limitHistoryDepth([...stack, `edit${step}`]);
+    }
+
+    expect(stack).toHaveLength(MAX_HISTORY_DEPTH);
+    expect(stack[0]).toBe("edit1");
+
+    // The step that overflows drops exactly the oldest one, not a whole batch.
+    stack = limitHistoryDepth([...stack, `edit${MAX_HISTORY_DEPTH + 1}`]);
+    expect(stack).toHaveLength(MAX_HISTORY_DEPTH);
+    expect(stack[0]).toBe("edit2");
+    expect(stack[stack.length - 1]).toBe(`edit${MAX_HISTORY_DEPTH + 1}`);
+
+    stack = limitHistoryDepth([...stack, `edit${MAX_HISTORY_DEPTH + 2}`]);
+    expect(stack).toHaveLength(MAX_HISTORY_DEPTH);
+    expect(stack[0]).toBe("edit3");
+  });
+
   it("trims a stored draft whose history predates the cap", () => {
     const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
     store({ ...current, undoStack: Array.from({ length: MAX_HISTORY_DEPTH + 10 }, () => current) });
