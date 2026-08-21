@@ -12,6 +12,11 @@ const clonePoints = (source: Point[]) =>
 
 const cloneSequenceItems = (source: AutonSequenceItem[]) => source.map((item) => ({ ...item }));
 
+const cloneSnapshot = (snapshot: PlannerSnapshot): PlannerSnapshot => ({
+  points: clonePoints(snapshot.points),
+  sequenceItems: cloneSequenceItems(snapshot.sequenceItems),
+});
+
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 
 type UsePlannerStateOptions = {
@@ -56,6 +61,17 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     sequenceItemsRef.current = nextSequenceItems;
     setPoints(nextPoints);
     setSequenceItems(nextSequenceItems);
+  }, []);
+
+  const setPlannerHistory = useCallback((undoSnapshots: PlannerSnapshot[], redoSnapshots: PlannerSnapshot[]) => {
+    const nextUndoStack = undoSnapshots.map(cloneSnapshot);
+    const nextRedoStack = redoSnapshots.map(cloneSnapshot);
+    undoStackRef.current = nextUndoStack;
+    redoStackRef.current = nextRedoStack;
+    setUndoStack(nextUndoStack);
+    setRedoStack(nextRedoStack);
+    editStartSnapshotRef.current = null;
+    nameEditStartSnapshotRef.current = null;
   }, []);
 
   const createSnapshot = (): PlannerSnapshot => ({
@@ -118,7 +134,23 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   };
 
   const restorePointSnapshot = useCallback((snapshot: PlannerSnapshot) => {
-    setPlannerSnapshot(snapshot);
+    const currentPresentationByPointId = new Map(
+      pointsRef.current.map((point) => [
+        point.id,
+        {
+          locked: point.locked,
+          controlsExpanded: point.controlsExpanded,
+          actionsExpanded: point.actionsExpanded,
+        },
+      ])
+    );
+    setPlannerSnapshot({
+      ...snapshot,
+      points: snapshot.points.map((point) => ({
+        ...point,
+        ...currentPresentationByPointId.get(point.id),
+      })),
+    });
     editStartSnapshotRef.current = null;
     nameEditStartSnapshotRef.current = null;
     onRestore?.();
@@ -157,9 +189,12 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     redoStack,
     pointsRef,
     sequenceItemsRef,
+    undoStackRef,
+    redoStackRef,
     setPlannerPoints,
     setPlannerSequenceItems,
     setPlannerSnapshot,
+    setPlannerHistory,
     createSnapshot,
     clearHistory,
     pushUndoSnapshot,

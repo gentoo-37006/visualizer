@@ -62,6 +62,13 @@ export type PlannerSnapshot = {
   sequenceItems: AutonSequenceItem[];
 };
 
+export type PlannerHistoryState = {
+  undoStack: PlannerSnapshot[];
+  redoStack: PlannerSnapshot[];
+};
+
+export type PersistedPlannerDraft = PlannerSnapshot & Partial<PlannerHistoryState>;
+
 export type MotionParameters = {
   maxAngularVelocity: number;
   maxForwardAcceleration: number;

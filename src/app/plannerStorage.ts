@@ -16,6 +16,7 @@ import type {
   HeadingInterpolation,
   MotionParameters,
   PathActionTrigger,
+  PersistedPlannerDraft,
   PlannerSnapshot,
   Point,
 } from "./plannerTypes";
@@ -257,7 +258,35 @@ const sanitizeSequenceItem = (value: unknown, knownPointIds: Set<string>): Auton
   };
 };
 
-export const loadAutonDraft = (): PlannerSnapshot | null => {
+const sanitizePlannerSnapshot = (value: unknown): PlannerSnapshot | null => {
+  if (typeof value !== "object" || value === null) return null;
+
+  const candidate = value as Partial<PlannerSnapshot>;
+  if (!Array.isArray(candidate.points)) return null;
+
+  const points = candidate.points
+    .map((point, index) => sanitizePoint(point, index))
+    .filter((point): point is Point => point !== null);
+  if (points.length === 0 || points[0].id !== INITIAL_POINT_ID) return null;
+
+  // Path points can only be reordered through the sequence, so the two lists have to agree.
+  const pathPointIds = new Set(points.slice(1).map((point) => point.id));
+  const storedItems = Array.isArray(candidate.sequenceItems) ? candidate.sequenceItems : [];
+  const sequenceItems = storedItems
+    .map((item) => sanitizeSequenceItem(item, pathPointIds))
+    .filter((item): item is AutonSequenceItem => item !== null);
+  const referencedPointIds = new Set(
+    sequenceItems.filter((item) => item.kind === "path").map((item) => item.pointId)
+  );
+  points.slice(1).forEach((point) => {
+    if (referencedPointIds.has(point.id)) return;
+    sequenceItems.push({ id: generateId(), kind: "path", pointId: point.id });
+  });
+
+  return { points, sequenceItems };
+};
+
+export const loadAutonDraft = (): PersistedPlannerDraft | null => {
   if (typeof window === "undefined") return null;
 
   const storedDraft = window.localStorage.getItem(AUTON_DRAFT_STORAGE_KEY);
@@ -265,38 +294,31 @@ export const loadAutonDraft = (): PlannerSnapshot | null => {
 
   try {
     const parsedDraft: unknown = JSON.parse(storedDraft);
-    if (typeof parsedDraft !== "object" || parsedDraft === null) return null;
+    const snapshot = sanitizePlannerSnapshot(parsedDraft);
+    if (!snapshot || typeof parsedDraft !== "object" || parsedDraft === null) return null;
 
-    const candidate = parsedDraft as Partial<PlannerSnapshot>;
-    if (!Array.isArray(candidate.points)) return null;
+    const candidate = parsedDraft as { undoStack?: unknown; redoStack?: unknown };
+    const sanitizeHistoryStack = (stack: unknown) =>
+      Array.isArray(stack)
+        ? stack
+            .map(sanitizePlannerSnapshot)
+            .filter((entry): entry is PlannerSnapshot => entry !== null)
+        : undefined;
+    const undoStack = sanitizeHistoryStack(candidate.undoStack);
+    const redoStack = sanitizeHistoryStack(candidate.redoStack);
 
-    const points = candidate.points
-      .map((point, index) => sanitizePoint(point, index))
-      .filter((point): point is Point => point !== null);
-    if (points.length === 0 || points[0].id !== INITIAL_POINT_ID) return null;
-
-    // Path points can only be reordered through the sequence, so the two lists have to agree.
-    const pathPointIds = new Set(points.slice(1).map((point) => point.id));
-    const storedItems = Array.isArray(candidate.sequenceItems) ? candidate.sequenceItems : [];
-    const sequenceItems = storedItems
-      .map((item) => sanitizeSequenceItem(item, pathPointIds))
-      .filter((item): item is AutonSequenceItem => item !== null);
-    const referencedPointIds = new Set(
-      sequenceItems.filter((item) => item.kind === "path").map((item) => item.pointId)
-    );
-    points.slice(1).forEach((point) => {
-      if (referencedPointIds.has(point.id)) return;
-      sequenceItems.push({ id: generateId(), kind: "path", pointId: point.id });
-    });
-
-    return { points, sequenceItems };
+    return {
+      ...snapshot,
+      ...(undoStack ? { undoStack } : {}),
+      ...(redoStack ? { redoStack } : {}),
+    };
   } catch {
     window.localStorage.removeItem(AUTON_DRAFT_STORAGE_KEY);
     return null;
   }
 };
 
-export const saveAutonDraft = (snapshot: PlannerSnapshot) => {
+export const saveAutonDraft = (snapshot: PersistedPlannerDraft) => {
   if (typeof window === "undefined") return;
 
   try {

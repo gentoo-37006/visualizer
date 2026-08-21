@@ -117,6 +117,17 @@
   filter: brightness(0.72);
 }
 
+.clearAutonButton:not(.deleteArmed):hover {
+  background: var(--background);
+  border-color: var(--border);
+  color: var(--text-primary);
+  filter: none;
+}
+
+.clearAutonButton.deleteArmed:hover {
+  filter: none;
+}
+
 .activeIconButton {
   border-color: var(--primary);
   color: var(--primary);
@@ -447,11 +458,6 @@
 }
 
 .deleteAction:hover .deleteTooltip {
-  opacity: 1;
-}
-
-/* Keeps the hint up after an unarmed click, when the pointer may already be gone. */
-.deleteTooltipPinned {
   opacity: 1;
 }
 

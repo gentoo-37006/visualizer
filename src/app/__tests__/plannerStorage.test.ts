@@ -65,6 +65,18 @@ describe("auton draft persistence", () => {
     expect(loadAutonDraft()).toEqual(snapshot);
   });
 
+  it("round trips undo and redo history with the draft", () => {
+    const current: PlannerSnapshot = {
+      points: [startPoint, { id: "a", nx: 0.25, ny: 0.75, color: "#abc", locked: false }],
+      sequenceItems: [{ id: "s1", kind: "path", pointId: "a" }],
+    };
+    const empty: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+
+    saveAutonDraft({ ...current, undoStack: [empty], redoStack: [current] });
+
+    expect(loadAutonDraft()).toEqual({ ...current, undoStack: [empty], redoStack: [current] });
+  });
+
   it("returns null rather than throwing on unusable storage", () => {
     store("{not json");
     expect(loadAutonDraft()).toBeNull();

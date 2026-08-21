@@ -149,6 +149,7 @@ export default function PathPlannerPage() {
   const didPointerDownOnFieldBackgroundRef = useRef(false);
   const shouldFieldImageModalBeVisibleRef = useRef(false);
   const shouldKotlinExportBeVisibleRef = useRef(false);
+  const kotlinExportGenerationIdRef = useRef(0);
   const cardDragScrollSpeedRef = useRef(0);
   const cardDragScrollFrameRef = useRef<number | null>(null);
   const sequencePointerDragRef = useRef<{
@@ -165,9 +166,12 @@ export default function PathPlannerPage() {
     redoStack,
     pointsRef,
     sequenceItemsRef,
+    undoStackRef,
+    redoStackRef,
     setPlannerPoints,
     setPlannerSequenceItems,
     setPlannerSnapshot,
+    setPlannerHistory,
     createSnapshot,
     clearHistory,
     pushUndoSnapshot,
@@ -299,6 +303,7 @@ export default function PathPlannerPage() {
       if (event.key !== "Escape") return;
 
       if (kotlinExport) {
+        kotlinExportGenerationIdRef.current += 1;
         shouldKotlinExportBeVisibleRef.current = false;
         setIsKotlinExportVisible(false);
         return;
@@ -344,7 +349,10 @@ export default function PathPlannerPage() {
       const storedCustomFieldImage = loadCustomFieldImage();
       const storedFieldImageSelection = loadFieldImageSelection();
       setAutonAlliance(storedAutonSettings.alliance);
-      if (storedAutonDraft) setPlannerSnapshot(storedAutonDraft);
+      if (storedAutonDraft) {
+        setPlannerSnapshot(storedAutonDraft);
+        setPlannerHistory(storedAutonDraft.undoStack ?? [], storedAutonDraft.redoStack ?? []);
+      }
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
       setMotionParameters(storedMotionParameters);
@@ -364,7 +372,7 @@ export default function PathPlannerPage() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [setPlannerSnapshot]);
+  }, [setPlannerHistory, setPlannerSnapshot]);
 
   useEffect(() => {
     const resetFieldBackgroundClick = (event: globalThis.PointerEvent) => {
@@ -407,11 +415,35 @@ export default function PathPlannerPage() {
     if (!didLoadStoredSettings) return;
 
     const timeoutId = window.setTimeout(() => {
-      saveAutonDraft({ points, sequenceItems: orderedSequenceItems });
+      saveAutonDraft({ points, sequenceItems: orderedSequenceItems, undoStack, redoStack });
     }, AUTON_DRAFT_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timeoutId);
-  }, [didLoadStoredSettings, orderedSequenceItems, points]);
+  }, [didLoadStoredSettings, orderedSequenceItems, points, redoStack, undoStack]);
+
+  useEffect(() => {
+    if (!didLoadStoredSettings) return;
+
+    const saveBeforeUnload = () => {
+      const currentPoints = pointsRef.current;
+      const currentSequenceItems = sequenceItemsRef.current.length > 0
+        ? sequenceItemsRef.current
+        : currentPoints.slice(1).map((point) => ({
+            id: `path-item-${point.id}`,
+            kind: "path" as const,
+            pointId: point.id,
+          }));
+      saveAutonDraft({
+        points: currentPoints,
+        sequenceItems: currentSequenceItems,
+        undoStack: undoStackRef.current,
+        redoStack: redoStackRef.current,
+      });
+    };
+
+    window.addEventListener("pagehide", saveBeforeUnload);
+    return () => window.removeEventListener("pagehide", saveBeforeUnload);
+  }, [didLoadStoredSettings, pointsRef, redoStackRef, sequenceItemsRef, undoStackRef]);
 
   useEffect(() => {
     if (!isPlaybackRunning) return;
@@ -496,9 +528,9 @@ export default function PathPlannerPage() {
   };
 
   const handleClearAuton = () => {
+    clearHistory();
     if (points.length <= 1 && orderedSequenceItems.length === 0) return;
 
-    pushCurrentSnapshot();
     setPlannerPoints([
       { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
     ]);
@@ -767,7 +799,6 @@ export default function PathPlannerPage() {
   const handleToggleLocked = (index: number) => {
     if (points[index].hidden) return;
 
-    pushCurrentSnapshot();
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, locked: !point.locked } : point
@@ -840,7 +871,6 @@ export default function PathPlannerPage() {
   };
 
   const handleToggleControlsExpanded = (index: number) => {
-    pushCurrentSnapshot();
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, controlsExpanded: !(point.controlsExpanded ?? true) } : point
@@ -849,7 +879,6 @@ export default function PathPlannerPage() {
   };
 
   const handleToggleActionsExpanded = (index: number) => {
-    pushCurrentSnapshot();
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
         i === index ? { ...point, actionsExpanded: !(point.actionsExpanded ?? true) } : point
@@ -1104,20 +1133,38 @@ export default function PathPlannerPage() {
   };
 
   const handleExportKotlin = () => {
-    if (sidebarPage === "poses") {
-      const contents = serializeSavedPosesKotlin(savedPoses, robotConstants);
-      shouldKotlinExportBeVisibleRef.current = true;
-      setKotlinExport({ contents });
-      setIsKotlinExportVisible(true);
-      return;
-    }
-
-    const contents = serializePathPlannerKotlin(points, savedPoses, getSequenceItemsWithPaths(sequenceItems, points), {
-      alliance: autonAlliance,
-    });
+    const generationId = kotlinExportGenerationIdRef.current + 1;
+    kotlinExportGenerationIdRef.current = generationId;
     shouldKotlinExportBeVisibleRef.current = true;
-    setKotlinExport({ contents });
+    setKotlinExport({ contents: "// Processing export..." });
     setIsKotlinExportVisible(true);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (
+          kotlinExportGenerationIdRef.current !== generationId ||
+          !shouldKotlinExportBeVisibleRef.current
+        ) {
+          return;
+        }
+
+        const contents = sidebarPage === "poses"
+          ? serializeSavedPosesKotlin(savedPoses, robotConstants)
+          : serializePathPlannerKotlin(
+              points,
+              savedPoses,
+              getSequenceItemsWithPaths(sequenceItems, points),
+              { alliance: autonAlliance }
+            );
+
+        if (
+          kotlinExportGenerationIdRef.current === generationId &&
+          shouldKotlinExportBeVisibleRef.current
+        ) {
+          setKotlinExport({ contents });
+        }
+      });
+    });
   };
 
   const handlePathTangentReversedChange = (index: number, tangentReversed: boolean) => {
@@ -1133,6 +1180,7 @@ export default function PathPlannerPage() {
   };
 
   const closeKotlinExport = () => {
+    kotlinExportGenerationIdRef.current += 1;
     shouldKotlinExportBeVisibleRef.current = false;
     setIsKotlinExportVisible(false);
   };
