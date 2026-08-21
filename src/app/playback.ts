@@ -473,11 +473,18 @@ const ROTATE_BOUNDS_SAMPLE_COUNT = 16;
 export const getOutOfBoundsPointIds = (
   timeline: PlaybackTimeline,
   robotWidth: number,
-  robotLength: number
+  robotLength: number,
+  startPoint?: Point
 ) => {
   const pointIds = new Set<string>();
   const fits = (pose: { nx: number; ny: number; heading: number }) =>
     isRobotInsideField(pose, robotWidth, robotLength);
+
+  // The start pose has no segment of its own, and an auton that begins with the
+  // robot inside a wall never gets to run at all.
+  if (startPoint && !fits({ ...startPoint, heading: startPoint.heading ?? 0 })) {
+    pointIds.add(startPoint.id);
+  }
 
   timeline.segments.forEach((segment) => {
     if (segment.kind === "wait") return;

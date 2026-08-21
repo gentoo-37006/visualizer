@@ -333,6 +333,7 @@ export function PlannerSidebar({
             {points[0] && (
               <StartPoseCard
                 point={points[0]}
+                isOutOfBounds={outOfBoundsPointIds.has(points[0].id)}
                 savedPoses={savedPoses}
                 hoverTarget={hoverTarget}
                 activeTarget={activeTarget}
@@ -517,6 +518,7 @@ function SequenceDragWrapper({
 
 type StartPoseCardProps = {
   point: Point;
+  isOutOfBounds: boolean;
   savedPoses: SavedPose[];
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
@@ -535,6 +537,7 @@ type StartPoseCardProps = {
 
 function StartPoseCard({
   point,
+  isOutOfBounds,
   savedPoses,
   hoverTarget,
   activeTarget,
@@ -554,6 +557,7 @@ function StartPoseCard({
   return (
     <PointCard
       index={0}
+      isOutOfBounds={isOutOfBounds}
       name="Start Pose"
       poseName={point.poseName}
       color={point.color}

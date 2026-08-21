@@ -298,6 +298,14 @@ describe("paths that leave the field", () => {
     expect([...getOutOfBoundsPointIds(timeline, 16, 16)]).toEqual(["a"]);
   });
 
+  it("flags a start pose that begins inside a wall", () => {
+    const timeline = timelineFor([start, straightPath], items);
+    const buried = { ...start, nx: 1 };
+
+    expect(getOutOfBoundsPointIds(timeline, 16, 16, start).has(start.id)).toBe(false);
+    expect(getOutOfBoundsPointIds(timeline, 16, 16, buried).has(start.id)).toBe(true);
+  });
+
   it("catches a corner swept out by turning in place", () => {
     // Backed up to the wall facing it, the robot fits; turned 45 degrees it does not.
     const againstWall = { ...straightPath, nx: 63 / 144 + 0.5, constantHeading: 45 };

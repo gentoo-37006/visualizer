@@ -237,8 +237,9 @@ export default function PathPlannerPage() {
   const pathDurations = useMemo(() => getPathDurationsByPointId(playbackTimeline), [playbackTimeline]);
 
   const outOfBoundsPointIds = useMemo(
-    () => getOutOfBoundsPointIds(playbackTimeline, robotConstants.width, robotConstants.length),
-    [playbackTimeline, robotConstants.length, robotConstants.width]
+    () =>
+      getOutOfBoundsPointIds(playbackTimeline, robotConstants.width, robotConstants.length, points[0]),
+    [playbackTimeline, points, robotConstants.length, robotConstants.width]
   );
 
   const isRobotOutOfBounds = !isRobotInsideField(
