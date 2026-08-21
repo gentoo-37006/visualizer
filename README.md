@@ -27,8 +27,8 @@ The sidebar holds the sequence in the order the robot runs it.
   by hand, or pick one of the `START_` poses you imported.
 - **Add Path** appends a path that ends at a new point, starting where the
   previous one is until you place it. Type exact coordinates into the card, or
-  drag the point on the field — note that the first one lands under the robot
-  graphic, so it is easier to give it coordinates first.
+  drag it on the field — a new point sits exactly on the one before it, and the
+  newer of the two is the one on top that takes the drag.
 - **Control Points** bend a path into a spline. Order matters: they are the
   intermediate Bézier points, in the order listed.
 - **Heading** picks how the robot is turned along the path — `Constant` holds one
