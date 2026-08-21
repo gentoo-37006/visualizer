@@ -17,7 +17,6 @@ import { PlannerSidebar, type SidebarPage } from "./components/PlannerSidebar";
 import { usePlannerState } from "./hooks/usePlannerState";
 import {
   serializePathPlannerKotlin,
-  serializeSavedPosesKotlin,
   parsePathPlannerKotlin,
   parseRobotConstantsKotlin,
   parseSavedPosesKotlin,
@@ -1165,14 +1164,12 @@ export default function PathPlannerPage() {
           return;
         }
 
-        const contents = sidebarPage === "poses"
-          ? serializeSavedPosesKotlin(savedPoses, robotConstants)
-          : serializePathPlannerKotlin(
-              points,
-              savedPoses,
-              getSequenceItemsWithPaths(sequenceItems, points),
-              { alliance: autonAlliance }
-            );
+        const contents = serializePathPlannerKotlin(
+          points,
+          savedPoses,
+          getSequenceItemsWithPaths(sequenceItems, points),
+          { alliance: autonAlliance }
+        );
 
         if (
           kotlinExportGenerationIdRef.current === generationId &&

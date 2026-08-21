@@ -212,31 +212,6 @@ export const parseSavedPosesKotlin = (
   return savedPoses;
 };
 
-const formatStartPoseCoordinate = (
-  value: number,
-  constantName: "HALF_WIDTH" | "HALF_LENGTH",
-  dimensions: { width?: number; length?: number } = {}
-) => {
-  const halfDimension =
-    constantName === "HALF_WIDTH"
-      ? (dimensions.width ?? DEFAULT_ROBOT_WIDTH) / 2
-      : (dimensions.length ?? DEFAULT_ROBOT_LENGTH) / 2;
-  const baseValue = value < 0 ? value - halfDimension : value + halfDimension;
-  const operator = value < 0 ? "+" : "-";
-  return `${formatKotlinNumber(baseValue)} ${operator} Constants.${constantName}`;
-};
-
-export const serializeSavedPosesKotlin = (
-  savedPoses: SavedPose[],
-  dimensions: { width?: number; length?: number } = {}
-) =>
-  savedPoses
-    .map(
-      (pose) =>
-        `val ${withStartPosePrefix(pose.name)} = Pose(${formatStartPoseCoordinate(pose.x, "HALF_WIDTH", dimensions)}, ${formatStartPoseCoordinate(pose.y, "HALF_LENGTH", dimensions)}, ${formatKotlinNumber(pose.heading ?? 0)})`
-    )
-    .join("\n");
-
 const toKotlinVariableName = (name: string, fallback: string) => {
   const trimmedName = name.trim();
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmedName)) return trimmedName;

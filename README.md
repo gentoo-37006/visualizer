@@ -62,9 +62,10 @@ imported.
 
 ## Kotlin import and export
 
-The three page buttons in the header each import a `.kt` file, and the export
-button writes back whichever page you are on — the auton or the start poses.
-Constants are read-only in the planner, so there is nothing to export there.
+The three page buttons in the header each import a `.kt` file. Export only
+applies to the auton: constants and start poses are things the planner reads
+from your codebase, not things it writes back, so the button is disabled on
+those pages.
 
 **Constants** reads the robot's `WIDTH` and `LENGTH` and the tuned
 `xVelocity`, `yVelocity`, `forwardZeroPowerAcceleration` and
@@ -73,7 +74,7 @@ back to typical FTC drivetrain numbers and says so on that page.
 
 **Start Poses** reads every `val START_… = Pose(…)`, including ones written in
 terms of `Constants.HALF_WIDTH` / `Constants.HALF_LENGTH`, and offers them as
-presets. Exported poses are written back in that same half-dimension form.
+presets for the start pose.
 
 **Auton** round-trips the routine itself. A point that lands on an imported pose
 is written as `Poses.START_…` rather than raw coordinates, so the generated code
