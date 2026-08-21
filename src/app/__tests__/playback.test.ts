@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTONOMOUS_PERIOD_SECONDS,
   buildPlaybackTimeline,
   clamp01,
+  createPlaybackTrackBackground,
+  getAutonomousOvertime,
   getPlaybackPoseAtTime,
   interpolateHeading,
   interpolateHeadingRange,
@@ -186,5 +189,32 @@ describe("playback pose sampling", () => {
     const { pose } = getPlaybackPoseAtTime({ segments: [], totalTime: 0 }, 0, points);
     expect(pose.nx).toBe(start.nx);
     expect(pose.ny).toBe(start.ny);
+  });
+});
+
+describe("autonomous period budget", () => {
+  it("reports no overtime for an auton that fits", () => {
+    expect(getAutonomousOvertime(AUTONOMOUS_PERIOD_SECONDS)).toBe(0);
+    expect(getAutonomousOvertime(0)).toBe(0);
+    expect(getAutonomousOvertime(Number.NaN)).toBe(0);
+  });
+
+  it("reports how far past the period an auton runs", () => {
+    expect(getAutonomousOvertime(AUTONOMOUS_PERIOD_SECONDS + 4.5)).toBeCloseTo(4.5, 6);
+  });
+
+  it("marks the deadline on the track only once the auton overruns", () => {
+    const withinBudget = createPlaybackTrackBackground({
+      segments: [],
+      totalTime: AUTONOMOUS_PERIOD_SECONDS,
+    });
+    const overBudget = createPlaybackTrackBackground({
+      segments: [],
+      totalTime: AUTONOMOUS_PERIOD_SECONDS * 2,
+    });
+
+    expect(withinBudget).not.toContain("calc(");
+    // Half the track, because the auton runs twice as long as it is allowed to.
+    expect(overBudget).toContain("calc(50.000% - 1.5px)");
   });
 });

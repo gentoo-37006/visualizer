@@ -1258,6 +1258,15 @@
   white-space: nowrap;
 }
 
+.playbackTimeOverBudget {
+  color: var(--danger);
+}
+
+.playbackOvertime {
+  margin-left: 0.375rem;
+  font-weight: 600;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .container {

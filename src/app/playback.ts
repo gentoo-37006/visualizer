@@ -399,6 +399,27 @@ export const getPlaybackPoseAtTime = (
   };
 };
 
+/** How long an FTC match's autonomous period lasts. */
+export const AUTONOMOUS_PERIOD_SECONDS = 30;
+
+export const getAutonomousOvertime = (totalTime: number) =>
+  Math.max(0, (Number.isFinite(totalTime) ? totalTime : 0) - AUTONOMOUS_PERIOD_SECONDS);
+
+/**
+ * A hairline over the segment gradient at the moment the autonomous period runs
+ * out, so an over-budget auton shows exactly which path it stops partway through.
+ */
+const createAutonomousDeadlineMarker = (totalTime: number) => {
+  if (getAutonomousOvertime(totalTime) <= 0) return null;
+
+  const deadlinePercent = ((AUTONOMOUS_PERIOD_SECONDS / totalTime) * 100).toFixed(3);
+  const at = (offsetPixels: number) =>
+    `calc(${deadlinePercent}% ${offsetPixels < 0 ? "-" : "+"} ${Math.abs(offsetPixels)}px)`;
+  // A dark core between white flanks, so the marker reads against both the pale
+  // path colors and the dim grey the waits are drawn in.
+  return `linear-gradient(to right, transparent ${at(-1.5)}, #ffffff ${at(-1.5)}, #ffffff ${at(-0.5)}, #111827 ${at(-0.5)}, #111827 ${at(0.5)}, #ffffff ${at(0.5)}, #ffffff ${at(1.5)}, transparent ${at(1.5)})`;
+};
+
 export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {
   if (timeline.totalTime <= 0) return "rgba(148, 163, 184, 0.35)";
 
@@ -415,7 +436,9 @@ export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {
     stops.push(`${segmentColor} ${startPercent.toFixed(3)}%`, `${segmentColor} ${endPercent.toFixed(3)}%`);
   });
 
-  return `linear-gradient(to right, ${stops.join(", ")})`;
+  const segmentGradient = `linear-gradient(to right, ${stops.join(", ")})`;
+  const deadlineMarker = createAutonomousDeadlineMarker(timeline.totalTime);
+  return deadlineMarker ? `${deadlineMarker}, ${segmentGradient}` : segmentGradient;
 };
 
 export const snapSvgPixel = (value: number) => Math.round(value);

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { formatPlaybackTime } from "../playback";
+import { AUTONOMOUS_PERIOD_SECONDS, formatPlaybackTime, getAutonomousOvertime } from "../playback";
 import styles from "../page.module.css";
 
 type PlaybackControlsProps = {
@@ -23,6 +23,9 @@ export function PlaybackControls({
   onToggle,
   onScrub,
 }: PlaybackControlsProps) {
+  const overtime = getAutonomousOvertime(totalTime);
+  const isOverBudget = overtime > 0.05;
+
   return (
     <section className={styles.playbackSidebar} aria-label="Path playback">
       <div className={styles.playbackRow}>
@@ -60,8 +63,18 @@ export function PlaybackControls({
           onChange={(event) => onScrub(Number(event.target.value))}
           aria-label="Path playback progress"
         />
-        <div className={styles.playbackTime}>
+        <div
+          className={`${styles.playbackTime} ${isOverBudget ? styles.playbackTimeOverBudget : ""}`}
+          title={
+            isOverBudget
+              ? `${overtime.toFixed(1)}s over the ${AUTONOMOUS_PERIOD_SECONDS}s autonomous period`
+              : undefined
+          }
+        >
           {formatPlaybackTime(currentTime)} / {formatPlaybackTime(totalTime)}
+          {isOverBudget && (
+            <span className={styles.playbackOvertime}>+{overtime.toFixed(1)}s</span>
+          )}
         </div>
       </div>
     </section>
