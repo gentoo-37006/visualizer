@@ -339,6 +339,7 @@ export function PointCard({
             aria-label={`Rename path ${index}`}
           />
         )}
+        <div className={styles.pointCardHeaderEnd}>
         {isOutOfBounds && (
           <span
             className={styles.pathWarning}
@@ -429,6 +430,7 @@ export function PointCard({
               )}
             </span>
           )}
+        </div>
         </div>
       </div>
       {cardSubheader}

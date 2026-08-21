@@ -16,6 +16,18 @@ import {
 import { seededColor } from "./plannerColors";
 
 const formatKotlinNumber = (value: number) => value.toFixed(1);
+
+/**
+ * Positions along a path run 0 to 1, so a single decimal — fine for inches and
+ * degrees — only leaves eleven places to put a trigger, and quietly rewrites a
+ * team's own `.startAt(0.35, ...)` as `0.4` on a round trip. The parser keeps
+ * the full value, so the exporter has to as well or the simulation and the
+ * generated code disagree about where an action fires.
+ */
+const formatKotlinPathT = (value: number) => {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Number.isInteger(rounded) ? rounded.toFixed(1) : String(rounded);
+};
 const DEFAULT_ROBOT_WIDTH = 16;
 const DEFAULT_ROBOT_LENGTH = 16;
 const POSE_MATCH_EPSILON = 0.05;
@@ -272,7 +284,7 @@ const formatActionCall = (item: AutonSequenceItem) => {
 
 const formatPathActionTrigger = (trigger: PathActionTrigger) => {
   const actionName = trigger.actionName.trim() || "ACTION";
-  return `\n            .${trigger.mode}At(${formatKotlinNumber(trigger.t)}, Actions.${actionName})`;
+  return `\n            .${trigger.mode}At(${formatKotlinPathT(trigger.t)}, Actions.${actionName})`;
 };
 
 const formatFollowPathCall = (pathName: string, point?: Point) => {
@@ -317,7 +329,7 @@ export const serializePathPlannerKotlin = (
       const shouldExportLinearT = Math.abs(linearStartT) > 0.0001 || Math.abs(linearEndT - 1) > 0.0001;
       const headingCall =
         headingMode === "linear"
-          ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)}${shouldExportLinearT ? `, ${formatKotlinNumber(linearStartT)}, ${formatKotlinNumber(linearEndT)}` : ""})`
+          ? `linearHeading(${formatKotlinNumber(point.startHeading ?? 0)}, ${formatKotlinNumber(point.endHeading ?? 0)}${shouldExportLinearT ? `, ${formatKotlinPathT(linearStartT)}, ${formatKotlinPathT(linearEndT)}` : ""})`
           : headingMode === "tangential"
             ? point.tangentReversed
               ? "reversedTangentHeading()"

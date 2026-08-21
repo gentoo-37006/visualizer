@@ -163,6 +163,36 @@ describe("robot constants and saved poses", () => {
     expect(poses[0].heading).toBe(90);
   });
 
+  it("keeps the precision of a trigger's t through a round trip", () => {
+    const source = `val toBasket = Path(
+    Pose(0.0, 0.0),
+    Pose(24.0, 0.0),
+).constantHeading(0.0)
+
+autonSequence(Alliance.BLUE)
+    .followPath(
+        toBasket
+            .startAt(0.35, Actions.LIFT)
+            .stopAt(0.875, Actions.INTAKE)
+    )`;
+
+    const output = roundTrip(source);
+    expect(output).toContain("startAt(0.35, Actions.LIFT)");
+    expect(output).toContain("stopAt(0.875, Actions.INTAKE)");
+  });
+
+  it("keeps the precision of a linear heading's t window through a round trip", () => {
+    const source = `val toBasket = Path(
+    Pose(0.0, 0.0),
+    Pose(24.0, 0.0),
+).linearHeading(0.0, 90.0, 0.25, 0.75)
+
+autonSequence(Alliance.BLUE)
+    .followPath(toBasket)`;
+
+    expect(roundTrip(source)).toContain("linearHeading(0.0, 90.0, 0.25, 0.75)");
+  });
+
   it("returns null when the constants file is missing required values", () => {
     expect(parseRobotConstantsKotlin("object Constants { const val WIDTH: Double = 18.0 }")).toBeNull();
   });
