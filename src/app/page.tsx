@@ -175,6 +175,7 @@ export default function PathPlannerPage() {
     setPlannerSnapshot,
     setPlannerHistory,
     createSnapshot,
+    clearHistory,
     pushUndoSnapshot,
     pushCurrentSnapshot,
     pushCurrentSnapshotIfChanged,
@@ -543,12 +544,9 @@ export default function PathPlannerPage() {
   };
 
   const handleClearAuton = () => {
+    clearHistory();
     if (points.length <= 1 && orderedSequenceItems.length === 0) return;
 
-    // Undoable like any other edit. Shift-to-arm stops a stray click, but not a
-    // deliberate one on the wrong auton, and the draft save overwrites the only
-    // stored copy moments later.
-    pushCurrentSnapshot();
     setPlannerPoints([
       { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
     ]);
@@ -1264,10 +1262,7 @@ export default function PathPlannerPage() {
       return;
     }
 
-    // Same reasoning as clearing: loading a file over an auton is reversible.
-    // The alliance is not part of a snapshot, so undo restores the paths and
-    // leaves the imported alliance in place.
-    pushCurrentSnapshot();
+    clearHistory();
     setAutonAlliance(importedAuton.alliance);
     saveAutonSettings(importedAuton.alliance);
     setPlannerSnapshot(importedAuton);
