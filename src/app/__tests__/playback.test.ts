@@ -5,6 +5,7 @@ import {
   clamp01,
   createPlaybackTrackBackground,
   getAutonomousOvertime,
+  getPathDurationsByPointId,
   getPlaybackPoseAtTime,
   interpolateHeading,
   interpolateHeadingRange,
@@ -216,5 +217,33 @@ describe("autonomous period budget", () => {
     expect(withinBudget).not.toContain("calc(");
     // Half the track, because the auton runs twice as long as it is allowed to.
     expect(overBudget).toContain("calc(50.000% - 1.5px)");
+  });
+});
+
+describe("per-path durations", () => {
+  it("charges a path for the turn onto its start heading", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const straight = timelineFor([start, straightPath], items);
+    const turned = timelineFor([start, { ...straightPath, constantHeading: 90 }], items);
+
+    expect(getPathDurationsByPointId(straight).get("a")).toBeCloseTo(straight.totalTime, 6);
+    expect(getPathDurationsByPointId(turned).get("a")).toBeCloseTo(turned.totalTime, 6);
+    expect(getPathDurationsByPointId(turned).get("a")!).toBeGreaterThan(
+      getPathDurationsByPointId(straight).get("a")!
+    );
+  });
+
+  it("leaves waits out, so the durations only cover driving", () => {
+    const timeline = timelineFor(
+      [start, straightPath],
+      [
+        { id: "s1", kind: "path", pointId: "a" },
+        { id: "s2", kind: "action", name: "SCORE", mode: "run", timeout: 5 },
+      ]
+    );
+    const durations = getPathDurationsByPointId(timeline);
+
+    expect(durations.size).toBe(1);
+    expect(durations.get("a")).toBeCloseTo(timeline.totalTime - 5, 6);
   });
 });

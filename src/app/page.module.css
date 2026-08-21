@@ -316,6 +316,15 @@
   user-select: none;
 }
 
+.pathDuration {
+  flex: 0 0 auto;
+  margin-right: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
 .pathNameInput {
   width: 16ch;
   max-width: 16ch;

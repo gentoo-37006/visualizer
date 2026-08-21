@@ -43,7 +43,7 @@ export type PlaybackSegment =
       startTime: number;
       duration: number;
       pose: PlaybackPose;
-      color: string;
+      point: Point;
       startHeading: number;
       endHeading: number;
     };
@@ -297,7 +297,7 @@ export const buildPlaybackTimeline = (
         startTime: elapsedTime,
         duration: rotateDuration,
         pose: currentPose,
-        color: point.color,
+        point,
         startHeading: currentPose.heading,
         endHeading: pathStartHeading,
       });
@@ -420,6 +420,21 @@ const createAutonomousDeadlineMarker = (totalTime: number) => {
   return `linear-gradient(to right, transparent ${at(-1.5)}, #ffffff ${at(-1.5)}, #ffffff ${at(-0.5)}, #111827 ${at(-0.5)}, #111827 ${at(0.5)}, #ffffff ${at(0.5)}, #ffffff ${at(1.5)}, transparent ${at(1.5)})`;
 };
 
+/**
+ * Seconds each path costs the auton, counting the turn onto its start heading:
+ * the sequence cannot skip that rotation, so it belongs to the path that needs it.
+ */
+export const getPathDurationsByPointId = (timeline: PlaybackTimeline) => {
+  const durations = new Map<string, number>();
+
+  timeline.segments.forEach((segment) => {
+    if (segment.kind === "wait") return;
+    durations.set(segment.point.id, (durations.get(segment.point.id) ?? 0) + segment.duration);
+  });
+
+  return durations;
+};
+
 export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {
   if (timeline.totalTime <= 0) return "rgba(148, 163, 184, 0.35)";
 
@@ -431,7 +446,7 @@ export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {
       segment.kind === "path"
         ? segment.point.color
         : segment.kind === "rotate"
-          ? segment.color
+          ? segment.point.color
           : "rgba(148, 163, 184, 0.35)";
     stops.push(`${segmentColor} ${startPercent.toFixed(3)}%`, `${segmentColor} ${endPercent.toFixed(3)}%`);
   });

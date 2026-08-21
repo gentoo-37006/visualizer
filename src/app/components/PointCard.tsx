@@ -8,6 +8,7 @@ import { ControlPointCard } from "./ControlPointCard";
 
 type PointCardProps = {
   index: number;
+  duration?: number;
   name: string;
   poseName?: string;
   color: string;
@@ -65,6 +66,7 @@ type PointCardProps = {
 
 export function PointCard({
   index,
+  duration,
   name,
   poseName,
   color,
@@ -334,6 +336,11 @@ export function PointCard({
             onBlur={handleNameBlur}
             aria-label={`Rename path ${index}`}
           />
+        )}
+        {duration !== undefined && (
+          <span className={styles.pathDuration} title="Estimated time this path takes, including the turn onto its start heading">
+            {duration.toFixed(1)}s
+          </span>
         )}
         <div className={styles.cardActions}>
           {index > 0 && (

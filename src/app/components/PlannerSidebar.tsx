@@ -110,6 +110,7 @@ type PlannerSidebarProps = {
   onActionModeChange: (id: string, mode: AutonActionMode) => void;
   onActionTimeoutChange: (id: string, timeout: string) => void;
   onRemoveAction: (id: string) => void;
+  pathDurations: Map<string, number>;
   onClearAuton: () => void;
   onAddPoint: () => void;
   onAddAction: () => void;
@@ -180,6 +181,7 @@ export function PlannerSidebar({
   onActionModeChange,
   onActionTimeoutChange,
   onRemoveAction,
+  pathDurations,
   onClearAuton,
   onAddPoint,
   onAddAction,
@@ -403,6 +405,7 @@ export function PlannerSidebar({
                   <PathPointCard
                     point={point}
                     index={pointIndex}
+                    duration={pathDurations.get(point.id)}
                     hoverTarget={hoverTarget}
                     activeTarget={activeTarget}
                     isShiftPressed={isShiftPressed}
@@ -602,6 +605,7 @@ function StartPoseCard({
 type PathPointCardProps = {
   point: Point;
   index: number;
+  duration?: number;
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
   isShiftPressed: boolean;
@@ -636,6 +640,7 @@ type PathPointCardProps = {
 function PathPointCard({
   point,
   index,
+  duration,
   hoverTarget,
   activeTarget,
   isShiftPressed,
@@ -665,6 +670,7 @@ function PathPointCard({
   return (
     <PointCard
       index={index}
+      duration={duration}
       name={point.name ?? `path${index}`}
       poseName={point.poseName}
       color={point.color}

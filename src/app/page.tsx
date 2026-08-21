@@ -67,6 +67,7 @@ import {
   buildPlaybackTimeline,
   clamp01,
   createPlaybackTrackBackground,
+  getPathDurationsByPointId,
   getPlaybackPoseAtTime,
   snapSvgPixel,
 } from "./playback";
@@ -228,8 +229,10 @@ export default function PathPlannerPage() {
     activePlaybackSegment?.kind === "path"
       ? activePlaybackSegment.point.color
       : activePlaybackSegment?.kind === "rotate"
-        ? activePlaybackSegment.color
+        ? activePlaybackSegment.point.color
         : activePlaybackSegment?.pose.color ?? points[0]?.color ?? INITIAL_POINT_COLOR;
+
+  const pathDurations = useMemo(() => getPathDurationsByPointId(playbackTimeline), [playbackTimeline]);
 
   const playbackTrackBackground = useMemo(
     () => createPlaybackTrackBackground(playbackTimeline),
@@ -1582,6 +1585,7 @@ export default function PathPlannerPage() {
           onActionTimeoutChange={handleActionTimeoutChange}
           onRemoveAction={handleRemoveAction}
           onClearAuton={handleClearAuton}
+          pathDurations={pathDurations}
           onAddPoint={handleAddPoint}
           onAddAction={handleAddAction}
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}
