@@ -114,7 +114,6 @@ export default function PathPlannerPage() {
   const [kotlinExport, setKotlinExport] = useState<{ contents: string } | null>(null);
   const [isKotlinExportVisible, setIsKotlinExportVisible] = useState(false);
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
-  const [autonAlliance, setAutonAlliance] = useState<AutonAlliance>(DEFAULT_AUTON_ALLIANCE);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
   const [motionParameters, setMotionParameters] = useState<MotionParameters>(DEFAULT_MOTION_PARAMETERS);
   const [motionParameterDrafts, setMotionParameterDrafts] = useState({
@@ -164,14 +163,17 @@ export default function PathPlannerPage() {
   const {
     points,
     sequenceItems,
+    alliance: autonAlliance,
     undoStack,
     redoStack,
     pointsRef,
     sequenceItemsRef,
+    allianceRef,
     undoStackRef,
     redoStackRef,
     setPlannerPoints,
     setPlannerSequenceItems,
+    setPlannerAlliance,
     setPlannerSnapshot,
     setPlannerHistory,
     createSnapshot,
@@ -189,6 +191,7 @@ export default function PathPlannerPage() {
     initialPoints: [
       { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: INITIAL_POINT_COLOR, locked: true, heading: 0 },
     ],
+    initialAlliance: DEFAULT_AUTON_ALLIANCE,
     onRestore: () => {
       setHoverTarget(null);
       setActiveTarget(null);
@@ -361,13 +364,14 @@ export default function PathPlannerPage() {
     const timeoutId = window.setTimeout(() => {
       const storedMotionParameters = loadMotionParameters();
       const storedAutonSettings = loadAutonSettings();
-      const storedAutonDraft = loadAutonDraft();
+      const storedAutonDraft = loadAutonDraft(storedAutonSettings.alliance);
       const storedCustomFieldImage = loadCustomFieldImage();
       const storedFieldImageSelection = loadFieldImageSelection();
-      setAutonAlliance(storedAutonSettings.alliance);
       if (storedAutonDraft) {
         setPlannerSnapshot(storedAutonDraft);
         setPlannerHistory(storedAutonDraft.undoStack ?? [], storedAutonDraft.redoStack ?? []);
+      } else {
+        setPlannerAlliance(storedAutonSettings.alliance);
       }
       setSavedPoses(loadSavedPoses());
       setRobotConstants(loadRobotConstants());
@@ -431,7 +435,7 @@ export default function PathPlannerPage() {
     if (!didLoadStoredSettings) return;
 
     const timeoutId = window.setTimeout(() => {
-      saveAutonDraft({ points, sequenceItems: orderedSequenceItems, undoStack, redoStack });
+      saveAutonDraft({ points, sequenceItems: orderedSequenceItems, alliance: autonAlliance, undoStack, redoStack });
     }, AUTON_DRAFT_SAVE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timeoutId);
@@ -452,6 +456,7 @@ export default function PathPlannerPage() {
       saveAutonDraft({
         points: currentPoints,
         sequenceItems: currentSequenceItems,
+        alliance: allianceRef.current,
         undoStack: undoStackRef.current,
         redoStack: redoStackRef.current,
       });
@@ -510,7 +515,10 @@ export default function PathPlannerPage() {
   };
 
   const handleAutonAllianceChange = (alliance: AutonAlliance) => {
-    setAutonAlliance(alliance);
+    if (alliance === allianceRef.current) return;
+
+    pushCurrentSnapshot();
+    setPlannerAlliance(alliance);
     saveAutonSettings(alliance);
   };
 
@@ -1263,7 +1271,6 @@ export default function PathPlannerPage() {
     }
 
     clearHistory();
-    setAutonAlliance(importedAuton.alliance);
     saveAutonSettings(importedAuton.alliance);
     setPlannerSnapshot(importedAuton);
     setHoverTarget(null);

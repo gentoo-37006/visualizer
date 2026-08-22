@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { limitHistoryDepth } from "../plannerStorage";
-import type { AutonSequenceItem, PlannerSnapshot, Point } from "../plannerTypes";
+import type { AutonAlliance, AutonSequenceItem, PlannerSnapshot, Point } from "../plannerTypes";
 
 const clonePoints = (source: Point[]) =>
   source.map((point) => ({
@@ -16,22 +16,26 @@ const cloneSequenceItems = (source: AutonSequenceItem[]) => source.map((item) =>
 const cloneSnapshot = (snapshot: PlannerSnapshot): PlannerSnapshot => ({
   points: clonePoints(snapshot.points),
   sequenceItems: cloneSequenceItems(snapshot.sequenceItems),
+  alliance: snapshot.alliance,
 });
 
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 
 type UsePlannerStateOptions = {
   initialPoints: Point[];
+  initialAlliance: AutonAlliance;
   onRestore?: () => void;
 };
 
-export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOptions) {
+export function usePlannerState({ initialPoints, initialAlliance, onRestore }: UsePlannerStateOptions) {
   const [points, setPoints] = useState<Point[]>(initialPoints);
   const [sequenceItems, setSequenceItems] = useState<AutonSequenceItem[]>([]);
+  const [alliance, setAlliance] = useState<AutonAlliance>(initialAlliance);
   const [undoStack, setUndoStack] = useState<PlannerSnapshot[]>([]);
   const [redoStack, setRedoStack] = useState<PlannerSnapshot[]>([]);
   const pointsRef = useRef<Point[]>(initialPoints);
   const sequenceItemsRef = useRef<AutonSequenceItem[]>([]);
+  const allianceRef = useRef<AutonAlliance>(initialAlliance);
   const undoStackRef = useRef<PlannerSnapshot[]>([]);
   const redoStackRef = useRef<PlannerSnapshot[]>([]);
   const editStartSnapshotRef = useRef<PlannerSnapshot | null>(null);
@@ -55,13 +59,20 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     });
   }, []);
 
+  const setPlannerAlliance = useCallback((nextAlliance: AutonAlliance) => {
+    allianceRef.current = nextAlliance;
+    setAlliance(nextAlliance);
+  }, []);
+
   const setPlannerSnapshot = useCallback((snapshot: PlannerSnapshot) => {
     const nextPoints = clonePoints(snapshot.points);
     const nextSequenceItems = cloneSequenceItems(snapshot.sequenceItems);
     pointsRef.current = nextPoints;
     sequenceItemsRef.current = nextSequenceItems;
+    allianceRef.current = snapshot.alliance;
     setPoints(nextPoints);
     setSequenceItems(nextSequenceItems);
+    setAlliance(snapshot.alliance);
   }, []);
 
   const setPlannerHistory = useCallback((undoSnapshots: PlannerSnapshot[], redoSnapshots: PlannerSnapshot[]) => {
@@ -78,10 +89,13 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   const createSnapshot = (): PlannerSnapshot => ({
     points: clonePoints(pointsRef.current),
     sequenceItems: cloneSequenceItems(sequenceItemsRef.current),
+    alliance: allianceRef.current,
   });
 
   const areSnapshotsEqual = (a: PlannerSnapshot, b: PlannerSnapshot) =>
-    arePointSnapshotsEqual(a.points, b.points) && JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
+    a.alliance === b.alliance &&
+    arePointSnapshotsEqual(a.points, b.points) &&
+    JSON.stringify(a.sequenceItems) === JSON.stringify(b.sequenceItems);
 
   const clearHistory = () => {
     undoStackRef.current = [];
@@ -111,8 +125,13 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
     setRedoStack([]);
   };
 
-  const pushCurrentSnapshotIfChanged = (nextPoints: Point[], nextSequenceItems = sequenceItemsRef.current) => {
-    if (areSnapshotsEqual(createSnapshot(), { points: nextPoints, sequenceItems: nextSequenceItems })) return;
+  const pushCurrentSnapshotIfChanged = (
+    nextPoints: Point[],
+    nextSequenceItems = sequenceItemsRef.current,
+    nextAlliance = allianceRef.current
+  ) => {
+    const nextSnapshot = { points: nextPoints, sequenceItems: nextSequenceItems, alliance: nextAlliance };
+    if (areSnapshotsEqual(createSnapshot(), nextSnapshot)) return;
     pushCurrentSnapshot();
   };
 
@@ -186,14 +205,17 @@ export function usePlannerState({ initialPoints, onRestore }: UsePlannerStateOpt
   return {
     points,
     sequenceItems,
+    alliance,
     undoStack,
     redoStack,
     pointsRef,
     sequenceItemsRef,
+    allianceRef,
     undoStackRef,
     redoStackRef,
     setPlannerPoints,
     setPlannerSequenceItems,
+    setPlannerAlliance,
     setPlannerSnapshot,
     setPlannerHistory,
     createSnapshot,

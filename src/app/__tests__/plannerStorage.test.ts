@@ -43,6 +43,7 @@ const startPoint = { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: "#fff", lock
 describe("auton draft persistence", () => {
   it("round trips a draft through storage", () => {
     const snapshot: PlannerSnapshot = {
+      alliance: "BLUE",
       points: [
         startPoint,
         {
@@ -75,8 +76,9 @@ describe("auton draft persistence", () => {
     const current: PlannerSnapshot = {
       points: [startPoint, { id: "a", nx: 0.25, ny: 0.75, color: "#abc", locked: false }],
       sequenceItems: [{ id: "s1", kind: "path", pointId: "a" }],
+      alliance: "RED",
     };
-    const empty: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+    const empty: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "BLUE" };
 
     saveAutonDraft({ ...current, undoStack: [empty], redoStack: [current] });
 
@@ -183,6 +185,60 @@ describe("auton draft persistence", () => {
     expect(items.map((item) => item.pointId).sort()).toEqual(["a", "b"]);
   });
 
+  it("carries the alliance through the draft", () => {
+    const snapshot: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "RED" };
+    saveAutonDraft(snapshot);
+
+    expect(loadAutonDraft()?.alliance).toBe("RED");
+  });
+
+  it("falls back for a draft written before the alliance was part of a snapshot", () => {
+    // Such a draft has no alliance at all; defaulting it would silently move a
+    // red auton to blue, so the caller's stored setting seeds it instead.
+    store({ points: [startPoint], sequenceItems: [] });
+
+    expect(loadAutonDraft("RED")?.alliance).toBe("RED");
+    expect(loadAutonDraft("BLUE")?.alliance).toBe("BLUE");
+  });
+
+  it("ignores a nonsense alliance rather than trusting it", () => {
+    store({ points: [startPoint], sequenceItems: [], alliance: "PURPLE" });
+
+    expect(loadAutonDraft("RED")?.alliance).toBe("RED");
+  });
+
+  it("restores each history entry's own alliance", () => {
+    const blue: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "BLUE" };
+    const red: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "RED" };
+    saveAutonDraft({ ...red, undoStack: [blue], redoStack: [] });
+
+    expect(loadAutonDraft()?.undoStack?.[0].alliance).toBe("BLUE");
+    expect(loadAutonDraft()?.alliance).toBe("RED");
+  });
+
+  it("keeps the alliance when a full draft will not fit", () => {
+    const writes: string[] = [];
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        localStorage: {
+          getItem: () => null,
+          removeItem: () => {},
+          setItem: (_key: string, value: string) => {
+            writes.push(value);
+            if (writes.length === 1) throw new Error("QuotaExceededError");
+          },
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "RED" };
+    saveAutonDraft({ ...current, undoStack: [current], redoStack: [current] });
+
+    expect(JSON.parse(writes[1]).alliance).toBe("RED");
+  });
+
   it("keeps history bounded so a long session cannot outgrow the quota", () => {
     const short = [1, 2, 3];
     expect(limitHistoryDepth(short)).toBe(short);
@@ -217,7 +273,7 @@ describe("auton draft persistence", () => {
   });
 
   it("trims a stored draft whose history predates the cap", () => {
-    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "BLUE" };
     store({ ...current, undoStack: Array.from({ length: MAX_HISTORY_DEPTH + 10 }, () => current) });
 
     expect(loadAutonDraft()?.undoStack).toHaveLength(MAX_HISTORY_DEPTH);
@@ -241,7 +297,7 @@ describe("auton draft persistence", () => {
       writable: true,
     });
 
-    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [] };
+    const current: PlannerSnapshot = { points: [startPoint], sequenceItems: [], alliance: "BLUE" };
     saveAutonDraft({ ...current, undoStack: [current], redoStack: [current] });
 
     expect(writes).toHaveLength(2);
@@ -264,6 +320,6 @@ describe("auton draft persistence", () => {
     });
 
     // A full quota must never interrupt editing.
-    expect(() => saveAutonDraft({ points: [startPoint], sequenceItems: [] })).not.toThrow();
+    expect(() => saveAutonDraft({ points: [startPoint], sequenceItems: [], alliance: "BLUE" })).not.toThrow();
   });
 });

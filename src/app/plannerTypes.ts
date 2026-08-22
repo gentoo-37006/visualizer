@@ -60,6 +60,7 @@ export type AutonSequenceItem = AutonActionItem | AutonPathItem;
 export type PlannerSnapshot = {
   points: Point[];
   sequenceItems: AutonSequenceItem[];
+  alliance: AutonAlliance;
 };
 
 export type PlannerHistoryState = {

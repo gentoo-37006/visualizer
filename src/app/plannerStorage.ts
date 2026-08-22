@@ -274,7 +274,10 @@ const sanitizeSequenceItem = (value: unknown, unclaimedPointIds: Set<string>): A
   };
 };
 
-const sanitizePlannerSnapshot = (value: unknown): PlannerSnapshot | null => {
+const sanitizeAlliance = (value: unknown, fallback: AutonAlliance): AutonAlliance =>
+  value === "BLUE" || value === "RED" ? value : fallback;
+
+const sanitizePlannerSnapshot = (value: unknown, fallbackAlliance: AutonAlliance): PlannerSnapshot | null => {
   if (typeof value !== "object" || value === null) return null;
 
   const candidate = value as Partial<PlannerSnapshot>;
@@ -299,10 +302,16 @@ const sanitizePlannerSnapshot = (value: unknown): PlannerSnapshot | null => {
     sequenceItems.push({ id: generateId(), kind: "path", pointId: point.id });
   });
 
-  return { points, sequenceItems };
+  return { points, sequenceItems, alliance: sanitizeAlliance(candidate.alliance, fallbackAlliance) };
 };
 
-export const loadAutonDraft = (): PersistedPlannerDraft | null => {
+/**
+ * `fallbackAlliance` covers drafts written before the alliance became part of a
+ * snapshot: without it every one of them would silently come back as BLUE.
+ */
+export const loadAutonDraft = (
+  fallbackAlliance: AutonAlliance = DEFAULT_AUTON_ALLIANCE
+): PersistedPlannerDraft | null => {
   if (typeof window === "undefined") return null;
 
   const storedDraft = window.localStorage.getItem(AUTON_DRAFT_STORAGE_KEY);
@@ -310,7 +319,7 @@ export const loadAutonDraft = (): PersistedPlannerDraft | null => {
 
   try {
     const parsedDraft: unknown = JSON.parse(storedDraft);
-    const snapshot = sanitizePlannerSnapshot(parsedDraft);
+    const snapshot = sanitizePlannerSnapshot(parsedDraft, fallbackAlliance);
     if (!snapshot || typeof parsedDraft !== "object" || parsedDraft === null) return null;
 
     const candidate = parsedDraft as { undoStack?: unknown; redoStack?: unknown };
@@ -318,7 +327,7 @@ export const loadAutonDraft = (): PersistedPlannerDraft | null => {
       Array.isArray(stack)
         ? limitHistoryDepth(
             stack
-              .map(sanitizePlannerSnapshot)
+              .map((entry) => sanitizePlannerSnapshot(entry, fallbackAlliance))
               .filter((entry): entry is PlannerSnapshot => entry !== null)
           )
         : undefined;
@@ -351,8 +360,11 @@ export const saveAutonDraft = (snapshot: PersistedPlannerDraft) => {
   // History is the bulk of a draft and the part worth least: losing undo beats
   // losing the auton, so try again with just the routine itself.
   try {
-    const { points, sequenceItems } = snapshot;
-    window.localStorage.setItem(AUTON_DRAFT_STORAGE_KEY, JSON.stringify({ points, sequenceItems }));
+    const { points, sequenceItems, alliance } = snapshot;
+    window.localStorage.setItem(
+      AUTON_DRAFT_STORAGE_KEY,
+      JSON.stringify({ points, sequenceItems, alliance })
+    );
   } catch {
     // Nothing else to give up; the draft stays in memory for this session.
   }
