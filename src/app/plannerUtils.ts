@@ -4,7 +4,7 @@ import {
   FIELD_SIZE_INCHES,
   POINT_RADIUS,
 } from "./plannerConstants";
-import type { ControlPoint, DragTarget, FieldSize, HeadingInterpolation } from "./plannerTypes";
+import type { ControlPoint, DragTarget, FieldSize, HeadingInterpolation, Point } from "./plannerTypes";
 
 export const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -26,6 +26,32 @@ export const normalizeHeading = (degrees: number) => {
   const normalized = ((((degrees + 180) % 360) + 360) % 360) - 180;
   return normalized === -180 && degrees > 0 ? 180 : normalized;
 };
+
+export const mirrorAutonPoints = (points: Point[]): Point[] =>
+  points.map((point) => {
+    const mirroredPoint: Point = { ...point, nx: 1 - point.nx };
+
+    delete mirroredPoint.poseName;
+    if (point.heading !== undefined) mirroredPoint.heading = normalizeHeading(-point.heading);
+    if (point.constantHeading !== undefined) {
+      mirroredPoint.constantHeading = normalizeHeading(-point.constantHeading);
+    }
+    if (point.startHeading !== undefined) {
+      mirroredPoint.startHeading = normalizeHeading(-point.startHeading);
+    }
+    if (point.endHeading !== undefined) {
+      mirroredPoint.endHeading = normalizeHeading(-point.endHeading);
+    }
+    if (point.controlPoints) {
+      mirroredPoint.controlPoints = point.controlPoints.map((controlPoint) => {
+        const mirroredControlPoint = { ...controlPoint, nx: 1 - controlPoint.nx };
+        delete mirroredControlPoint.poseName;
+        return mirroredControlPoint;
+      });
+    }
+
+    return mirroredPoint;
+  });
 
 export const isNumericDraft = (value: string) => /^-?(?:\d+)?(?:\.\d*)?$/.test(value);
 

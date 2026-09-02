@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isKotlinIdentifierDraft,
   isNumericDraft,
+  mirrorAutonPoints,
   normalizeHeading,
   toFieldCoords,
   toNormalizedCoords,
@@ -59,6 +60,69 @@ describe("normalizeHeading", () => {
     for (const heading of [0, 37, -37, 180, -180, 359, -359, 1000]) {
       expect(normalizeHeading(normalizeHeading(heading))).toBe(normalizeHeading(heading));
     }
+  });
+});
+
+describe("mirrorAutonPoints", () => {
+  it("mirrors every position and explicit heading while preserving path settings", () => {
+    const points = [
+      {
+        id: "start",
+        nx: 0.2,
+        ny: 0.3,
+        color: "#fff",
+        locked: true,
+        heading: 30,
+        poseName: "BLUE_START",
+      },
+      {
+        id: "path",
+        name: "score",
+        nx: 0.75,
+        ny: 0.8,
+        color: "#0ff",
+        locked: false,
+        headingMode: "linear" as const,
+        constantHeading: 45,
+        startHeading: -170,
+        endHeading: 90,
+        linearStartT: 0.2,
+        linearEndT: 0.7,
+        tangentReversed: true,
+        poseName: "SCORE",
+        controlPoints: [
+          { id: "control", nx: 0.1, ny: 0.6, poseName: "CONTROL" },
+        ],
+      },
+    ];
+
+    const mirrored = mirrorAutonPoints(points);
+
+    expect(mirrored[0]).toMatchObject({ nx: 0.8, ny: 0.3, heading: -30 });
+    expect(mirrored[1]).toMatchObject({
+      nx: 0.25,
+      ny: 0.8,
+      headingMode: "linear",
+      constantHeading: -45,
+      startHeading: 170,
+      endHeading: -90,
+      linearStartT: 0.2,
+      linearEndT: 0.7,
+      tangentReversed: true,
+    });
+    expect(mirrored[1].controlPoints?.[0]).toEqual({ id: "control", nx: 0.9, ny: 0.6 });
+    expect(mirrored[0]).not.toHaveProperty("poseName");
+    expect(mirrored[1]).not.toHaveProperty("poseName");
+  });
+
+  it("does not mutate the current auton", () => {
+    const points = [
+      { id: "start", nx: 0.2, ny: 0.3, color: "#fff", locked: true, heading: 30 },
+    ];
+
+    mirrorAutonPoints(points);
+
+    expect(points[0]).toMatchObject({ nx: 0.2, ny: 0.3, heading: 30 });
   });
 });
 

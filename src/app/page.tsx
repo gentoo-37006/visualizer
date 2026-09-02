@@ -54,6 +54,7 @@ import {
   isKotlinIdentifierDraft,
   isNumericDraft,
   mainPointHitRadius,
+  mirrorAutonPoints,
   normalizeHeading,
   targetPathIndex,
   toFieldCoords,
@@ -564,6 +565,15 @@ export default function PathPlannerPage() {
     setIsDragging(false);
     setPlaybackTime(0);
     setIsPlaybackRunning(false);
+  };
+
+  const handleMirrorAuton = () => {
+    const nextPoints = mirrorAutonPoints(pointsRef.current);
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
+    setHoverTarget(null);
+    setActiveTarget(null);
+    setIsDragging(false);
   };
 
   const handleAddAction = () => {
@@ -1603,6 +1613,7 @@ export default function PathPlannerPage() {
           onActionTimeoutChange={handleActionTimeoutChange}
           onRemoveAction={handleRemoveAction}
           onClearAuton={handleClearAuton}
+          onMirrorAuton={handleMirrorAuton}
           pathDurations={pathDurations}
           outOfBoundsPointIds={outOfBoundsPointIds}
           onAddPoint={handleAddPoint}

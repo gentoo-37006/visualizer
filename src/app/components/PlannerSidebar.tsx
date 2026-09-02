@@ -113,6 +113,7 @@ type PlannerSidebarProps = {
   pathDurations: Map<string, number>;
   outOfBoundsPointIds: Set<string>;
   onClearAuton: () => void;
+  onMirrorAuton: () => void;
   onAddPoint: () => void;
   onAddAction: () => void;
   onToggleActionsHidden: () => void;
@@ -185,6 +186,7 @@ export function PlannerSidebar({
   pathDurations,
   outOfBoundsPointIds,
   onClearAuton,
+  onMirrorAuton,
   onAddPoint,
   onAddAction,
   onToggleActionsHidden,
@@ -240,6 +242,20 @@ export function PlannerSidebar({
                 </span>
               )}
             </span>
+            <button
+              className={styles.secondaryIconButton}
+              onClick={onMirrorAuton}
+              aria-label="Mirror auton"
+              title="Mirror auton"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="3" x2="12" y2="21"></line>
+                <path d="M8 8 4 12l4 4"></path>
+                <line x1="4" y1="12" x2="9" y2="12"></line>
+                <path d="m16 8 4 4-4 4"></path>
+                <line x1="15" y1="12" x2="20" y2="12"></line>
+              </svg>
+            </button>
             <button className={styles.secondaryIconButton} onClick={onUndo} aria-disabled={undoStackLength === 0} aria-label="Undo" title="Undo">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7v6h6"></path>
