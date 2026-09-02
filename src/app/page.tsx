@@ -126,6 +126,7 @@ export default function PathPlannerPage() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [isPlaybackRunning, setIsPlaybackRunning] = useState(false);
   const [areActionsHidden, setAreActionsHidden] = useState(false);
+  const [areControlPointsHidden, setAreControlPointsHidden] = useState(false);
   const [fieldImageSelection, setFieldImageSelection] = useState<FieldImageSelection>(
     DEFAULT_FIELD_IMAGE_SELECTION
   );
@@ -217,6 +218,7 @@ export default function PathPlannerPage() {
     [sequenceItems, points]
   );
   const hasActions = orderedSequenceItems.some((item) => item.kind === "action");
+  const hasControlPoints = points.some((point) => (point.controlPoints?.length ?? 0) > 0);
 
   const playbackTimeline = useMemo(
     () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants, motionParameters),
@@ -1373,7 +1375,7 @@ export default function PathPlannerPage() {
     for (let i = points.length - 1; i >= 0; i--) {
       if (points[i].locked) continue;
       const controlPoints = points[i].controlPoints ?? [];
-      if (!points[i].hidden) {
+      if (!areControlPointsHidden && !points[i].hidden) {
         for (let j = controlPoints.length - 1; j >= 0; j--) {
           const dx = controlPoints[j].nx - nx;
           const dy = controlPoints[j].ny - ny;
@@ -1542,6 +1544,7 @@ export default function PathPlannerPage() {
         isRobotOutOfBounds={isRobotOutOfBounds}
         playbackPose={playbackPose}
         isPointVisible={isPointVisible}
+        areControlPointsHidden={areControlPointsHidden}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1564,7 +1567,9 @@ export default function PathPlannerPage() {
           redoStackLength={redoStack.length}
           isShiftPressed={isShiftPressed}
           areActionsHidden={areActionsHidden}
+          areControlPointsHidden={areControlPointsHidden}
           hasActions={hasActions}
+          hasControlPoints={hasControlPoints}
           draggingPathIndex={draggingPathIndex}
           pathDropGapIndex={pathDropGapIndex}
           importInputRef={importInputRef}
@@ -1618,6 +1623,7 @@ export default function PathPlannerPage() {
           outOfBoundsPointIds={outOfBoundsPointIds}
           onAddPoint={handleAddPoint}
           onAddAction={handleAddAction}
+          onToggleControlPointsHidden={() => setAreControlPointsHidden((currentValue) => !currentValue)}
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}
           onUpdateMotionParameter={updateMotionParameter}
           onFormatMotionParameter={formatMotionParameter}

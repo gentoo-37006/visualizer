@@ -29,6 +29,7 @@ type FieldCanvasProps = {
   robotSvgFrame: RobotSvgFrame;
   playbackPose: PlaybackPose;
   isRobotOutOfBounds: boolean;
+  areControlPointsHidden: boolean;
   isPointVisible: (index: number) => boolean;
   onPointerDown: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerMove: (event: ReactPointerEvent<SVGSVGElement>) => void;
@@ -49,6 +50,7 @@ export function FieldCanvas({
   robotSvgFrame,
   playbackPose,
   isRobotOutOfBounds,
+  areControlPointsHidden,
   isPointVisible,
   onPointerDown,
   onPointerMove,
@@ -83,7 +85,7 @@ export function FieldCanvas({
           style={{ cursor: isDragging ? "grabbing" : (hoverTarget !== null ? "grab" : "default") }}
           viewBox={`0 0 ${fieldSize.width + POINT_DIAMETER} ${fieldSize.height + POINT_DIAMETER}`}
         >
-          {hasMeasuredField && points.map((point, index) => {
+          {hasMeasuredField && !areControlPointsHidden && points.map((point, index) => {
             if (index === points.length - 1) return null;
             const nextPoint = points[index + 1];
             if (nextPoint.hidden || !nextPoint.controlPoints?.length) return null;
@@ -213,7 +215,7 @@ export function FieldCanvas({
             );
           })}
 
-          {hasMeasuredField && points.map((point, index) =>
+          {hasMeasuredField && !areControlPointsHidden && points.map((point, index) =>
             point.hidden ? null : (point.controlPoints ?? []).map((controlPoint, controlIndex) => {
               const { x, y } = toSvgPixelCoords(controlPoint.nx, controlPoint.ny, fieldSize);
               const isHovered =

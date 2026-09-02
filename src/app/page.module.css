@@ -861,25 +861,60 @@
   background-color: #ea580c;
 }
 
-.toggleActionsButton {
+.visibilityToggleButton {
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
   background-color: #374151;
+  padding-inline: 0;
 }
 
-.addButton.toggleActionsButton:hover {
+.addButton.visibilityToggleButton:hover {
   background-color: #4b5563;
 }
 
-.actionsHiddenButton {
+.actionsVisibleButton {
+  background-color: #f97316;
+}
+
+.addButton.actionsVisibleButton:hover {
+  background-color: #ea580c;
+}
+
+.controlPointsVisibleButton {
+  background-color: #22c55e;
+}
+
+.addButton.controlPointsVisibleButton:hover {
+  background-color: #16a34a;
+}
+
+.visibilityHiddenButton {
   background-color: #6b7280;
 }
 
-.addButton.actionsHiddenButton:hover {
+.addButton.visibilityHiddenButton:hover {
   background-color: #7c8798;
+}
+
+.addButton.visibilityToggleButton[aria-disabled="true"]:hover {
+  background-color: #374151;
+}
+
+.addButton.visibilityToggleButton.visibilityHiddenButton[aria-disabled="true"]:hover {
+  background-color: #6b7280;
+}
+
+.addButton.visibilityToggleButton.controlPointsVisibleButton[aria-disabled="true"]:hover {
+  background-color: #22c55e;
+}
+
+.addButton.visibilityToggleButton.actionsVisibleButton[aria-disabled="true"]:hover {
+  background-color: #f97316;
 }
 
 .addButton:hover {
   background-color: var(--primary-hover);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .addButton:disabled,
