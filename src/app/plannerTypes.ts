@@ -3,13 +3,22 @@ export type ControlPoint = {
   nx: number;
   ny: number;
   poseName?: string;
+  pathGeometry?: PathGeometry;
+  startControlOffsetNx?: number;
+  startControlOffsetNy?: number;
+  endControlOffsetNx?: number;
+  endControlOffsetNy?: number;
+  /** Legacy symmetric node handle, read only while migrating saved drafts. */
+  controlOffsetNx?: number;
+  controlOffsetNy?: number;
 };
 
 export type HeadingInterpolation = "constant" | "linear" | "tangential";
+export type PathGeometry = "linear" | "spline";
 export type PathHeadingField = "constant" | "start" | "end" | "startT" | "endT";
-export type AutonActionMode = "start" | "run" | "stop";
+export type AutonActionMode = "submit" | "run" | "remove";
 export type AutonAlliance = "BLUE" | "RED";
-export type PathActionTriggerMode = "start" | "stop";
+export type PathActionTriggerMode = "submit" | "remove";
 
 export type PathActionTrigger = {
   id: string;
@@ -34,6 +43,14 @@ export type Point = {
   linearStartT?: number;
   linearEndT?: number;
   tangentReversed?: boolean;
+  /** Geometry of the final segment; earlier segments live in controlPoints. */
+  pathGeometry?: PathGeometry;
+  segmentId?: string;
+  startControlOffsetNx?: number;
+  startControlOffsetNy?: number;
+  endControlOffsetNx?: number;
+  endControlOffsetNy?: number;
+  /** Segments before the final segment. The legacy key is retained for saved-draft compatibility. */
   controlPoints?: ControlPoint[];
   controlsExpanded?: boolean;
   actionsExpanded?: boolean;
@@ -78,7 +95,13 @@ export type MotionParameters = {
 
 export type DragTarget =
   | { kind: "point"; index: number }
-  | { kind: "control"; pathIndex: number; controlIndex: number };
+  | { kind: "segmentEnd"; pathIndex: number; segmentIndex: number }
+  | {
+      kind: "segmentControl";
+      pathIndex: number;
+      segmentIndex: number;
+      control: "start" | "end";
+    };
 
 export type FieldSize = {
   width: number;

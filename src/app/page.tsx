@@ -43,19 +43,27 @@ import type {
   HeadingInterpolation,
   MotionParameters,
   PathActionTriggerMode,
+  PathGeometry,
   PathHeadingField,
   PlannerSnapshot,
   Point,
 } from "./plannerTypes";
 import {
+  applyPathSegments,
   controlPointHitRadius,
+  createForwardPathSegment,
   createDefaultHeadingValues,
   generateId,
+  getPathSegments,
+  getPathEndTangent,
+  headingToNormalizedTangent,
+  isSegmentControlLockedByLinearNeighbor,
   isKotlinIdentifierDraft,
   isNumericDraft,
   mainPointHitRadius,
   mirrorAutonPoints,
   normalizeHeading,
+  resolvePathSegments,
   targetPathIndex,
   toFieldCoords,
   toNormalizedCoords,
@@ -218,7 +226,9 @@ export default function PathPlannerPage() {
     [sequenceItems, points]
   );
   const hasActions = orderedSequenceItems.some((item) => item.kind === "action");
-  const hasControlPoints = points.some((point) => (point.controlPoints?.length ?? 0) > 0);
+  const hasControlPoints = points.some((point, index) =>
+    index > 0 && getPathSegments(point).some((segment) => segment.pathGeometry === "spline")
+  );
 
   const playbackTimeline = useMemo(
     () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants, motionParameters),
@@ -534,18 +544,38 @@ export default function PathPlannerPage() {
   const handleAddPoint = () => {
     pushCurrentSnapshot();
     const seed = points.length > 0 ? points[points.length - 1] : { nx: 0.5, ny: 0.5 };
+    const previousPoint = points.length > 1 ? points[points.length - 2] : null;
+    const seedPoint = seed as Point;
+    const fallbackHeading = seedPoint.headingMode === "linear"
+      ? seedPoint.endHeading ?? 0
+      : seedPoint.headingMode === "constant"
+        ? seedPoint.constantHeading ?? 0
+        : seedPoint.heading ?? 0;
     const pointId = generateId();
+    const previousTangent = previousPoint ? getPathEndTangent(previousPoint, seedPoint) : null;
+    const initialSegment = createForwardPathSegment(
+      seed,
+      previousTangent ?? headingToNormalizedTangent(fallbackHeading),
+      "spline",
+      generateId()
+    );
     setPlannerPoints([
       ...points,
       {
         id: pointId,
         name: `path${points.length}`,
-        nx: seed.nx,
-        ny: seed.ny,
+        nx: initialSegment.nx,
+        ny: initialSegment.ny,
         color: seededColor(pointId),
         locked: false,
         hidden: false,
         ...createDefaultHeadingValues(),
+        pathGeometry: initialSegment.pathGeometry,
+        segmentId: initialSegment.id,
+        startControlOffsetNx: initialSegment.startControlOffsetNx,
+        startControlOffsetNy: initialSegment.startControlOffsetNy,
+        endControlOffsetNx: initialSegment.endControlOffsetNx,
+        endControlOffsetNy: initialSegment.endControlOffsetNy,
       },
     ]);
     setPlannerSequenceItems([
@@ -582,7 +612,7 @@ export default function PathPlannerPage() {
     pushCurrentSnapshot();
     setPlannerSequenceItems([
       ...getSequenceItemsWithPaths(sequenceItemsRef.current, pointsRef.current),
-      { id: generateId(), kind: "action", name: "ACTION", mode: "start", timeout: 1.0 },
+      { id: generateId(), kind: "action", name: "ACTION", mode: "submit", timeout: 1.0 },
     ]);
   };
 
@@ -883,17 +913,52 @@ export default function PathPlannerPage() {
     );
   };
 
-  const updateControlPoint = (pathIndex: number, controlIndex: number, nx: number, ny: number) => {
+  const updateSegmentEnd = (pathIndex: number, segmentIndex: number, nx: number, ny: number) => {
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) => {
         if (i !== pathIndex) return point;
-        return {
-          ...point,
-          controlPoints: (point.controlPoints ?? []).map((controlPoint, j) =>
-            j === controlIndex ? { ...controlPoint, nx, ny } : controlPoint
-          ),
-        };
+        const segments = getPathSegments(point).map((segment, index) =>
+          index === segmentIndex ? { ...segment, nx, ny, poseName: undefined } : segment
+        );
+        return applyPathSegments(point, segments);
+      })
+    );
+  };
+
+  const updateSegmentControl = (
+    pathIndex: number,
+    segmentIndex: number,
+    control: "start" | "end",
+    nx: number,
+    ny: number
+  ) => {
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
+    setPlannerPoints((currentPoints) =>
+      currentPoints.map((point, pointIndex) => {
+        if (pointIndex !== pathIndex) return point;
+        const segments = getPathSegments(point);
+        if (isSegmentControlLockedByLinearNeighbor(segments, segmentIndex, control)) return point;
+        const resolved = resolvePathSegments(currentPoints[pathIndex - 1], segments)[segmentIndex];
+        if (!resolved || segments[segmentIndex]?.pathGeometry !== "spline") return point;
+
+        const offsetNx = control === "start" ? nx - resolved.start.x : resolved.end.x - nx;
+        const offsetNy = control === "start" ? ny - resolved.start.y : resolved.end.y - ny;
+        const nextSegments = segments.map((segment, index) => {
+          if (index === segmentIndex) {
+            return control === "start"
+              ? { ...segment, startControlOffsetNx: offsetNx, startControlOffsetNy: offsetNy }
+              : { ...segment, endControlOffsetNx: offsetNx, endControlOffsetNy: offsetNy };
+          }
+          if (control === "start" && index === segmentIndex - 1 && segment.pathGeometry === "spline") {
+            return { ...segment, endControlOffsetNx: offsetNx, endControlOffsetNy: offsetNy };
+          }
+          if (control === "end" && index === segmentIndex + 1 && segment.pathGeometry === "spline") {
+            return { ...segment, startControlOffsetNx: offsetNx, startControlOffsetNy: offsetNy };
+          }
+          return segment;
+        });
+        return applyPathSegments(point, nextSegments);
       })
     );
   };
@@ -901,8 +966,10 @@ export default function PathPlannerPage() {
   const updateTargetPosition = (target: DragTarget, nx: number, ny: number) => {
     if (target.kind === "point") {
       updatePoint(target.index, nx, ny);
+    } else if (target.kind === "segmentEnd") {
+      updateSegmentEnd(target.pathIndex, target.segmentIndex, nx, ny);
     } else {
-      updateControlPoint(target.pathIndex, target.controlIndex, nx, ny);
+      updateSegmentControl(target.pathIndex, target.segmentIndex, target.control, nx, ny);
     }
   };
 
@@ -923,24 +990,38 @@ export default function PathPlannerPage() {
   };
 
   const handleAddControlPoint = (index: number) => {
-    pushCurrentSnapshot();
-    setPlannerPoints((currentPoints) =>
-      currentPoints.map((point, i) => {
-        if (i !== index) return point;
-        const controlPoints = point.controlPoints ?? [];
-        const previousPoint = currentPoints[index - 1];
-        const seed = controlPoints[controlPoints.length - 1] ?? {
-          nx: previousPoint ? (previousPoint.nx + point.nx) / 2 : point.nx,
-          ny: previousPoint ? (previousPoint.ny + point.ny) / 2 : point.ny,
-        };
+    const currentPoints = pointsRef.current;
+    const previousPoint = currentPoints[index - 1];
+    if (!previousPoint || !currentPoints[index]) return;
 
-        return {
-          ...point,
-          controlPoints: [...controlPoints, { id: generateId(), nx: seed.nx, ny: seed.ny }],
-          controlsExpanded: true,
-        };
-      })
-    );
+    const nextPoints = currentPoints.map((point, pointIndex) => {
+      if (pointIndex !== index) return point;
+      const segments = getPathSegments(point);
+      const finalSegment = segments.at(-1)!;
+      const fallbackHeading = point.headingMode === "linear"
+        ? point.endHeading ?? 0
+        : point.headingMode === "constant"
+          ? point.constantHeading ?? 0
+          : 0;
+      const previousTangent = getPathEndTangent(previousPoint, point);
+      const nextSegment = createForwardPathSegment(
+        finalSegment,
+        previousTangent ?? headingToNormalizedTangent(fallbackHeading),
+        finalSegment.pathGeometry,
+        generateId(),
+        previousTangent
+      );
+      return {
+        ...applyPathSegments(point, [
+          ...segments,
+          nextSegment,
+        ]),
+        controlsExpanded: true,
+      };
+    });
+
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
   };
 
   const handleControlCoordChange = (
@@ -949,10 +1030,10 @@ export default function PathPlannerPage() {
     axis: "x" | "y",
     value: string
   ) => {
-    const controlPoint = points[pathIndex].controlPoints?.[controlIndex];
-    if (!controlPoint) return;
+    const segment = getPathSegments(points[pathIndex])[controlIndex];
+    if (!segment) return;
 
-    const currentField = toFieldCoords(controlPoint.nx, controlPoint.ny);
+    const currentField = toFieldCoords(segment.nx, segment.ny);
     const num = parseFloat(value);
     if (isNaN(num)) return;
 
@@ -963,25 +1044,31 @@ export default function PathPlannerPage() {
     if (axis === "y") newY = num;
 
     const { nx, ny } = toNormalizedCoords(newX, newY);
-    updateControlPoint(pathIndex, controlIndex, nx, ny);
+    updateSegmentEnd(pathIndex, controlIndex, nx, ny);
   };
 
   const handleRemoveControlPoint = (pathIndex: number, controlIndex: number) => {
+    if (getPathSegments(pointsRef.current[pathIndex]).length <= 1) return;
     pushCurrentSnapshot();
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, pointIndex) =>
         pointIndex === pathIndex
-          ? {
-              ...point,
-              controlPoints: (point.controlPoints ?? []).filter((_, index) => index !== controlIndex),
-            }
+          ? applyPathSegments(point, getPathSegments(point).filter((_, index) => index !== controlIndex))
           : point
       )
     );
-    if (activeTarget?.kind === "control" && activeTarget.pathIndex === pathIndex && activeTarget.controlIndex === controlIndex) {
+    if (
+      (activeTarget?.kind === "segmentEnd" || activeTarget?.kind === "segmentControl") &&
+      activeTarget.pathIndex === pathIndex &&
+      activeTarget.segmentIndex === controlIndex
+    ) {
       setActiveTarget(null);
     }
-    if (hoverTarget?.kind === "control" && hoverTarget.pathIndex === pathIndex && hoverTarget.controlIndex === controlIndex) {
+    if (
+      (hoverTarget?.kind === "segmentEnd" || hoverTarget?.kind === "segmentControl") &&
+      hoverTarget.pathIndex === pathIndex &&
+      hoverTarget.segmentIndex === controlIndex
+    ) {
       setHoverTarget(null);
     }
   };
@@ -992,7 +1079,7 @@ export default function PathPlannerPage() {
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, pointIndex) => {
         if (pointIndex !== pathIndex) return point;
-        const controlPoints = [...(point.controlPoints ?? [])];
+        const controlPoints = getPathSegments(point);
         if (
           fromIndex < 0 ||
           toIndex < 0 ||
@@ -1003,7 +1090,7 @@ export default function PathPlannerPage() {
         }
         const [movedControlPoint] = controlPoints.splice(fromIndex, 1);
         controlPoints.splice(toIndex, 0, movedControlPoint);
-        return { ...point, controlPoints };
+        return applyPathSegments(point, controlPoints);
       })
     );
   };
@@ -1089,6 +1176,23 @@ export default function PathPlannerPage() {
     );
   };
 
+  const handleSegmentGeometryChange = (index: number, segmentIndex: number, pathGeometry: PathGeometry) => {
+    const nextPoints = pointsRef.current.map((point, pointIndex) =>
+      pointIndex === index
+        ? applyPathSegments(
+            point,
+            getPathSegments(point).map((segment, currentSegmentIndex) =>
+              currentSegmentIndex === segmentIndex ? { ...segment, pathGeometry } : segment
+            )
+          )
+        : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
+    setHoverTarget(null);
+    setActiveTarget(null);
+  };
+
   const handlePathHeadingChange = (index: number, field: PathHeadingField, value: string) => {
     const parsedValue = parseFloat(value);
     if (isNaN(parsedValue)) return;
@@ -1125,7 +1229,7 @@ export default function PathPlannerPage() {
               ...point,
               actionTriggers: [
                 ...(point.actionTriggers ?? []),
-                { id: generateId(), mode: "start", t: 0, actionName: "ACTION" },
+                { id: generateId(), mode: "submit", t: 0, actionName: "ACTION" },
               ],
               actionsExpanded: true,
             }
@@ -1374,16 +1478,30 @@ export default function PathPlannerPage() {
 
     for (let i = points.length - 1; i >= 0; i--) {
       if (points[i].locked) continue;
-      const controlPoints = points[i].controlPoints ?? [];
-      if (!areControlPointsHidden && !points[i].hidden) {
-        for (let j = controlPoints.length - 1; j >= 0; j--) {
-          const dx = controlPoints[j].nx - nx;
-          const dy = controlPoints[j].ny - ny;
-          if (Math.sqrt(dx * dx + dy * dy) <= controlPointHitRadius(minFieldSize)) {
-            return { kind: "control", pathIndex: i, controlIndex: j } as DragTarget;
+      if (i > 0 && !points[i].hidden) {
+        const segments = getPathSegments(points[i]);
+        const resolvedSegments = resolvePathSegments(points[i - 1], segments);
+        for (let segmentIndex = segments.length - 1; segmentIndex >= 0; segmentIndex--) {
+          const resolved = resolvedSegments[segmentIndex];
+          if (!areControlPointsHidden && resolved.control1 && resolved.control2) {
+            for (const [control, handle] of [["start", resolved.control1], ["end", resolved.control2]] as const) {
+              if (isSegmentControlLockedByLinearNeighbor(segments, segmentIndex, control)) continue;
+              const dx = handle.x - nx;
+              const dy = handle.y - ny;
+              if (Math.hypot(dx, dy) <= controlPointHitRadius(minFieldSize)) {
+                return { kind: "segmentControl", pathIndex: i, segmentIndex, control } as DragTarget;
+              }
+            }
+          }
+
+          const dx = segments[segmentIndex].nx - nx;
+          const dy = segments[segmentIndex].ny - ny;
+          if (Math.hypot(dx, dy) <= mainPointHitRadius(minFieldSize)) {
+            return { kind: "segmentEnd", pathIndex: i, segmentIndex } as DragTarget;
           }
         }
       }
+      if (i > 0) continue;
       if (!isPointVisible(i)) continue;
 
       const dx = points[i].nx - nx;
@@ -1599,6 +1717,7 @@ export default function PathPlannerPage() {
           onHeadingChange={handleHeadingChange}
           onRenamePath={handleRenamePath}
           onPathInterpolationChange={handlePathInterpolationChange}
+          onSegmentGeometryChange={handleSegmentGeometryChange}
           onPathHeadingChange={handlePathHeadingChange}
           onPathTangentReversedChange={handlePathTangentReversedChange}
           onToggleActionsExpanded={handleToggleActionsExpanded}

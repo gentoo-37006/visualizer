@@ -1,7 +1,7 @@
 import type { RobotConstants } from "./kotlinAutonFile";
 import { FIELD_SIZE_INCHES, INITIAL_POINT_COLOR } from "./plannerConstants";
 import type { AutonSequenceItem, MotionParameters, Point } from "./plannerTypes";
-import { normalizeHeading } from "./plannerUtils";
+import { getPathSegments, normalizeHeading, samplePathSegments } from "./plannerUtils";
 
 export type PlaybackPose = {
   nx: number;
@@ -72,19 +72,6 @@ export const interpolateHeadingRange = (start: number, end: number, t: number, s
   if (t >= clampedEndT) return normalizeHeading(end);
   const localT = (t - clampedStartT) / (clampedEndT - clampedStartT);
   return interpolateHeading(start, end, smoothInterpolationT(localT));
-};
-
-const interpolateBezierPoint = (points: Array<{ nx: number; ny: number }>, t: number) => {
-  let workingPoints = points.map((point) => ({ ...point }));
-
-  while (workingPoints.length > 1) {
-    workingPoints = workingPoints.slice(0, -1).map((point, index) => ({
-      nx: interpolateNumber(point.nx, workingPoints[index + 1].nx, t),
-      ny: interpolateNumber(point.ny, workingPoints[index + 1].ny, t),
-    }));
-  }
-
-  return workingPoints[0];
 };
 
 const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny: number }) => {
@@ -223,15 +210,10 @@ export const buildPlaybackTimeline = (
     const previousPoint = points[pointIndex - 1];
     if (!point || !previousPoint) return;
 
-    const bezierPoints = [
-      previousPoint,
-      ...(point.controlPoints ?? []),
-      point,
-    ].map((pathPoint) => ({ nx: pathPoint.nx, ny: pathPoint.ny }));
-    const sampleCount = Math.max(48, (point.controlPoints?.length ?? 0) * 20);
-    const positionSamples = Array.from({ length: sampleCount + 1 }, (_, index) =>
-      interpolateBezierPoint(bezierPoints, index / sampleCount)
-    );
+    const positionSamples = samplePathSegments(previousPoint, getPathSegments(point), 32).map((sample) => ({
+      nx: sample.x,
+      ny: sample.y,
+    }));
     const headingMode = point.headingMode ?? "constant";
     const samples = positionSamples.map((sample, index) => {
       const t = index / Math.max(1, positionSamples.length - 1);

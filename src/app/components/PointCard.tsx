@@ -2,9 +2,9 @@
 
 import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import styles from "../page.module.css";
-import type { HeadingInterpolation, PathActionTrigger, PathActionTriggerMode, PathHeadingField } from "../plannerTypes";
+import type { HeadingInterpolation, PathActionTrigger, PathActionTriggerMode, PathGeometry, PathHeadingField } from "../plannerTypes";
 import { isKotlinIdentifierDraft, isNumericDraft } from "../plannerUtils";
-import { ControlPointCard } from "./ControlPointCard";
+import { SegmentCard } from "./ControlPointCard";
 
 type PointCardProps = {
   index: number;
@@ -25,7 +25,7 @@ type PointCardProps = {
   linearStartT: number;
   linearEndT: number;
   tangentReversed?: boolean;
-  controlPoints: Array<{ id: string; x: number; y: number }>;
+  controlPoints: Array<{ id: string; x: number; y: number; pathGeometry: PathGeometry }>;
   actionTriggers?: PathActionTrigger[];
   actionsExpanded: boolean;
   controlPointCount: number;
@@ -57,6 +57,7 @@ type PointCardProps = {
   onToggleControlsExpanded?: () => void;
   onAddControlPoint?: () => void;
   onControlPointChange?: (controlIndex: number, axis: "x" | "y", val: string) => void;
+  onSegmentGeometryChange?: (controlIndex: number, pathGeometry: PathGeometry) => void;
   onRemoveControlPoint?: (controlIndex: number) => void;
   onReorderControlPoint?: (fromIndex: number, toIndex: number) => void;
   onControlPointEditStart: () => void;
@@ -112,6 +113,7 @@ export function PointCard({
   onToggleControlsExpanded,
   onAddControlPoint,
   onControlPointChange,
+  onSegmentGeometryChange,
   onRemoveControlPoint,
   onReorderControlPoint,
   onControlPointEditStart,
@@ -452,7 +454,7 @@ export function PointCard({
             </select>
           </div>
         )}
-        {(index > 0 || !poseName) && (
+        {index === 0 && !poseName && (
           <>
             <div className={styles.inputGroup}>
               <label className={styles.inputLabel}>X (in)</label>
@@ -718,8 +720,8 @@ export function PointCard({
                           onPathActionTriggerChange?.(trigger.id, "mode", event.target.value as PathActionTriggerMode)
                         }
                       >
-                        <option value="start">Start</option>
-                        <option value="stop">Stop</option>
+                        <option value="submit">Submit</option>
+                        <option value="remove">Remove</option>
                       </select>
                     </div>
                   </div>
@@ -750,11 +752,11 @@ export function PointCard({
               >
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
-              <span>Control Points ({controlPointCount})</span>
+              <span>Segments ({controlPointCount})</span>
             </button>
             <button className={styles.addControlPointButton} onClick={onAddControlPoint}>
               <span aria-hidden="true">+</span>
-              Add
+              Add Segment
             </button>
           </div>
           {controlsExpanded && controlPoints.length > 0 && (
@@ -773,14 +775,17 @@ export function PointCard({
                   onPointerUp={handleControlPointerUp}
                   onPointerCancel={handleControlPointerCancel}
                 >
-                  <ControlPointCard
+                  <SegmentCard
                     index={controlIndex}
+                    pathGeometry={controlPoint.pathGeometry}
                     x={controlPoint.x}
                     y={controlPoint.y}
+                    onPathGeometryChange={(pathGeometry) => onSegmentGeometryChange?.(controlIndex, pathGeometry)}
                     onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
                     onEditStart={onControlPointEditStart}
                     onEditCommit={onControlPointEditCommit}
                     canDelete={canDelete}
+                    canRemove={controlPoints.length > 1}
                     onDelete={() => onRemoveControlPoint?.(controlIndex)}
                   />
                 </div>

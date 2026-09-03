@@ -15,10 +15,11 @@ import type {
   DragTarget,
   HeadingInterpolation,
   MotionParameters,
+  PathGeometry,
   PathHeadingField,
   Point,
 } from "../plannerTypes";
-import { targetPathIndex, toFieldCoords } from "../plannerUtils";
+import { getPathSegments, targetPathIndex, toFieldCoords } from "../plannerUtils";
 import styles from "../page.module.css";
 import { ActionCard } from "./ActionCard";
 import { PointCard } from "./PointCard";
@@ -89,6 +90,7 @@ type PlannerSidebarProps = {
   onHeadingChange: (value: string) => void;
   onRenamePath: (index: number, name: string) => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
+  onSegmentGeometryChange: (index: number, segmentIndex: number, pathGeometry: PathGeometry) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
   onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
@@ -170,6 +172,7 @@ export function PlannerSidebar({
   onHeadingChange,
   onRenamePath,
   onPathInterpolationChange,
+  onSegmentGeometryChange,
   onPathHeadingChange,
   onPathTangentReversedChange,
   onToggleActionsExpanded,
@@ -442,6 +445,7 @@ export function PlannerSidebar({
                     onNameEditStart={onNameEditStart}
                     onNameEditCommit={onNameEditCommit}
                     onPathInterpolationChange={onPathInterpolationChange}
+                    onSegmentGeometryChange={onSegmentGeometryChange}
                     onPathHeadingChange={onPathHeadingChange}
                     onPathTangentReversedChange={onPathTangentReversedChange}
                     onToggleActionsExpanded={onToggleActionsExpanded}
@@ -478,8 +482,8 @@ export function PlannerSidebar({
               }}
               aria-disabled={!hasControlPoints}
               aria-pressed={areControlPointsHidden}
-              aria-label={areControlPointsHidden ? "Show control points" : "Hide control points"}
-              title={areControlPointsHidden ? "Show control points" : "Hide control points"}
+              aria-label={areControlPointsHidden ? "Show path controls" : "Hide path controls"}
+              title={areControlPointsHidden ? "Show path controls" : "Hide path controls"}
             >
               <ControlPointsIcon hidden={areControlPointsHidden} />
             </button>
@@ -657,6 +661,7 @@ type PathPointCardProps = {
   onNameEditStart: () => void;
   onNameEditCommit: () => void;
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
+  onSegmentGeometryChange: (index: number, segmentIndex: number, pathGeometry: PathGeometry) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
   onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
@@ -693,6 +698,7 @@ function PathPointCard({
   onNameEditStart,
   onNameEditCommit,
   onPathInterpolationChange,
+  onSegmentGeometryChange,
   onPathHeadingChange,
   onPathTangentReversedChange,
   onToggleActionsExpanded,
@@ -729,13 +735,14 @@ function PathPointCard({
       linearStartT={point.linearStartT ?? 0}
       linearEndT={point.linearEndT ?? 1}
       tangentReversed={point.tangentReversed ?? false}
-      controlPoints={(point.controlPoints ?? []).map((controlPoint) => ({
-        id: controlPoint.id,
-        ...toFieldCoords(controlPoint.nx, controlPoint.ny),
+      controlPoints={getPathSegments(point).map((segment) => ({
+        id: segment.id,
+        pathGeometry: segment.pathGeometry,
+        ...toFieldCoords(segment.nx, segment.ny),
       }))}
       actionTriggers={point.actionTriggers ?? []}
       actionsExpanded={point.actionsExpanded ?? true}
-      controlPointCount={(point.controlPoints ?? []).length}
+      controlPointCount={getPathSegments(point).length}
       controlsExpanded={point.controlsExpanded ?? true}
       isActive={targetPathIndex(hoverTarget) === index || targetPathIndex(activeTarget) === index}
       onChange={(axis, value) => onCoordChange(index, axis, value)}
@@ -758,6 +765,7 @@ function PathPointCard({
       onToggleControlsExpanded={() => onToggleControlsExpanded(index)}
       onAddControlPoint={() => onAddControlPoint(index)}
       onControlPointChange={(controlIndex, axis, value) => onControlCoordChange(index, controlIndex, axis, value)}
+      onSegmentGeometryChange={(segmentIndex, pathGeometry) => onSegmentGeometryChange(index, segmentIndex, pathGeometry)}
       onRemoveControlPoint={(controlIndex) => onRemoveControlPoint(index, controlIndex)}
       onReorderControlPoint={(fromIndex, toIndex) => onReorderControlPoint(index, fromIndex, toIndex)}
       onControlPointEditStart={onPositionEditStart}

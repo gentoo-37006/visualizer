@@ -29,15 +29,20 @@ The sidebar holds the sequence in the order the robot runs it.
   previous one is until you place it. Type exact coordinates into the card, or
   drag it on the field — a new point sits exactly on the one before it, and the
   newer of the two is the one on top that takes the drag.
-- **Control Points** bend a path into a spline. Order matters: they are the
-  intermediate Bézier points, in the order listed.
+- **Segments** divide a `Path` into uninterrupted curves. Each path starts with
+  one segment, and its last segment defines the path endpoint. Segments can be
+  reordered and the robot only stops after the final one.
+- **Segment type** is selected separately for every segment. `Linear` connects
+  its start and end directly; `Spline` exposes two local cubic Bézier handles.
+  At a spline-to-spline join the handles mirror each other. At a linear-to-spline
+  join, the spline handle is fixed to the linear tangent, preserving C1 continuity.
 - **Heading** picks how the robot is turned along the path — `Constant` holds one
   angle, `Linear` sweeps between two (optionally only across part of the path),
   and `Tangential` faces along the direction of travel, optionally reversed.
 - **Path Actions** fire an action partway through a path, at a fraction `t` of
   the way along it.
-- **Add Action** inserts an action between paths. `Run` blocks for its timeout,
-  `Start` and `Stop` do not.
+- **Add Action** inserts an action between paths. `Run` blocks for its timeout;
+  `Submit` and `Remove` do not.
 - Drag cards to reorder the sequence. Deleting is shift-click, so a stray click
   cannot throw away a routine; the trash button in the header clears everything
   the same way. Shift-clicking a path's eye hides every *other* path, which is
@@ -82,27 +87,43 @@ keeps referring to your constants:
 
 ```kotlin
 val toBasket = Path(
-    Poses.START_BASKET,
-    Pose(28.8, -14.4),
+    Spline(
+        Poses.START_BASKET,
+        Pose(9.6, -4.8),
+        Pose(19.2, -9.6),
+        Pose(28.8, -14.4),
+    ),
 ).linearHeading(0.0, 90.0)
 
 val toPark = Path(
-    Pose(28.8, -14.4),
-    Pose(0.0, 0.0),
-    Pose(-28.8, 14.4),
+    Linear(
+        Pose(28.8, -14.4),
+        Pose(0.0, 0.0),
+    ),
+    Spline(
+        Pose(0.0, 0.0),
+        Pose(-9.6, 4.8),
+        Pose(-19.2, 9.6),
+        Pose(-28.8, 14.4),
+    ),
 ).tangentHeading()
 
 autonSequence(Alliance.RED)
-    .followPath(
+    .path(
         toBasket
-            .startAt(0.5, Actions.LIFT)
+            .submitAt(0.5, Actions.LIFT)
     )
     .run(Actions.SCORE, 1.5)
-    .followPath(toPark)
+    .path(toPark)
 ```
 
-Importing that same shape back reconstructs the points, the control points, the
+Importing that same shape back reconstructs the paths, their segments, the
 heading modes, the action ordering and the alliance.
+
+Each `Path` is one uninterrupted pathchain containing one or more `Linear` or
+`Spline` curves. A `Linear` has its start and end pose. A cubic `Spline` has its
+start, two local control poses and its end. Consecutive curves share an endpoint,
+and the robot does not stop between them.
 
 ## Field images
 
