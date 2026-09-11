@@ -107,9 +107,9 @@ export function ActionCard({
             value={mode}
             onChange={(event) => onModeChange(event.target.value as AutonActionMode)}
           >
-            <option value="start">Start</option>
+            <option value="submit">Submit</option>
             <option value="run">Run</option>
-            <option value="stop">Stop</option>
+            <option value="remove">Remove</option>
           </select>
         </div>
         {mode === "run" && (

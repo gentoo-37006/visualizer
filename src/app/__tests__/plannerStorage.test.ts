@@ -53,13 +53,30 @@ describe("auton draft persistence", () => {
           ny: 0.75,
           color: "#abc",
           locked: false,
+          pathGeometry: "spline",
+          segmentId: "final-segment",
           headingMode: "linear",
           startHeading: 10,
           endHeading: -20,
           linearStartT: 0.2,
           linearEndT: 0.8,
-          controlPoints: [{ id: "c1", nx: 0.4, ny: 0.4 }],
-          actionTriggers: [{ id: "t1", mode: "start", t: 0.5, actionName: "INTAKE" }],
+          startControlOffsetNx: 0.05,
+          startControlOffsetNy: -0.02,
+          endControlOffsetNx: 0.04,
+          endControlOffsetNy: 0.03,
+          controlPoints: [
+            {
+              id: "segment-1",
+              nx: 0.4,
+              ny: 0.4,
+              pathGeometry: "linear",
+              startControlOffsetNx: 0.08,
+              startControlOffsetNy: -0.05,
+              endControlOffsetNx: 0.02,
+              endControlOffsetNy: 0.01,
+            },
+          ],
+          actionTriggers: [{ id: "t1", mode: "submit", t: 0.5, actionName: "INTAKE" }],
         },
       ],
       sequenceItems: [
@@ -74,7 +91,10 @@ describe("auton draft persistence", () => {
 
   it("round trips undo and redo history with the draft", () => {
     const current: PlannerSnapshot = {
-      points: [startPoint, { id: "a", nx: 0.25, ny: 0.75, color: "#abc", locked: false }],
+      points: [
+        startPoint,
+        { id: "a", nx: 0.25, ny: 0.75, color: "#abc", locked: false, pathGeometry: "spline" },
+      ],
       sequenceItems: [{ id: "s1", kind: "path", pointId: "a" }],
       alliance: "RED",
     };

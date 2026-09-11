@@ -96,6 +96,48 @@ describe("playback timeline", () => {
     expect(timeline.totalTime).toBeGreaterThan(0);
   });
 
+  it("drives every cubic segment in a pathchain without stopping between segments", () => {
+    const joinedPath: Point = {
+      ...straightPath,
+      controlPoints: [
+        { id: "join-1", nx: 0.58, ny: 0.35 },
+        { id: "join-2", nx: 0.68, ny: 0.62 },
+      ],
+    };
+    const timeline = timelineFor(
+      [start, joinedPath],
+      [{ id: "s1", kind: "path", pointId: joinedPath.id }]
+    );
+
+    expect(timeline.segments).toHaveLength(1);
+    const pathSegment = timeline.segments[0];
+    expect(pathSegment.kind).toBe("path");
+    if (pathSegment.kind !== "path") return;
+
+    expect(pathSegment.samples).toHaveLength(97);
+    expect(pathSegment.samples[32]).toMatchObject({ nx: 0.58, ny: 0.35 });
+    expect(pathSegment.samples[64]).toMatchObject({ nx: 0.68, ny: 0.62 });
+  });
+
+  it("connects linear segment endpoints with straight lines", () => {
+    const linearPath: Point = {
+      ...straightPath,
+      pathGeometry: "linear",
+      controlPoints: [{ id: "saved-join", nx: 0.6, ny: 0.2 }],
+    };
+    const timeline = timelineFor(
+      [start, linearPath],
+      [{ id: "s1", kind: "path", pointId: linearPath.id }]
+    );
+    const pathSegment = timeline.segments[0];
+    expect(pathSegment.kind).toBe("path");
+    if (pathSegment.kind !== "path") return;
+
+    expect(pathSegment.samples).toHaveLength(65);
+    expect(pathSegment.samples[16]).toMatchObject({ nx: 0.55, ny: 0.35 });
+    expect(pathSegment.samples[32]).toMatchObject({ nx: 0.6, ny: 0.2 });
+  });
+
   it("adds a rotate segment when the path starts at a different heading", () => {
     const timeline = timelineFor(
       [start, { ...straightPath, constantHeading: 90 }],
@@ -113,7 +155,7 @@ describe("playback timeline", () => {
   it("only lets timed run actions consume time", () => {
     const withStart = timelineFor(
       [start],
-      [{ id: "s1", kind: "action", name: "LIFT", mode: "start", timeout: 5 }]
+      [{ id: "s1", kind: "action", name: "LIFT", mode: "submit", timeout: 5 }]
     );
     expect(withStart.totalTime).toBe(0);
 

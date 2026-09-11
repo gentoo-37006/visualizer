@@ -172,13 +172,22 @@ const sanitizeControlPoint = (value: unknown): ControlPoint | null => {
     nx,
     ny,
     ...(typeof candidate.poseName === "string" ? { poseName: candidate.poseName } : {}),
+    ...(candidate.pathGeometry === "linear" || candidate.pathGeometry === "spline"
+      ? { pathGeometry: candidate.pathGeometry }
+      : {}),
+    ...(isFiniteNumber(candidate.startControlOffsetNx) ? { startControlOffsetNx: candidate.startControlOffsetNx } : {}),
+    ...(isFiniteNumber(candidate.startControlOffsetNy) ? { startControlOffsetNy: candidate.startControlOffsetNy } : {}),
+    ...(isFiniteNumber(candidate.endControlOffsetNx) ? { endControlOffsetNx: candidate.endControlOffsetNx } : {}),
+    ...(isFiniteNumber(candidate.endControlOffsetNy) ? { endControlOffsetNy: candidate.endControlOffsetNy } : {}),
+    ...(isFiniteNumber(candidate.controlOffsetNx) ? { controlOffsetNx: candidate.controlOffsetNx } : {}),
+    ...(isFiniteNumber(candidate.controlOffsetNy) ? { controlOffsetNy: candidate.controlOffsetNy } : {}),
   };
 };
 
 const sanitizeActionTrigger = (value: unknown): PathActionTrigger | null => {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Partial<PathActionTrigger>;
-  if (candidate.mode !== "start" && candidate.mode !== "stop") return null;
+  if (candidate.mode !== "submit" && candidate.mode !== "remove") return null;
   if (typeof candidate.actionName !== "string") return null;
 
   return {
@@ -210,6 +219,31 @@ const sanitizePoint = (value: unknown, index: number): Point | null => {
   const linearEndT = sanitizeNormalized(candidate.linearEndT);
   const heading = optionalNumber(candidate.heading);
   const headingMode = sanitizeHeadingMode(candidate.headingMode);
+  const sanitizedSegments = Array.isArray(candidate.controlPoints)
+    ? candidate.controlPoints.map(sanitizeControlPoint).filter((segment): segment is ControlPoint => segment !== null)
+    : [];
+  const usesSegmentSchema = sanitizedSegments.some((segment) => segment.pathGeometry !== undefined);
+  const pathGeometry = candidate.pathGeometry === "linear" || candidate.pathGeometry === "spline"
+    ? candidate.pathGeometry
+    : "spline";
+  const migratedSegments = usesSegmentSchema
+    ? sanitizedSegments
+    : sanitizedSegments.map((segment, segmentIndex) => {
+        const previousLegacyNode = sanitizedSegments[segmentIndex - 1];
+        return {
+          ...segment,
+          pathGeometry,
+          startControlOffsetNx: segmentIndex === 0
+            ? candidate.startControlOffsetNx
+            : previousLegacyNode?.controlOffsetNx,
+          startControlOffsetNy: segmentIndex === 0
+            ? candidate.startControlOffsetNy
+            : previousLegacyNode?.controlOffsetNy,
+          endControlOffsetNx: segment.controlOffsetNx,
+          endControlOffsetNy: segment.controlOffsetNy,
+        };
+      });
+  const finalLegacyNode = usesSegmentSchema ? undefined : sanitizedSegments.at(-1);
 
   return {
     id,
@@ -228,9 +262,21 @@ const sanitizePoint = (value: unknown, index: number): Point | null => {
     ...(linearStartT !== null ? { linearStartT } : {}),
     ...(linearEndT !== null ? { linearEndT } : {}),
     ...(candidate.tangentReversed === true ? { tangentReversed: true } : {}),
-    ...(Array.isArray(candidate.controlPoints)
-      ? { controlPoints: candidate.controlPoints.map(sanitizeControlPoint).filter((point): point is ControlPoint => point !== null) }
+    ...(index > 0 ? { pathGeometry } : {}),
+    ...(typeof candidate.segmentId === "string" && candidate.segmentId ? { segmentId: candidate.segmentId } : {}),
+    ...(isFiniteNumber(finalLegacyNode?.controlOffsetNx ?? candidate.startControlOffsetNx)
+      ? { startControlOffsetNx: finalLegacyNode?.controlOffsetNx ?? candidate.startControlOffsetNx }
       : {}),
+    ...(isFiniteNumber(finalLegacyNode?.controlOffsetNy ?? candidate.startControlOffsetNy)
+      ? { startControlOffsetNy: finalLegacyNode?.controlOffsetNy ?? candidate.startControlOffsetNy }
+      : {}),
+    ...(isFiniteNumber(candidate.endControlOffsetNx)
+      ? { endControlOffsetNx: candidate.endControlOffsetNx }
+      : {}),
+    ...(isFiniteNumber(candidate.endControlOffsetNy)
+      ? { endControlOffsetNy: candidate.endControlOffsetNy }
+      : {}),
+    ...(migratedSegments.length > 0 ? { controlPoints: migratedSegments } : {}),
     ...(typeof candidate.controlsExpanded === "boolean" ? { controlsExpanded: candidate.controlsExpanded } : {}),
     ...(typeof candidate.actionsExpanded === "boolean" ? { actionsExpanded: candidate.actionsExpanded } : {}),
     ...(Array.isArray(candidate.actionTriggers)
@@ -263,7 +309,7 @@ const sanitizeSequenceItem = (value: unknown, unclaimedPointIds: Set<string>): A
   }
 
   if (candidate.kind !== "action") return null;
-  if (candidate.mode !== "start" && candidate.mode !== "run" && candidate.mode !== "stop") return null;
+  if (candidate.mode !== "submit" && candidate.mode !== "run" && candidate.mode !== "remove") return null;
 
   return {
     id,

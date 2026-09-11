@@ -7,12 +7,7 @@ import type {
   PathActionTrigger,
   Point,
 } from "./plannerTypes";
-import {
-  generateId,
-  normalizeHeading,
-  toFieldCoords,
-  toNormalizedCoords,
-} from "./plannerUtils";
+import { generateId, getPathSegments, normalizeHeading, resolvePathSegments, toFieldCoords, toNormalizedCoords } from "./plannerUtils";
 import { seededColor } from "./plannerColors";
 
 const formatKotlinNumber = (value: number) => value.toFixed(1);
@@ -20,7 +15,7 @@ const formatKotlinNumber = (value: number) => value.toFixed(1);
 /**
  * Positions along a path run 0 to 1, so a single decimal — fine for inches and
  * degrees — only leaves eleven places to put a trigger, and quietly rewrites a
- * team's own `.startAt(0.35, ...)` as `0.4` on a round trip. The parser keeps
+ * team's own `.submitAt(0.35, ...)` as `0.4` on a round trip. The parser keeps
  * the full value, so the exporter has to as well or the simulation and the
  * generated code disagree about where an action fires.
  */
@@ -262,11 +257,11 @@ const formatPathActionTrigger = (trigger: PathActionTrigger) => {
   return `\n            .${trigger.mode}At(${formatKotlinPathT(trigger.t)}, Actions.${actionName})`;
 };
 
-const formatFollowPathCall = (pathName: string, point?: Point) => {
+const formatPathCall = (pathName: string, point?: Point) => {
   const triggers = [...(point?.actionTriggers ?? [])].sort((a, b) => a.t - b.t);
-  if (triggers.length === 0) return `    .followPath(${pathName})`;
+  if (triggers.length === 0) return `    .path(${pathName})`;
 
-  return `    .followPath(
+  return `    .path(
         ${pathName}${triggers.map(formatPathActionTrigger).join("")}
     )`;
 };
@@ -293,11 +288,19 @@ export const serializePathPlannerKotlin = (
     .map((point, pathIndex) => {
       const previousPoint = points[pathIndex];
       const pathName = pathNames[pathIndex];
-      const poses = [
-        formatKotlinPose(previousPoint, savedPoses),
-        ...(point.controlPoints ?? []).map((controlPoint) => formatKotlinPose(controlPoint, savedPoses)),
-        formatKotlinPose(point, savedPoses),
-      ];
+      const segments = getPathSegments(point);
+      const resolvedSegments = resolvePathSegments(previousPoint, segments);
+      const segmentDeclarations = resolvedSegments.map((resolved, segmentIndex) => {
+        const segmentStart = segmentIndex === 0 ? previousPoint : segments[segmentIndex - 1];
+        const startPose = formatKotlinPose(segmentStart, savedPoses);
+        const endPose = formatKotlinPose(segments[segmentIndex], savedPoses);
+        if (!resolved.control1 || !resolved.control2) {
+          return `    Linear(\n        ${startPose},\n        ${endPose},\n    ),`;
+        }
+        const control1 = formatKotlinPose({ nx: resolved.control1.x, ny: resolved.control1.y }, []);
+        const control2 = formatKotlinPose({ nx: resolved.control2.x, ny: resolved.control2.y }, []);
+        return `    Spline(\n        ${startPose},\n        ${control1},\n        ${control2},\n        ${endPose},\n    ),`;
+      });
       const headingMode = point.headingMode ?? "constant";
       const linearStartT = point.linearStartT ?? 0;
       const linearEndT = point.linearEndT ?? 1;
@@ -312,7 +315,7 @@ export const serializePathPlannerKotlin = (
             : `constantHeading(${formatKotlinNumber(point.constantHeading ?? 0)})`;
 
       return `val ${pathName} = Path(
-${poses.map((pose) => `    ${pose},`).join("\n")}
+${segmentDeclarations.join("\n")}
 ).${headingCall}`;
     })
     .join("\n\n");
@@ -324,7 +327,7 @@ ${poses.map((pose) => `    ${pose},`).join("\n")}
     .map((item) => {
       if (item.kind === "action") return formatActionCall(item);
       const pathName = pathNameByPointId.get(item.pointId);
-      return pathName ? formatFollowPathCall(pathName, pointById.get(item.pointId)) : "";
+      return pathName ? formatPathCall(pathName, pointById.get(item.pointId)) : "";
     })
     .filter(Boolean)
     .join("\n");
@@ -403,7 +406,10 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       };
   type ParsedPath = {
     name: string;
-    args: string[];
+    curves: Array<{
+      pathGeometry: "linear" | "spline";
+      poses: ParsedPoseReference[];
+    }>;
     headingMode: HeadingInterpolation;
     constantHeading: number;
     startHeading: number;
@@ -424,6 +430,25 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     if (closeParenIndex < 0) continue;
 
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex));
+    const curves = args.flatMap((arg) => {
+      const curveMatch = arg.match(/^\s*(Linear|Spline)\s*\(/);
+      if (!curveMatch) return [];
+      const curveOpenParenIndex = arg.indexOf("(", curveMatch.index ?? 0);
+      const curveCloseParenIndex = findMatchingParen(arg, curveOpenParenIndex);
+      if (curveCloseParenIndex < 0) return [];
+      const poses = splitTopLevelArgs(arg.slice(curveOpenParenIndex + 1, curveCloseParenIndex))
+        .map((poseArg) => parseKotlinPose(poseArg, savedPoses));
+      const expectedPoseCount = curveMatch[1] === "Linear" ? 2 : 4;
+      if (poses.length !== expectedPoseCount || poses.some((pose) => pose === null)) return [];
+      return [{
+        pathGeometry: curveMatch[1] === "Linear" ? "linear" as const : "spline" as const,
+        poses: poses as ParsedPoseReference[],
+      }];
+    });
+    if (curves.length === 0 || curves.length !== args.length) {
+      pathRegex.lastIndex = closeParenIndex + 1;
+      continue;
+    }
     const afterPath = contents.slice(closeParenIndex + 1, closeParenIndex + 160);
     const headingMatch = afterPath.match(
       /^\s*\.\s*(constantHeading|linearHeading|tangentHeading|reversedTangentHeading)\s*\(([^)]*)\)/
@@ -455,12 +480,12 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       constantHeading = normalizeHeading(Number.isNaN(value) ? 0 : value);
     }
 
-    pathDefinitions.set(name, { name, args, headingMode, constantHeading, startHeading, endHeading, linearStartT, linearEndT, tangentReversed });
+    pathDefinitions.set(name, { name, curves, headingMode, constantHeading, startHeading, endHeading, linearStartT, linearEndT, tangentReversed });
     pathRegex.lastIndex = closeParenIndex + 1;
   }
 
   const builderCalls: ParsedBuilderCall[] = [];
-  const builderCallRegex = /\.(followPath|start|stop|run)\s*\(/g;
+  const builderCallRegex = /\.(path|submit|remove|run)\s*\(/g;
   let builderCallMatch: RegExpExecArray | null;
 
   while ((builderCallMatch = builderCallRegex.exec(contents)) !== null) {
@@ -471,17 +496,17 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
 
     const callContents = contents.slice(openParenIndex + 1, closeParenIndex);
     const args = splitTopLevelArgs(callContents);
-    if (method === "followPath") {
+    if (method === "path") {
       const pathName = callContents.match(/\b([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1];
       if (pathName) {
-        const triggers: PathActionTrigger[] = [...callContents.matchAll(/\.(startAt|stopAt)\s*\(([^)]*)\)/g)]
+        const triggers: PathActionTrigger[] = [...callContents.matchAll(/\.(submitAt|removeAt)\s*\(([^)]*)\)/g)]
           .map((triggerMatch) => {
             const triggerArgs = splitTopLevelArgs(triggerMatch[2]);
             const t = Number.parseFloat(triggerArgs[0] ?? "0");
             const actionName = triggerArgs[1]?.match(/\bActions\.([A-Za-z_][A-Za-z0-9_]*)\b/)?.[1] ?? "ACTION";
             return {
               id: generateId(),
-              mode: triggerMatch[1] === "startAt" ? "start" as const : "stop" as const,
+              mode: triggerMatch[1] === "submitAt" ? "submit" as const : "remove" as const,
               t: Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0,
               actionName,
             };
@@ -509,7 +534,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
     });
     builderCallRegex.lastIndex = closeParenIndex + 1;
   }
-  // One entry per followPath call rather than per path name. A cycling auton
+  // One entry per path call rather than per path name. A cycling auton
   // follows the same declared path several times, and keying any of this by name
   // collapses those calls onto whichever point was built last, so the sequence
   // ends up driving a path the robot is not standing at the start of.
@@ -525,7 +550,7 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
 
   if (orderedPaths.length === 0) return null;
 
-  const firstStart = parseKotlinPose(orderedPaths[0].path.args[0] ?? "", savedPoses);
+  const firstStart = orderedPaths[0].path.curves[0]?.poses[0];
   const importedPoints: Point[] = [
     {
       id: INITIAL_POINT_ID,
@@ -542,17 +567,31 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
   // the entries below that produce no point at all.
   const pathPointIdsByFollowIndex: Array<string | null> = [];
   orderedPaths.forEach(({ path, triggers }) => {
-    const parsedArgs = path.args.map((arg) => parseKotlinPose(arg, savedPoses));
-    const endPose = [...parsedArgs].reverse().find((pose) => pose !== null);
+    const importedSegments = path.curves.map((curve) => {
+      const startPose = curve.poses[0];
+      const endPose = curve.poses.at(-1)!;
+      return {
+        id: generateId(),
+        nx: endPose.nx,
+        ny: endPose.ny,
+        poseName: endPose.poseName,
+        pathGeometry: curve.pathGeometry,
+        ...(curve.pathGeometry === "spline"
+          ? {
+              startControlOffsetNx: curve.poses[1].nx - startPose.nx,
+              startControlOffsetNy: curve.poses[1].ny - startPose.ny,
+              endControlOffsetNx: endPose.nx - curve.poses[2].nx,
+              endControlOffsetNy: endPose.ny - curve.poses[2].ny,
+            }
+          : {}),
+      };
+    });
+    const endPose = path.curves.at(-1)?.poses.at(-1);
     if (!endPose) {
       pathPointIdsByFollowIndex.push(null);
       return;
     }
-
-    const firstArgIsPose = parsedArgs[0] !== null;
-    const controlPoses = parsedArgs
-      .slice(firstArgIsPose ? 1 : 0, -1)
-      .filter((pose): pose is ParsedPoseReference => pose !== null);
+    const finalSegment = importedSegments.at(-1)!;
 
     const pointId = generateId();
     pathPointIdsByFollowIndex.push(pointId);
@@ -571,13 +610,14 @@ export const parsePathPlannerKotlin = (contents: string, savedPoses: SavedPose[]
       linearStartT: path.linearStartT,
       linearEndT: path.linearEndT,
       tangentReversed: path.tangentReversed,
-      controlPoints: controlPoses.map((pose) => ({
-        id: generateId(),
-        nx: pose.nx,
-        ny: pose.ny,
-        poseName: pose.poseName,
-      })),
-      controlsExpanded: controlPoses.length > 0,
+      pathGeometry: finalSegment.pathGeometry,
+      segmentId: finalSegment.id,
+      startControlOffsetNx: finalSegment.startControlOffsetNx,
+      startControlOffsetNy: finalSegment.startControlOffsetNy,
+      endControlOffsetNx: finalSegment.endControlOffsetNx,
+      endControlOffsetNy: finalSegment.endControlOffsetNy,
+      controlPoints: importedSegments.slice(0, -1),
+      controlsExpanded: true,
       actionsExpanded: triggers.length > 0,
       actionTriggers: [...triggers].sort((a, b) => a.t - b.t),
     });
