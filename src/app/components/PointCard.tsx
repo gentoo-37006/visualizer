@@ -43,6 +43,7 @@ type PointCardProps = {
   onHeadingChange?: (val: string) => void;
   onInterpolationChange?: (mode: HeadingInterpolation) => void;
   onPathHeadingChange?: (field: PathHeadingField, val: string) => void;
+  onMatchPreviousHeading?: () => void;
   onTangentReversedChange?: (tangentReversed: boolean) => void;
   onPathActionTriggerChange?: (
     triggerId: string,
@@ -103,6 +104,7 @@ export function PointCard({
   onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
+  onMatchPreviousHeading,
   onTangentReversedChange,
   onPathActionTriggerChange,
   onToggleActionsExpanded,
@@ -534,20 +536,53 @@ export function PointCard({
             )}
             {headingMode === "linear" && (
               <>
-                <div className={styles.inputGroup}>
+                <div className={`${styles.inputGroup} ${styles.linearStartHeadingGroup}`}>
                   <label className={styles.inputLabel}>Start</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className={styles.inputField}
-                    value={editingAxis === "start" ? draftPathHeading : startHeading.toFixed(1)}
-                    onFocus={() => startEditing("start")}
-                    onChange={(e) => {
-                      if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
-                    }}
-                    onBlur={(e) => commitEdit("start", e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(e, "start", e.currentTarget.value)}
-                  />
+                  <div className={styles.headingInputWithAction}>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className={styles.inputField}
+                      value={editingAxis === "start" ? draftPathHeading : startHeading.toFixed(1)}
+                      onFocus={() => startEditing("start")}
+                      onChange={(e) => {
+                        if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
+                      }}
+                      onBlur={(e) => commitEdit("start", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, "start", e.currentTarget.value)}
+                    />
+                    <span className={styles.matchPreviousHeadingAction}>
+                      <button
+                        type="button"
+                        className={styles.matchPreviousHeadingButton}
+                        onClick={onMatchPreviousHeading}
+                        aria-label="Match previous"
+                        aria-describedby={`match-previous-heading-tooltip-${index}`}
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M3 12a9 9 0 1 0 3-7.7L3 7"></path>
+                          <path d="M3 3v4h4"></path>
+                        </svg>
+                      </button>
+                      <span
+                        id={`match-previous-heading-tooltip-${index}`}
+                        className={styles.matchPreviousHeadingTooltip}
+                        role="tooltip"
+                      >
+                        Match previous
+                      </span>
+                    </span>
+                  </div>
                 </div>
                 <div className={styles.inputGroup}>
                   <label className={styles.inputLabel}>End</label>

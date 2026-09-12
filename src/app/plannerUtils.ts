@@ -255,6 +255,32 @@ export const getPathEndTangent = (
   return null;
 };
 
+export const getPathEndHeading = (
+  start: Pick<Point, "nx" | "ny">,
+  point: Point
+) => {
+  const headingMode = point.headingMode ?? "constant";
+  if (headingMode === "constant") return normalizeHeading(point.constantHeading ?? 0);
+  if (headingMode === "linear") return normalizeHeading(point.endHeading ?? 0);
+
+  const tangent = getPathEndTangent(start, point);
+  if (!tangent) return 0;
+
+  const tangentHeading = (Math.atan2(tangent.x, -tangent.y) * 180) / Math.PI;
+  return normalizeHeading(tangentHeading + (point.tangentReversed ? 180 : 0));
+};
+
+export const getPreviousPathEndHeading = (points: Point[], pathIndex: number) => {
+  const startPoseHeading = normalizeHeading(points[0]?.heading ?? 0);
+  if (pathIndex <= 1) return startPoseHeading;
+
+  const previousPathStart = points[pathIndex - 2];
+  const previousPath = points[pathIndex - 1];
+  if (!previousPathStart || !previousPath) return startPoseHeading;
+
+  return getPathEndHeading(previousPathStart, previousPath);
+};
+
 export const headingToNormalizedTangent = (heading: number): SplinePoint => {
   const radians = (heading * Math.PI) / 180;
   return { x: Math.sin(radians), y: -Math.cos(radians) };

@@ -529,6 +529,68 @@
   flex: 0 0 5.25rem;
 }
 
+.linearStartHeadingGroup {
+  flex-basis: 7.625rem;
+}
+
+.headingInputWithAction {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.headingInputWithAction .inputField {
+  flex: 0 0 5.25rem;
+}
+
+.matchPreviousHeadingAction {
+  position: relative;
+  display: flex;
+}
+
+.matchPreviousHeadingButton {
+  aspect-ratio: 1;
+  height: var(--card-control-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition);
+}
+
+.matchPreviousHeadingButton:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.matchPreviousHeadingTooltip {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  opacity: 0;
+  padding: 0.375rem 0.5rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.matchPreviousHeadingAction:hover .matchPreviousHeadingTooltip,
+.matchPreviousHeadingAction:focus-within .matchPreviousHeadingTooltip {
+  opacity: 1;
+}
+
 .selectGroup {
   display: flex;
   flex-direction: column;

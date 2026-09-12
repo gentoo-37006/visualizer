@@ -5,6 +5,7 @@ import {
   createCubicSplineSegments,
   createSplinePath,
   evaluateCubicSplineSegment,
+  getPreviousPathEndHeading,
   isKotlinIdentifierDraft,
   isNumericDraft,
   mirrorAutonPoints,
@@ -14,6 +15,7 @@ import {
   toNormalizedCoords,
 } from "../plannerUtils";
 import { FIELD_SIZE_INCHES } from "../plannerConstants";
+import type { Point } from "../plannerTypes";
 
 describe("field coordinates", () => {
   it("round trips inches through the normalised form", () => {
@@ -66,6 +68,51 @@ describe("normalizeHeading", () => {
     for (const heading of [0, 37, -37, 180, -180, 359, -359, 1000]) {
       expect(normalizeHeading(normalizeHeading(heading))).toBe(normalizeHeading(heading));
     }
+  });
+});
+
+describe("previous path ending heading", () => {
+  const start: Point = {
+    id: "start",
+    nx: 0.5,
+    ny: 0.5,
+    color: "#fff",
+    locked: true,
+    heading: 30,
+  };
+  const target: Point = {
+    id: "target",
+    nx: 0.9,
+    ny: 0.5,
+    color: "#fff",
+    locked: false,
+  };
+
+  it("uses the start pose for the first path", () => {
+    expect(getPreviousPathEndHeading([start, target], 1)).toBe(30);
+  });
+
+  it("uses a constant predecessor's heading", () => {
+    const previous = { ...target, id: "constant", headingMode: "constant" as const, constantHeading: 45 };
+    expect(getPreviousPathEndHeading([start, previous, target], 2)).toBe(45);
+  });
+
+  it("uses a linear predecessor's ending heading", () => {
+    const previous = { ...target, id: "linear", headingMode: "linear" as const, endHeading: -120 };
+    expect(getPreviousPathEndHeading([start, previous, target], 2)).toBe(-120);
+  });
+
+  it("derives forward and reversed tangential headings from the path geometry", () => {
+    const previous = {
+      ...target,
+      id: "tangential",
+      nx: 0.75,
+      headingMode: "tangential" as const,
+      pathGeometry: "linear" as const,
+    };
+
+    expect(getPreviousPathEndHeading([start, previous, target], 2)).toBeCloseTo(90, 6);
+    expect(getPreviousPathEndHeading([start, { ...previous, tangentReversed: true }, target], 2)).toBeCloseTo(-90, 6);
   });
 });
 

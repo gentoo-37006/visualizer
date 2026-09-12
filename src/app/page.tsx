@@ -54,6 +54,7 @@ import {
   createForwardPathSegment,
   createDefaultHeadingValues,
   generateId,
+  getPreviousPathEndHeading,
   getPathSegments,
   getPathEndTangent,
   headingToNormalizedTangent,
@@ -1163,17 +1164,22 @@ export default function PathPlannerPage() {
   };
 
   const handlePathInterpolationChange = (index: number, mode: HeadingInterpolation) => {
-    const nextPoints = pointsRef.current.map((point, i) =>
-      i === index ? { ...createDefaultHeadingValues(), ...point, headingMode: mode } : point
+    const currentPoints = pointsRef.current;
+    const defaultStartHeading = mode === "linear"
+      ? getPreviousPathEndHeading(currentPoints, index)
+      : undefined;
+    const nextPoints = currentPoints.map((point, i) =>
+      i === index
+        ? {
+            ...createDefaultHeadingValues(),
+            ...point,
+            headingMode: mode,
+            ...(defaultStartHeading !== undefined ? { startHeading: defaultStartHeading } : {}),
+          }
+        : point
     );
     pushCurrentSnapshotIfChanged(nextPoints);
-    setPlannerPoints((currentPoints) =>
-      currentPoints.map((point, i) =>
-        i === index
-          ? { ...createDefaultHeadingValues(), ...point, headingMode: mode }
-          : point
-      )
-    );
+    setPlannerPoints(nextPoints);
   };
 
   const handleSegmentGeometryChange = (index: number, segmentIndex: number, pathGeometry: PathGeometry) => {
@@ -1218,6 +1224,16 @@ export default function PathPlannerPage() {
         i === index ? { ...point, [key]: nextValue } : point
       )
     );
+  };
+
+  const handleMatchPreviousPathHeading = (index: number) => {
+    const currentPoints = pointsRef.current;
+    const startHeading = getPreviousPathEndHeading(currentPoints, index);
+    const nextPoints = currentPoints.map((point, i) =>
+      i === index ? { ...point, startHeading } : point
+    );
+    pushCurrentSnapshotIfChanged(nextPoints);
+    setPlannerPoints(nextPoints);
   };
 
   const handleAddPathAction = (index: number) => {
@@ -1719,6 +1735,7 @@ export default function PathPlannerPage() {
           onPathInterpolationChange={handlePathInterpolationChange}
           onSegmentGeometryChange={handleSegmentGeometryChange}
           onPathHeadingChange={handlePathHeadingChange}
+          onMatchPreviousPathHeading={handleMatchPreviousPathHeading}
           onPathTangentReversedChange={handlePathTangentReversedChange}
           onToggleActionsExpanded={handleToggleActionsExpanded}
           onAddPathAction={handleAddPathAction}

@@ -92,6 +92,7 @@ type PlannerSidebarProps = {
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onSegmentGeometryChange: (index: number, segmentIndex: number, pathGeometry: PathGeometry) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onMatchPreviousPathHeading: (index: number) => void;
   onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
   onAddPathAction: (index: number) => void;
@@ -174,6 +175,7 @@ export function PlannerSidebar({
   onPathInterpolationChange,
   onSegmentGeometryChange,
   onPathHeadingChange,
+  onMatchPreviousPathHeading,
   onPathTangentReversedChange,
   onToggleActionsExpanded,
   onAddPathAction,
@@ -444,6 +446,7 @@ export function PlannerSidebar({
                     onPathInterpolationChange={onPathInterpolationChange}
                     onSegmentGeometryChange={onSegmentGeometryChange}
                     onPathHeadingChange={onPathHeadingChange}
+                    onMatchPreviousPathHeading={onMatchPreviousPathHeading}
                     onPathTangentReversedChange={onPathTangentReversedChange}
                     onToggleActionsExpanded={onToggleActionsExpanded}
                     onAddPathAction={onAddPathAction}
@@ -660,6 +663,7 @@ type PathPointCardProps = {
   onPathInterpolationChange: (index: number, mode: HeadingInterpolation) => void;
   onSegmentGeometryChange: (index: number, segmentIndex: number, pathGeometry: PathGeometry) => void;
   onPathHeadingChange: (index: number, field: PathHeadingField, value: string) => void;
+  onMatchPreviousPathHeading: (index: number) => void;
   onPathTangentReversedChange: (index: number, tangentReversed: boolean) => void;
   onToggleActionsExpanded: (index: number) => void;
   onAddPathAction: (index: number) => void;
@@ -697,6 +701,7 @@ function PathPointCard({
   onPathInterpolationChange,
   onSegmentGeometryChange,
   onPathHeadingChange,
+  onMatchPreviousPathHeading,
   onPathTangentReversedChange,
   onToggleActionsExpanded,
   onAddPathAction,
@@ -750,6 +755,7 @@ function PathPointCard({
       onNameEditCommit={onNameEditCommit}
       onInterpolationChange={(mode) => onPathInterpolationChange(index, mode)}
       onPathHeadingChange={(field, value) => onPathHeadingChange(index, field, value)}
+      onMatchPreviousHeading={() => onMatchPreviousPathHeading(index)}
       onTangentReversedChange={(tangentReversed) => onPathTangentReversedChange(index, tangentReversed)}
       onToggleActionsExpanded={() => onToggleActionsExpanded(index)}
       onAddPathAction={() => onAddPathAction(index)}
