@@ -220,7 +220,7 @@ describe("mixed path segments", () => {
 });
 
 describe("mirrorAutonPoints", () => {
-  it("mirrors every position and explicit heading while preserving path settings", () => {
+  it("rotates every position, control and explicit heading by 180 degrees", () => {
     const points = [
       {
         id: "start",
@@ -246,27 +246,54 @@ describe("mirrorAutonPoints", () => {
         linearEndT: 0.7,
         tangentReversed: true,
         poseName: "SCORE",
+        startControlOffsetNx: 0.04,
+        startControlOffsetNy: -0.03,
+        endControlOffsetNx: -0.02,
+        endControlOffsetNy: 0.05,
         controlPoints: [
-          { id: "control", nx: 0.1, ny: 0.6, poseName: "CONTROL" },
+          {
+            id: "control",
+            nx: 0.1,
+            ny: 0.6,
+            poseName: "CONTROL",
+            startControlOffsetNx: 0.08,
+            startControlOffsetNy: -0.06,
+            endControlOffsetNx: -0.07,
+            endControlOffsetNy: 0.09,
+          },
         ],
       },
     ];
 
     const mirrored = mirrorAutonPoints(points);
 
-    expect(mirrored[0]).toMatchObject({ nx: 0.8, ny: 0.3, heading: -30 });
+    expect(mirrored[0]).toMatchObject({ nx: 0.8, ny: 0.7, heading: -150 });
     expect(mirrored[1]).toMatchObject({
       nx: 0.25,
-      ny: 0.8,
       headingMode: "linear",
-      constantHeading: -45,
-      startHeading: 170,
+      constantHeading: -135,
+      startHeading: 10,
       endHeading: -90,
       linearStartT: 0.2,
       linearEndT: 0.7,
       tangentReversed: true,
     });
-    expect(mirrored[1].controlPoints?.[0]).toEqual({ id: "control", nx: 0.9, ny: 0.6 });
+    expect(mirrored[1].ny).toBeCloseTo(0.2, 10);
+    expect(mirrored[1]).toMatchObject({
+      startControlOffsetNx: -0.04,
+      startControlOffsetNy: 0.03,
+      endControlOffsetNx: 0.02,
+      endControlOffsetNy: -0.05,
+    });
+    expect(mirrored[1].controlPoints?.[0]).toEqual({
+      id: "control",
+      nx: 0.9,
+      ny: 0.4,
+      startControlOffsetNx: -0.08,
+      startControlOffsetNy: 0.06,
+      endControlOffsetNx: 0.07,
+      endControlOffsetNy: -0.09,
+    });
     expect(mirrored[0]).not.toHaveProperty("poseName");
     expect(mirrored[1]).not.toHaveProperty("poseName");
   });

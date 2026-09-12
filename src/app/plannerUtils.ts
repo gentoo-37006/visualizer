@@ -30,18 +30,18 @@ export const normalizeHeading = (degrees: number) => {
 
 export const mirrorAutonPoints = (points: Point[]): Point[] =>
   points.map((point) => {
-    const mirroredPoint: Point = { ...point, nx: 1 - point.nx };
+    const mirroredPoint: Point = { ...point, nx: 1 - point.nx, ny: 1 - point.ny };
 
     delete mirroredPoint.poseName;
-    if (point.heading !== undefined) mirroredPoint.heading = normalizeHeading(-point.heading);
+    if (point.heading !== undefined) mirroredPoint.heading = normalizeHeading(point.heading + 180);
     if (point.constantHeading !== undefined) {
-      mirroredPoint.constantHeading = normalizeHeading(-point.constantHeading);
+      mirroredPoint.constantHeading = normalizeHeading(point.constantHeading + 180);
     }
     if (point.startHeading !== undefined) {
-      mirroredPoint.startHeading = normalizeHeading(-point.startHeading);
+      mirroredPoint.startHeading = normalizeHeading(point.startHeading + 180);
     }
     if (point.endHeading !== undefined) {
-      mirroredPoint.endHeading = normalizeHeading(-point.endHeading);
+      mirroredPoint.endHeading = normalizeHeading(point.endHeading + 180);
     }
     if (point.startControlOffsetNx !== undefined) {
       mirroredPoint.startControlOffsetNx = -point.startControlOffsetNx;
@@ -49,17 +49,36 @@ export const mirrorAutonPoints = (points: Point[]): Point[] =>
     if (point.endControlOffsetNx !== undefined) {
       mirroredPoint.endControlOffsetNx = -point.endControlOffsetNx;
     }
+    if (point.startControlOffsetNy !== undefined) {
+      mirroredPoint.startControlOffsetNy = -point.startControlOffsetNy;
+    }
+    if (point.endControlOffsetNy !== undefined) {
+      mirroredPoint.endControlOffsetNy = -point.endControlOffsetNy;
+    }
     if (point.controlPoints) {
       mirroredPoint.controlPoints = point.controlPoints.map((controlPoint) => {
-        const mirroredControlPoint = { ...controlPoint, nx: 1 - controlPoint.nx };
+        const mirroredControlPoint = {
+          ...controlPoint,
+          nx: 1 - controlPoint.nx,
+          ny: 1 - controlPoint.ny,
+        };
         if (controlPoint.controlOffsetNx !== undefined) {
           mirroredControlPoint.controlOffsetNx = -controlPoint.controlOffsetNx;
+        }
+        if (controlPoint.controlOffsetNy !== undefined) {
+          mirroredControlPoint.controlOffsetNy = -controlPoint.controlOffsetNy;
         }
         if (controlPoint.startControlOffsetNx !== undefined) {
           mirroredControlPoint.startControlOffsetNx = -controlPoint.startControlOffsetNx;
         }
+        if (controlPoint.startControlOffsetNy !== undefined) {
+          mirroredControlPoint.startControlOffsetNy = -controlPoint.startControlOffsetNy;
+        }
         if (controlPoint.endControlOffsetNx !== undefined) {
           mirroredControlPoint.endControlOffsetNx = -controlPoint.endControlOffsetNx;
+        }
+        if (controlPoint.endControlOffsetNy !== undefined) {
+          mirroredControlPoint.endControlOffsetNy = -controlPoint.endControlOffsetNy;
         }
         delete mirroredControlPoint.poseName;
         return mirroredControlPoint;
