@@ -1,4 +1,4 @@
-const CACHE_NAME = "auton-visualizer-v7";
+const CACHE_NAME = "auton-visualizer-v8";
 const APP_SHELL_URLS = [
   "/favicon.ico",
   "/robot.png",
@@ -7,6 +7,7 @@ const APP_SHELL_URLS = [
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
   "/icons/apple-touch-icon.png",
+  "/fields/biobuzz.webp",
   "/fields/decode.webp",
   "/fields/intothedeep.webp",
   "/fields/centerstage.webp",
