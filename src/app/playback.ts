@@ -138,6 +138,21 @@ const getDirectionalVelocityLimit = (
   return 1 / (components.forward / forwardLimit + components.strafe / strafeLimit);
 };
 
+const getPedroBrakeCoefficients = (
+  dx: number,
+  dy: number,
+  heading: number,
+  constants: RobotConstants
+) => {
+  const components = getDirectionalComponents(dx, dy, heading);
+  return {
+    linear: constants.linearBrakeForward * Math.pow(components.forward, 2) +
+      constants.linearBrakeStrafe * Math.pow(components.strafe, 2),
+    quadratic: constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
+      constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3),
+  };
+};
+
 const getPedroVelocityToBrakeInTime = (
   distanceRemaining: number,
   dx: number,
@@ -145,11 +160,7 @@ const getPedroVelocityToBrakeInTime = (
   heading: number,
   constants: RobotConstants
 ) => {
-  const components = getDirectionalComponents(dx, dy, heading);
-  const k2 = constants.linearBrakeForward * Math.pow(components.forward, 2) +
-    constants.linearBrakeStrafe * Math.pow(components.strafe, 2);
-  const k1 = constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
-    constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3);
+  const { linear: k2, quadratic: k1 } = getPedroBrakeCoefficients(dx, dy, heading, constants);
   const distance = Math.abs(distanceRemaining) / Math.max(1e-6, constants.brakeAggression);
   const velocity = k1 > 1e-9
     ? (-k2 + Math.sqrt(k2 * k2 + 4 * k1 * distance)) / (2 * k1)
@@ -235,12 +246,23 @@ const getPedroBrakeDisplacement = (
   velocity: number,
   constants: RobotConstants
 ) => {
-  const components = getDirectionalComponents(dx, dy, heading);
-  const linear = constants.linearBrakeForward * Math.pow(components.forward, 2) +
-    constants.linearBrakeStrafe * Math.pow(components.strafe, 2);
-  const quadratic = constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
-    constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3);
+  const { linear, quadratic } = getPedroBrakeCoefficients(dx, dy, heading, constants);
   return Math.max(0, quadratic * velocity * velocity + linear * velocity);
+};
+
+const getPedroBrakingDeceleration = (
+  dx: number,
+  dy: number,
+  heading: number,
+  velocity: number,
+  constants: RobotConstants
+) => {
+  const { linear, quadratic } = getPedroBrakeCoefficients(dx, dy, heading, constants);
+  // If s(v) = qv² + lv is the measured stopping distance, then following
+  // that curve requires dv/dt = -v / s'(v).
+  const derivative = 2 * quadratic * velocity + linear;
+  if (derivative <= 1e-9) return Number.POSITIVE_INFINITY;
+  return velocity / derivative / Math.max(1e-6, constants.brakeAggression);
 };
 
 const getDirectionalNaturalDeceleration = (
@@ -452,15 +474,12 @@ const simulateForesightPath = (
     let deceleration = translationalAcceleration;
     if (isBraking && constants.brakeAtEnd) {
       targetVelocity = 0;
-      const coefficientDeceleration = brakeDisplacement > 1e-6
-        ? velocity * velocity / (2 * brakeDisplacement)
-        : translationalAcceleration;
       // The tuned brake coefficients already describe the real robot's
       // stopping displacement. Scaling them again by controller power would
       // count the drivetrain response twice and greatly overestimate braking
       // time in an idealized visualizer plant.
       deceleration = safeMotionLimit(
-        coefficientDeceleration / Math.max(1e-6, constants.brakeAggression)
+        getPedroBrakingDeceleration(direction.dx, direction.dy, heading, velocity, constants)
       );
       peakBrakeAcceleration = Math.max(peakBrakeAcceleration, deceleration);
     } else if (targetVelocity < velocity) {
@@ -474,9 +493,10 @@ const simulateForesightPath = (
     }
 
     const velocityDeltaLimit = (targetVelocity >= velocity ? translationalAcceleration : deceleration) * step;
+    const previousVelocity = velocity;
     velocity += Math.max(-velocityDeltaLimit, Math.min(velocityDeltaLimit, targetVelocity - velocity));
     if (distance < totalDistance) {
-      distance = Math.min(totalDistance, distance + velocity * step);
+      distance = Math.min(totalDistance, distance + ((previousVelocity + velocity) / 2) * step);
     } else {
       holdElapsed += step;
     }

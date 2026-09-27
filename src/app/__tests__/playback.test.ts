@@ -308,6 +308,29 @@ describe("playback timeline", () => {
     expect(overshootBiased.totalTime).toBeGreaterThan(conservative.totalTime);
   });
 
+  it("decelerates visibly before reaching the endpoint", () => {
+    const longStart = { ...start, nx: 0, heading: 90 };
+    const longPath = { ...straightPath, nx: 1, constantHeading: 90 };
+    const timeline = buildPlaybackTimeline(
+      [longStart, longPath],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      ROBOT
+    );
+    const path = timeline.segments[0];
+
+    expect(path.kind).toBe("path");
+    if (path.kind !== "path") return;
+    const frames = path.simulationFrames;
+    const brakeStart = frames.findIndex(
+      (frame, index) => index > 0 && frame.velocity < frames[index - 1].velocity - 1e-6
+    );
+    const endpoint = frames.findIndex((frame) => frame.distance >= path.profile.distance);
+
+    expect(brakeStart).toBeGreaterThan(0);
+    expect(endpoint - brakeStart).toBeGreaterThan(20);
+    expect(frames[endpoint].velocity).toBeLessThan(1);
+  });
+
   it("applies the configured translational inertia", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
     const highAcceleration = buildPlaybackTimeline(
