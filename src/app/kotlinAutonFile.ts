@@ -1,4 +1,4 @@
-import { INITIAL_POINT_ID } from "./plannerConstants";
+import { FIELD_SIZE_INCHES, INITIAL_POINT_ID } from "./plannerConstants";
 import type {
   AutonActionMode,
   AutonAlliance,
@@ -37,6 +37,7 @@ export type ParsedKotlinAuton = {
 
 export type SavedPose = {
   name: string;
+  kotlinName?: string;
   x: number;
   y: number;
   heading: number;
@@ -102,7 +103,7 @@ const formatKotlinPose = (
 ) => {
   const savedPose = findMatchingSavedPose(point, savedPoses);
   if (savedPose && (heading === undefined || Math.abs(normalizeHeading(heading - (savedPose.heading ?? 0))) <= POSE_MATCH_EPSILON)) {
-    return `Poses.${withStartPosePrefix(savedPose.name)}`;
+    return `Poses.${savedPose.kotlinName ?? withStartPosePrefix(savedPose.name)}`;
   }
 
   const coords = toFieldCoords(point.nx, point.ny);
@@ -116,6 +117,10 @@ const stripLineComment = (line: string) => line.replace(/\/\/.*$/, "");
 
 const evaluatePoseExpression = (expression: string, width = DEFAULT_ROBOT_WIDTH, length = DEFAULT_ROBOT_LENGTH) => {
   const constants: Record<string, number> = {
+    "FieldCoordinateSystem.HALF_FIELD_SIZE": FIELD_SIZE_INCHES / 2,
+    "HALF_FIELD_SIZE": FIELD_SIZE_INCHES / 2,
+    "Robot.HALF_WIDTH": width / 2,
+    "Robot.HALF_LENGTH": length / 2,
     "Constants.WIDTH": width,
     "Constants.LENGTH": length,
     "Constants.HEIGHT": length,
@@ -190,27 +195,82 @@ export const parseSavedPosesKotlin = (
   const width = dimensions.width ?? DEFAULT_ROBOT_WIDTH;
   const length = dimensions.length ?? DEFAULT_ROBOT_LENGTH;
   const savedPoses: SavedPose[] = [];
-  const usedNames = new Set<string>();
-  const poseRegex = /\bval\s+(START[A-Za-z0-9_]*)\s*=\s*Pose\s*\(/g;
-  let poseMatch: RegExpExecArray | null;
 
-  while ((poseMatch = poseRegex.exec(contents)) !== null) {
+  type FieldCoordinate = { value: number; offset: -1 | 0 | 1 };
+  const horizontalCoordinates = new Map<string, FieldCoordinate>();
+  const verticalCoordinates = new Map<string, FieldCoordinate>();
+
+  const parseOffset = (expression: string): -1 | 0 | 1 | null => {
+    const match = expression.trim().match(/(?:Offset\s*\.\s*)?(NEG|NONE|POS)\b/);
+    if (!match) return null;
+    return match[1] === "NEG" ? -1 : match[1] === "POS" ? 1 : 0;
+  };
+
+  const parseCoordinate = (expression: string, axis: "Horizontal" | "Vertical"): FieldCoordinate | null => {
+    const trimmedExpression = stripLineComment(expression).trim();
+    const referenceMatch = trimmedExpression.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (referenceMatch) {
+      return (axis === "Horizontal" ? horizontalCoordinates : verticalCoordinates).get(referenceMatch[1]) ?? null;
+    }
+
+    const constructorMatch = trimmedExpression.match(new RegExp(`^(?:[A-Za-z_][A-Za-z0-9_]*\\.)*${axis}\\s*\\(`));
+    if (!constructorMatch) return null;
+    const openParenIndex = trimmedExpression.indexOf("(", constructorMatch.index);
+    const closeParenIndex = findMatchingParen(trimmedExpression, openParenIndex);
+    if (closeParenIndex < 0) return null;
+
+    const args = splitTopLevelArgs(trimmedExpression.slice(openParenIndex + 1, closeParenIndex));
+    const value = evaluatePoseExpression(args[0] ?? "", width, length);
+    const offset = parseOffset(args[1] ?? "");
+    return value === null || offset === null ? null : { value, offset };
+  };
+
+  const coordinateRegex = /\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(Horizontal|Vertical)\s*\(/g;
+  let coordinateMatch: RegExpExecArray | null;
+  while ((coordinateMatch = coordinateRegex.exec(contents)) !== null) {
+    const openParenIndex = contents.indexOf("(", coordinateMatch.index);
+    const closeParenIndex = findMatchingParen(contents, openParenIndex);
+    if (closeParenIndex < 0) continue;
+
+    const coordinate = parseCoordinate(
+      `${coordinateMatch[2]}(${contents.slice(openParenIndex + 1, closeParenIndex)})`,
+      coordinateMatch[2] as "Horizontal" | "Vertical"
+    );
+    if (coordinate) {
+      (coordinateMatch[2] === "Horizontal" ? horizontalCoordinates : verticalCoordinates).set(coordinateMatch[1], coordinate);
+    }
+    coordinateRegex.lastIndex = closeParenIndex + 1;
+  }
+
+  const startPoseRegex = /\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*startPose\s*\(/g;
+  let poseMatch: RegExpExecArray | null;
+  while ((poseMatch = startPoseRegex.exec(contents)) !== null) {
     const name = stripStartPosePrefix(poseMatch[1]);
-    if (usedNames.has(name)) continue;
 
     const openParenIndex = contents.indexOf("(", poseMatch.index);
     const closeParenIndex = findMatchingParen(contents, openParenIndex);
     if (closeParenIndex < 0) continue;
 
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex)).map(stripLineComment);
-    const x = evaluatePoseExpression(args[0] ?? "", width, length);
-    const y = evaluatePoseExpression(args[1] ?? "", width, length);
-    const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
-    if (x === null || y === null) continue;
+    const horizontal = parseCoordinate(args[0] ?? "", "Horizontal");
+    const vertical = parseCoordinate(args[1] ?? "", "Vertical");
+    const headingMatch = (args[2] ?? "").match(/(?:Heading\s*\.\s*)?(NORTH|EAST|SOUTH|WEST)\b/);
+    if (!horizontal || !vertical || !headingMatch) continue;
 
-    usedNames.add(name);
-    savedPoses.push({ name, x, y, heading: normalizeHeading(heading ?? 0) });
-    poseRegex.lastIndex = closeParenIndex + 1;
+    const headings = { NORTH: 0, EAST: 90, SOUTH: 180, WEST: -90 } as const;
+    const heading = headings[headingMatch[1] as keyof typeof headings];
+    const sideways = heading === 90 || heading === -90;
+    const reachX = sideways ? length / 2 : width / 2;
+    const reachY = sideways ? width / 2 : length / 2;
+
+    savedPoses.push({
+      name,
+      ...(poseMatch[1].startsWith(START_POSE_PREFIX) ? {} : { kotlinName: poseMatch[1] }),
+      x: horizontal.value + horizontal.offset * reachX,
+      y: vertical.value + vertical.offset * reachY,
+      heading,
+    });
+    startPoseRegex.lastIndex = closeParenIndex + 1;
   }
 
   return savedPoses;

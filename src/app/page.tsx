@@ -1435,7 +1435,7 @@ export default function PathPlannerPage() {
       const contents = await file.text();
       const importedSavedPoses = parseSavedPosesKotlin(contents, robotConstants);
       if (importedSavedPoses.length === 0) {
-        window.alert("This poses file does not contain any START poses.");
+        window.alert("This poses file does not contain any startPose declarations.");
         return;
       }
 

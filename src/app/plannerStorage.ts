@@ -57,6 +57,7 @@ const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
   value.every(
     (pose) =>
       typeof pose?.name === "string" &&
+      (typeof pose?.kotlinName === "string" || pose?.kotlinName === undefined) &&
       typeof pose?.x === "number" &&
       typeof pose?.y === "number" &&
       (typeof pose?.heading === "number" || pose?.heading === undefined)

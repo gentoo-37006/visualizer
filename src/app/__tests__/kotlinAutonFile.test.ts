@@ -210,7 +210,7 @@ autonSequence(Alliance.BLUE)
 });
 
 describe("robot constants and saved poses", () => {
-  it("parses constants and resolves poses expressed against them", () => {
+  it("parses robot constants and ignores direct Pose declarations as saved poses", () => {
     const constants = parseRobotConstantsKotlin(`object Constants {
     const val WIDTH: Double = 18.0
     const val LENGTH: Double = 17.0
@@ -231,15 +231,79 @@ describe("robot constants and saved poses", () => {
       maxLateralVelocity: 50,
     });
 
+    expect(
+      parseSavedPosesKotlin(
+        `val START_WALL = Pose(-72.0 + Constants.HALF_WIDTH, 0.0, 90.0)`,
+        constants ?? DEFAULT_ROBOT_CONSTANTS
+      )
+    ).toEqual([]);
+  });
+
+  it("parses start poses defined from field-coordinate constraints", () => {
     const poses = parseSavedPosesKotlin(
-      `val START_WALL = Pose(-72.0 + Constants.HALF_WIDTH, 0.0, 90.0)`,
-      constants ?? DEFAULT_ROBOT_CONSTANTS
+      `private val NORTH_WALL = Vertical(HALF_FIELD_SIZE, Offset.NEG)
+private val EAST_WALL = Horizontal(HALF_FIELD_SIZE, Offset.NEG)
+private val SOUTH_WALL = Vertical(-HALF_FIELD_SIZE, Offset.POS)
+private val WEST_WALL = Horizontal(-HALF_FIELD_SIZE, Offset.POS)
+
+val START_RED_DEFAULT = startPose(
+    WEST_WALL,
+    NORTH_WALL,
+    Heading.SOUTH
+)
+val START_BLUE_DEFAULT = startPose(
+    EAST_WALL,
+    SOUTH_WALL,
+    Heading.NORTH
+)`,
+      { width: 18, length: 20 }
     );
 
-    expect(poses).toHaveLength(1);
-    expect(poses[0].name).toBe("WALL");
-    expect(poses[0].x).toBeCloseTo(-72 + 9, 6);
-    expect(poses[0].heading).toBe(90);
+    expect(poses).toEqual([
+      { name: "RED_DEFAULT", x: -63, y: 62, heading: 180 },
+      { name: "BLUE_DEFAULT", x: 63, y: -62, heading: 0 },
+    ]);
+  });
+
+  it("parses inline field coordinates and uses the heading-relative robot footprint", () => {
+    const poses = parseSavedPosesKotlin(
+      `val START_SIDEWAYS = startPose(
+    Horizontal(-24.0, Offset.NEG),
+    Vertical(-72.0, Offset.POS),
+    Heading.EAST
+)`,
+      { width: 18, length: 20 }
+    );
+
+    expect(poses).toEqual([
+      { name: "SIDEWAYS", x: -34, y: -63, heading: 90 },
+    ]);
+  });
+
+  it("recognizes startPose declarations without requiring a START name", () => {
+    const poses = parseSavedPosesKotlin(
+      `val audienceSide: Pose = startPose(
+    Horizontal(24.0, Offset.NONE),
+    Vertical(48.0, Offset.NEG),
+    Heading.WEST
+)`,
+      { width: 18, length: 20 }
+    );
+
+    expect(poses).toEqual([
+      { name: "audienceSide", kotlinName: "audienceSide", x: 24, y: 39, heading: -90 },
+    ]);
+
+    const auton = `val path1 = Path(
+    Linear(
+        Poses.audienceSide,
+        Pose(0.0, 0.0),
+    ),
+).constantHeading(0.0)
+
+autonSequence(Alliance.BLUE)
+    .path(path1)`;
+    expect(roundTrip(auton, poses)).toContain("Poses.audienceSide");
   });
 
   it("keeps the precision of a trigger's t through a round trip", () => {
