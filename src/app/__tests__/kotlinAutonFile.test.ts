@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ROBOT_CONSTANTS,
   parsePathPlannerKotlin,
-  parseRobotConstantsKotlin,
+  parsePedroConstants,
   parseSavedPosesKotlin,
   serializePathPlannerKotlin,
   type SavedPose,
@@ -211,24 +211,49 @@ autonSequence(Alliance.BLUE)
 
 describe("robot constants and saved poses", () => {
   it("parses robot constants and ignores direct Pose declarations as saved poses", () => {
-    const constants = parseRobotConstantsKotlin(`object Constants {
-    const val WIDTH: Double = 18.0
-    const val LENGTH: Double = 17.0
+    const constants = parsePedroConstants(`public class Constants {
+    public static final double WIDTH = 99.0;
+    public static final double LENGTH = 98.0;
+    public static ForesightConfig foresightConfig = new ForesightConfig(c -> {
+        c.maxAchievableForwardVelocity.set(72.5);
+        c.maxAchievableStrafeVelocity.set(52.25);
+        c.naturalForwardDeceleration.set(85.0);
+        c.naturalStrafeDeceleration.set(104.5);
+        c.maxAccelerationConstraint.set(40.0);
+        c.maxVelocityConstraint.set(ForesightConfig.Constraint.NONE);
+        c.maxDecelerationConstraint.set(50.0);
+        c.maxDecelerationScale.set(0.8);
+        c.headingFeedback.set(Controller.proportional(4.5));
+        c.headingBrakeCoefficients.set(Vector2D.cartesian(0.05, 0.006));
+        c.linearBrakeCoefficients.set(Matrix.diag(0.11, 0.09));
+        c.quadraticBrakeCoefficients.set(Matrix.diag(0.0015, 0.0014));
+        c.cosineScale.set(true);
+        c.turnBeforeDriving.set(true);
+        c.headingDeviationTolerance.set(Math.toRadians(12.0));
+    });
+}`, { width: 18, length: 17 });
 
-    val follower = FollowerConstants()
-        .forwardZeroPowerAcceleration(40.0)
-        .lateralZeroPowerAcceleration(35.0)
-        .xVelocity(60.0)
-        .yVelocity(50.0)
-}`);
-
-    expect(constants).toEqual({
+    expect(constants).toMatchObject({
       width: 18,
       length: 17,
-      forwardBrakeStrength: 40,
-      lateralBrakeStrength: 35,
-      maxForwardVelocity: 60,
-      maxLateralVelocity: 50,
+      maxAchievableForwardVelocity: 72.5,
+      maxAchievableStrafeVelocity: 52.25,
+      naturalForwardDeceleration: 85,
+      naturalStrafeDeceleration: 104.5,
+      maxAccelerationConstraint: 40,
+      maxVelocityConstraint: null,
+      maxDecelerationConstraint: 50,
+      maxDecelerationScale: 0.8,
+      headingFeedback: 4.5,
+      headingBrakeLinear: 0.05,
+      headingBrakeQuadratic: 0.006,
+      linearBrakeForward: 0.11,
+      linearBrakeStrafe: 0.09,
+      quadraticBrakeForward: 0.0015,
+      quadraticBrakeStrafe: 0.0014,
+      cosineScale: true,
+      turnBeforeDriving: true,
+      headingDeviationTolerance: 12,
     });
 
     expect(
@@ -403,6 +428,6 @@ autonSequence(Alliance.BLUE)
   });
 
   it("returns null when the constants file is missing required values", () => {
-    expect(parseRobotConstantsKotlin("object Constants { const val WIDTH: Double = 18.0 }")).toBeNull();
+    expect(parsePedroConstants("public class Constants {}")).toBeNull();
   });
 });

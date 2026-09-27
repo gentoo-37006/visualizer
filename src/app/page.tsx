@@ -18,7 +18,7 @@ import { usePlannerState } from "./hooks/usePlannerState";
 import {
   serializePathPlannerKotlin,
   parsePathPlannerKotlin,
-  parseRobotConstantsKotlin,
+  parsePedroConstants,
   parseSavedPosesKotlin,
   stripStartPosePrefix,
   DEFAULT_AUTON_ALLIANCE,
@@ -41,7 +41,6 @@ import type {
   DragTarget,
   FieldSize,
   HeadingInterpolation,
-  MotionParameters,
   PathActionTriggerMode,
   PathGeometry,
   PathHeadingField,
@@ -82,14 +81,11 @@ import {
   snapSvgPixel,
 } from "./playback";
 import {
-  DEFAULT_MOTION_PARAMETERS,
   AUTON_SETTINGS_STORAGE_KEY,
-  MOTION_PARAMETERS_STORAGE_KEY,
   ROBOT_CONSTANTS_STORAGE_KEY,
   SAVED_POSES_STORAGE_KEY,
   loadAutonDraft,
   loadAutonSettings,
-  loadMotionParameters,
   loadRobotConstants,
   loadSavedPoses,
   saveAutonDraft,
@@ -125,11 +121,9 @@ export default function PathPlannerPage() {
   const [isKotlinExportVisible, setIsKotlinExportVisible] = useState(false);
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
-  const [motionParameters, setMotionParameters] = useState<MotionParameters>(DEFAULT_MOTION_PARAMETERS);
-  const [motionParameterDrafts, setMotionParameterDrafts] = useState({
-    maxAngularVelocity: String(DEFAULT_MOTION_PARAMETERS.maxAngularVelocity),
-    maxForwardAcceleration: String(DEFAULT_MOTION_PARAMETERS.maxForwardAcceleration),
-    maxLateralAcceleration: String(DEFAULT_MOTION_PARAMETERS.maxLateralAcceleration),
+  const [robotDimensionDrafts, setRobotDimensionDrafts] = useState({
+    width: String(DEFAULT_ROBOT_CONSTANTS.width),
+    length: String(DEFAULT_ROBOT_CONSTANTS.length),
   });
   const [didLoadStoredSettings, setDidLoadStoredSettings] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
@@ -232,8 +226,8 @@ export default function PathPlannerPage() {
   );
 
   const playbackTimeline = useMemo(
-    () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants, motionParameters),
-    [motionParameters, orderedSequenceItems, points, robotConstants]
+    () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants),
+    [orderedSequenceItems, points, robotConstants]
   );
   const clampedPlaybackTime = Math.min(playbackTime, playbackTimeline.totalTime);
 
@@ -376,7 +370,6 @@ export default function PathPlannerPage() {
     // opens in the background never composites, so requestAnimationFrame would
     // leave stored settings unloaded and unsaved until it is first focused.
     const timeoutId = window.setTimeout(() => {
-      const storedMotionParameters = loadMotionParameters();
       const storedAutonSettings = loadAutonSettings();
       const storedAutonDraft = loadAutonDraft(storedAutonSettings.alliance);
       const storedCustomFieldImage = loadCustomFieldImage();
@@ -388,8 +381,8 @@ export default function PathPlannerPage() {
         setPlannerAlliance(storedAutonSettings.alliance);
       }
       setSavedPoses(loadSavedPoses());
-      setRobotConstants(loadRobotConstants());
-      setMotionParameters(storedMotionParameters);
+      const storedRobotConstants = loadRobotConstants();
+      setRobotConstants(storedRobotConstants);
       setCustomFieldImage(storedCustomFieldImage);
       // A stored custom selection is meaningless if the image itself is gone.
       setFieldImageSelection(
@@ -397,10 +390,9 @@ export default function PathPlannerPage() {
           ? DEFAULT_FIELD_IMAGE_SELECTION
           : storedFieldImageSelection
       );
-      setMotionParameterDrafts({
-        maxAngularVelocity: String(storedMotionParameters.maxAngularVelocity),
-        maxForwardAcceleration: String(storedMotionParameters.maxForwardAcceleration),
-        maxLateralAcceleration: String(storedMotionParameters.maxLateralAcceleration),
+      setRobotDimensionDrafts({
+        width: String(storedRobotConstants.width),
+        length: String(storedRobotConstants.length),
       });
       setDidLoadStoredSettings(true);
     }, 0);
@@ -441,8 +433,8 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     if (!didLoadStoredSettings) return;
-    window.localStorage.setItem(MOTION_PARAMETERS_STORAGE_KEY, JSON.stringify(motionParameters));
-  }, [didLoadStoredSettings, motionParameters]);
+    window.localStorage.setItem(ROBOT_CONSTANTS_STORAGE_KEY, JSON.stringify(robotConstants));
+  }, [didLoadStoredSettings, robotConstants]);
 
   // Dragging a point fires on every frame, so the draft is only written once the edit settles.
   useEffect(() => {
@@ -506,21 +498,21 @@ export default function PathPlannerPage() {
     return () => cancelAnimationFrame(frameId);
   }, [isPlaybackRunning, playbackTimeline.totalTime]);
 
-  const updateMotionParameter = (key: keyof MotionParameters, value: string) => {
+  const updateRobotDimension = (key: "width" | "length", value: string) => {
     if (!isNumericDraft(value)) return;
-    setMotionParameterDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
+    setRobotDimensionDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
     const parsedValue = Number.parseFloat(value);
     if (!Number.isFinite(parsedValue)) return;
-    setMotionParameters((currentParameters) => ({
-      ...currentParameters,
+    setRobotConstants((currentConstants) => ({
+      ...currentConstants,
       [key]: Math.max(0.1, parsedValue),
     }));
   };
 
-  const formatMotionParameter = (key: keyof MotionParameters) => {
-    setMotionParameterDrafts((currentDrafts) => ({
+  const formatRobotDimension = (key: "width" | "length") => {
+    setRobotDimensionDrafts((currentDrafts) => ({
       ...currentDrafts,
-      [key]: motionParameters[key].toFixed(1),
+      [key]: robotConstants[key].toFixed(2),
     }));
   };
 
@@ -1455,7 +1447,7 @@ export default function PathPlannerPage() {
 
     try {
       const contents = await file.text();
-      const importedRobotConstants = parseRobotConstantsKotlin(contents);
+      const importedRobotConstants = parsePedroConstants(contents, robotConstants);
       if (!importedRobotConstants) {
         window.alert("This constants file does not contain the required robot constants.");
         return;
@@ -1694,7 +1686,7 @@ export default function PathPlannerPage() {
           autonAlliance={autonAlliance}
           savedPoses={savedPoses}
           robotConstants={robotConstants}
-          motionParameterDrafts={motionParameterDrafts}
+          robotDimensionDrafts={robotDimensionDrafts}
           hoverTarget={hoverTarget}
           activeTarget={activeTarget}
           undoStackLength={undoStack.length}
@@ -1761,8 +1753,8 @@ export default function PathPlannerPage() {
           onAddAction={handleAddAction}
           onToggleControlPointsHidden={() => setAreControlPointsHidden((currentValue) => !currentValue)}
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}
-          onUpdateMotionParameter={updateMotionParameter}
-          onFormatMotionParameter={formatMotionParameter}
+          onUpdateRobotDimension={updateRobotDimension}
+          onFormatRobotDimension={formatRobotDimension}
         />
         <PlaybackControls
           isRunning={isPlaybackRunning}

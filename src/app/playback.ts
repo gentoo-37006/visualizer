@@ -1,6 +1,6 @@
 import type { RobotConstants } from "./kotlinAutonFile";
 import { FIELD_SIZE_INCHES, INITIAL_POINT_COLOR } from "./plannerConstants";
-import type { AutonSequenceItem, MotionParameters, Point } from "./plannerTypes";
+import type { AutonSequenceItem, Point } from "./plannerTypes";
 import { getPathSegments, normalizeHeading, samplePathSegments } from "./plannerUtils";
 
 export type PlaybackPose = {
@@ -31,6 +31,7 @@ export type PlaybackSegment =
       samples: PlaybackPose[];
       cumulativeDistances: number[];
       profile: MotionProfile;
+      simulationFrames: Array<{ time: number; distance: number; heading: number }>;
     }
   | {
       kind: "wait";
@@ -85,15 +86,13 @@ const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny
 export const safeMotionLimit = (value: number, fallback = 1) =>
   Number.isFinite(value) && Math.abs(value) > 0.001 ? Math.abs(value) : fallback;
 
-const getDirectionalMotionLimit = (
+const getDirectionalComponents = (
   dx: number,
   dy: number,
-  heading: number,
-  forwardLimit: number,
-  lateralLimit: number
+  heading: number
 ) => {
   const distance = Math.hypot(dx, dy);
-  if (distance <= 0.001) return Math.max(forwardLimit, lateralLimit);
+  if (distance <= 0.001) return { forward: 1, strafe: 0 };
 
   const unitX = dx / distance;
   const unitY = dy / distance;
@@ -102,12 +101,54 @@ const getDirectionalMotionLimit = (
   const forwardY = Math.cos(headingRadians);
   const lateralX = Math.cos(headingRadians);
   const lateralY = -Math.sin(headingRadians);
-  const forwardComponent = Math.abs(unitX * forwardX + unitY * forwardY);
-  const lateralComponent = Math.abs(unitX * lateralX + unitY * lateralY);
-  const limits = [];
-  if (forwardComponent > 0.001) limits.push(forwardLimit / forwardComponent);
-  if (lateralComponent > 0.001) limits.push(lateralLimit / lateralComponent);
-  return Math.min(...limits);
+  return {
+    forward: Math.abs(unitX * forwardX + unitY * forwardY),
+    strafe: Math.abs(unitX * lateralX + unitY * lateralY),
+  };
+};
+
+const getDirectionalVelocityLimit = (
+  dx: number,
+  dy: number,
+  heading: number,
+  forwardLimit: number,
+  strafeLimit: number
+) => {
+  const components = getDirectionalComponents(dx, dy, heading);
+  return 1 / (components.forward / forwardLimit + components.strafe / strafeLimit);
+};
+
+const getDirectionalAccelerationLimit = (
+  dx: number,
+  dy: number,
+  heading: number,
+  forwardLimit: number,
+  strafeLimit: number
+) => {
+  const components = getDirectionalComponents(dx, dy, heading);
+  return 1 / (
+    Math.pow(components.forward, 3) / forwardLimit +
+    Math.pow(components.strafe, 3) / strafeLimit
+  );
+};
+
+const getPedroBrakingAcceleration = (
+  dx: number,
+  dy: number,
+  heading: number,
+  velocity: number,
+  constants: RobotConstants
+) => {
+  const components = getDirectionalComponents(dx, dy, heading);
+  const linear = constants.linearBrakeForward * Math.pow(components.forward, 2) +
+    constants.linearBrakeStrafe * Math.pow(components.strafe, 2);
+  const quadratic = constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
+    constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3);
+  const stoppingDistance = Math.max(
+    1e-6,
+    (quadratic * velocity * velocity + linear * velocity) * Math.max(1e-6, constants.brakeAggression)
+  );
+  return (velocity * velocity) / (2 * stoppingDistance);
 };
 
 const createMotionProfile = (
@@ -118,16 +159,22 @@ const createMotionProfile = (
 ): MotionProfile => {
   const safeDistance = Math.max(0, distance);
   const safeMaxVelocity = safeMotionLimit(maxVelocity);
-  const safeAcceleration = safeMotionLimit(acceleration);
+  const safeAcceleration = Number.isFinite(acceleration)
+    ? safeMotionLimit(acceleration)
+    : Number.POSITIVE_INFINITY;
   const safeBrakeAcceleration = safeMotionLimit(brakeAcceleration, safeAcceleration);
-  const peakVelocity = Math.sqrt(
-    (2 * safeAcceleration * safeBrakeAcceleration * safeDistance) /
-      (safeAcceleration + safeBrakeAcceleration)
-  );
+  const peakVelocity = Number.isFinite(safeAcceleration)
+    ? Math.sqrt(
+        (2 * safeAcceleration * safeBrakeAcceleration * safeDistance) /
+          (safeAcceleration + safeBrakeAcceleration)
+      )
+    : Math.sqrt(2 * safeBrakeAcceleration * safeDistance);
   const cruiseVelocity = Math.min(safeMaxVelocity, peakVelocity);
-  const accelerationTime = cruiseVelocity / safeAcceleration;
+  const accelerationTime = Number.isFinite(safeAcceleration) ? cruiseVelocity / safeAcceleration : 0;
   const brakeTime = cruiseVelocity / safeBrakeAcceleration;
-  const accelerationDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeAcceleration);
+  const accelerationDistance = Number.isFinite(safeAcceleration)
+    ? (cruiseVelocity * cruiseVelocity) / (2 * safeAcceleration)
+    : 0;
   const brakeDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeBrakeAcceleration);
   const cruiseDistance = Math.max(0, safeDistance - accelerationDistance - brakeDistance);
   const cruiseTime = cruiseDistance / cruiseVelocity;
@@ -150,7 +197,7 @@ export const getMotionProfileDuration = (profile: MotionProfile) =>
 
 export const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: number) => {
   const safeTime = Math.max(0, Math.min(time, getMotionProfileDuration(profile)));
-  if (safeTime <= profile.accelerationTime) {
+  if (profile.accelerationTime > 0 && safeTime <= profile.accelerationTime) {
     return 0.5 * profile.acceleration * safeTime * safeTime;
   }
 
@@ -169,19 +216,111 @@ export const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: num
   );
 };
 
+const getSampleHeadingAtDistance = (
+  samples: PlaybackPose[],
+  cumulativeDistances: number[],
+  distance: number
+) => {
+  const foundEndIndex = cumulativeDistances.findIndex((value) => value >= distance);
+  const safeEndIndex = foundEndIndex < 0 ? cumulativeDistances.length - 1 : Math.max(1, foundEndIndex);
+  const startIndex = Math.max(0, safeEndIndex - 1);
+  const startDistance = cumulativeDistances[startIndex] ?? 0;
+  const endDistance = cumulativeDistances[safeEndIndex] ?? startDistance;
+  const localT = endDistance > startDistance ? clamp01((distance - startDistance) / (endDistance - startDistance)) : 0;
+  return interpolateHeading(samples[startIndex]?.heading ?? 0, samples[safeEndIndex]?.heading ?? 0, localT);
+};
+
+const cosineScale = (error: number, tolerance: number) => {
+  const safeTolerance = Math.max(1e-6, Math.abs(tolerance));
+  const radians = Math.min(Math.abs(error) * ((Math.PI / 2) / safeTolerance), Math.PI / 2);
+  return Math.cos(radians);
+};
+
+const headingVelocityForError = (errorDegrees: number, constants: RobotConstants) => {
+  const error = Math.abs(errorDegrees) * (Math.PI / 180);
+  if (error <= 1e-9) return 0;
+  const linear = Math.max(0, Math.abs(constants.headingBrakeLinear));
+  const quadratic = Math.max(0, Math.abs(constants.headingBrakeQuadratic));
+  let brakingVelocity: number;
+  if (quadratic > 1e-9) {
+    brakingVelocity = (-linear + Math.sqrt(linear * linear + 4 * quadratic * error)) / (2 * quadratic);
+  } else if (linear > 1e-9) {
+    brakingVelocity = error / linear;
+  } else {
+    brakingVelocity = error;
+  }
+  const feedbackPower = Math.min(1, Math.abs(constants.headingFeedback * (errorDegrees * Math.PI / 180)));
+  return brakingVelocity * feedbackPower * (180 / Math.PI);
+};
+
+const simulatePedroHeading = (
+  profile: MotionProfile,
+  samples: PlaybackPose[],
+  cumulativeDistances: number[],
+  initialHeading: number,
+  constants: RobotConstants
+) => {
+  const step = 1 / 100;
+  const profileDuration = getMotionProfileDuration(profile);
+  const frames = [{ time: 0, distance: 0, heading: normalizeHeading(initialHeading) }];
+  let elapsed = 0;
+  let profileTime = 0;
+  let heading = normalizeHeading(initialHeading);
+  let holdElapsed = 0;
+  const timeoutSeconds = Math.max(0, constants.timeoutConstraint) / 1000;
+
+  while (elapsed < 120) {
+    const distance = getMotionProfileDistanceAtTime(profile, profileTime);
+    const targetHeading = getSampleHeadingAtDistance(samples, cumulativeDistances, distance);
+    const headingError = normalizeHeading(targetHeading - heading);
+    const maxHeadingStep = headingVelocityForError(headingError, constants) * step;
+    heading = normalizeHeading(heading + Math.sign(headingError) * Math.min(Math.abs(headingError), maxHeadingStep));
+
+    let driveScale = 1;
+    if (constants.cosineScale && Math.abs(headingError) > constants.headingDeviationTolerance) {
+      driveScale = constants.turnBeforeDriving
+        ? 0
+        : cosineScale(headingError, constants.headingDeviationTolerance);
+    }
+    if (profileTime < profileDuration) {
+      profileTime = Math.min(profileDuration, profileTime + step * driveScale);
+    } else {
+      holdElapsed += step;
+    }
+
+    elapsed += step;
+    const nextDistance = getMotionProfileDistanceAtTime(profile, profileTime);
+    frames.push({ time: elapsed, distance: nextDistance, heading });
+
+    const finalHeading = samples[samples.length - 1]?.heading ?? heading;
+    const headingComplete = Math.abs(normalizeHeading(finalHeading - heading)) <= constants.headingConstraint;
+    if (profileTime >= profileDuration && (headingComplete || holdElapsed >= timeoutSeconds)) break;
+  }
+
+  return frames;
+};
+
 export const buildPlaybackTimeline = (
   points: Point[],
   orderedSequenceItems: AutonSequenceItem[],
-  robotConstants: RobotConstants,
-  motionParameters: MotionParameters
+  robotConstants: RobotConstants
 ): PlaybackTimeline => {
-  const angularVelocity = safeMotionLimit(motionParameters.maxAngularVelocity);
-  const maxForwardVelocity = safeMotionLimit(robotConstants.maxForwardVelocity);
-  const maxLateralVelocity = safeMotionLimit(robotConstants.maxLateralVelocity);
-  const maxForwardAcceleration = safeMotionLimit(motionParameters.maxForwardAcceleration);
-  const maxLateralAcceleration = safeMotionLimit(motionParameters.maxLateralAcceleration);
-  const forwardBrakeAcceleration = safeMotionLimit(robotConstants.forwardBrakeStrength, maxForwardAcceleration);
-  const lateralBrakeAcceleration = safeMotionLimit(robotConstants.lateralBrakeStrength, maxLateralAcceleration);
+  const maxForwardVelocity = safeMotionLimit(robotConstants.maxAchievableForwardVelocity);
+  const maxLateralVelocity = safeMotionLimit(robotConstants.maxAchievableStrafeVelocity);
+  const forwardBrakeAcceleration = safeMotionLimit(robotConstants.naturalForwardDeceleration);
+  const lateralBrakeAcceleration = safeMotionLimit(robotConstants.naturalStrafeDeceleration);
+  const accelerationConstraint = robotConstants.maxAccelerationConstraint !== null
+    ? safeMotionLimit(robotConstants.maxAccelerationConstraint)
+    : Number.POSITIVE_INFINITY;
+  const velocityConstraint = robotConstants.maxVelocityConstraint !== null
+    ? safeMotionLimit(robotConstants.maxVelocityConstraint)
+    : Number.POSITIVE_INFINITY;
+  const decelerationConstraint = robotConstants.maxDecelerationConstraint !== null
+    ? safeMotionLimit(robotConstants.maxDecelerationConstraint)
+    : Number.POSITIVE_INFINITY;
+  const decelerationScale = robotConstants.maxDecelerationScale !== null
+    ? Math.min(1, safeMotionLimit(robotConstants.maxDecelerationScale))
+    : 1;
   const segments: PlaybackSegment[] = [];
   let elapsedTime = 0;
   let currentPose: PlaybackPose = {
@@ -251,41 +390,31 @@ export const buildPlaybackTimeline = (
         return {
           maxVelocity: Math.min(
             limits.maxVelocity,
-            getDirectionalMotionLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity)
+            velocityConstraint,
+            getDirectionalVelocityLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity)
           ),
-          acceleration: Math.min(
-            limits.acceleration,
-            getDirectionalMotionLimit(dx, dy, heading, maxForwardAcceleration, maxLateralAcceleration)
-          ),
+          acceleration: accelerationConstraint,
           brakeAcceleration: Math.min(
             limits.brakeAcceleration,
-            getDirectionalMotionLimit(dx, dy, heading, forwardBrakeAcceleration, lateralBrakeAcceleration)
+            decelerationConstraint,
+            getPedroBrakingAcceleration(
+              dx,
+              dy,
+              heading,
+              getDirectionalVelocityLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity),
+              robotConstants
+            ),
+            getDirectionalAccelerationLimit(dx, dy, heading, forwardBrakeAcceleration, lateralBrakeAcceleration) * decelerationScale
           ),
         };
       },
       {
-        maxVelocity: Math.max(maxForwardVelocity, maxLateralVelocity),
-        acceleration: Math.max(maxForwardAcceleration, maxLateralAcceleration),
+        maxVelocity: Math.min(velocityConstraint, Math.max(maxForwardVelocity, maxLateralVelocity)),
+        acceleration: accelerationConstraint,
         brakeAcceleration: Math.max(forwardBrakeAcceleration, lateralBrakeAcceleration),
       }
     );
     const distance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
-    const pathStartHeading = samples[0]?.heading ?? currentPose.heading;
-    const rotateDegrees = Math.abs(normalizeHeading(pathStartHeading - currentPose.heading));
-    if (rotateDegrees > 0.001) {
-      const rotateDuration = rotateDegrees / angularVelocity;
-      segments.push({
-        kind: "rotate",
-        startTime: elapsedTime,
-        duration: rotateDuration,
-        pose: currentPose,
-        point,
-        startHeading: currentPose.heading,
-        endHeading: pathStartHeading,
-      });
-      elapsedTime += rotateDuration;
-      currentPose = { ...currentPose, heading: pathStartHeading };
-    }
 
     if (distance > 0.001) {
       const profile = createMotionProfile(
@@ -294,7 +423,14 @@ export const buildPlaybackTimeline = (
         motionLimits.acceleration,
         motionLimits.brakeAcceleration
       );
-      const duration = Math.max(getMotionProfileDuration(profile), 0.001);
+      const simulationFrames = simulatePedroHeading(
+        profile,
+        samples,
+        cumulativeDistances,
+        currentPose.heading,
+        robotConstants
+      );
+      const duration = Math.max(simulationFrames[simulationFrames.length - 1]?.time ?? 0, 0.001);
 
       segments.push({
         kind: "path",
@@ -304,10 +440,13 @@ export const buildPlaybackTimeline = (
         samples,
         cumulativeDistances,
         profile,
+        simulationFrames,
       });
       elapsedTime += duration;
+      const finalSimulatedHeading = simulationFrames[simulationFrames.length - 1]?.heading;
       currentPose = {
         ...(samples[samples.length - 1] ?? currentPose),
+        heading: finalSimulatedHeading ?? samples[samples.length - 1]?.heading ?? currentPose.heading,
         color: point.color,
       };
     }
@@ -345,7 +484,16 @@ export const getPlaybackPoseAtTime = (
   }
 
   const segmentTime = clampedPlaybackTime - activeSegment.startTime;
-  const pathDistance = getMotionProfileDistanceAtTime(activeSegment.profile, segmentTime);
+  const foundFrameEndIndex = activeSegment.simulationFrames.findIndex((frame) => frame.time >= segmentTime);
+  const safeFrameEndIndex = foundFrameEndIndex < 0
+    ? activeSegment.simulationFrames.length - 1
+    : Math.max(1, foundFrameEndIndex);
+  const frameStart = activeSegment.simulationFrames[Math.max(0, safeFrameEndIndex - 1)];
+  const frameEnd = activeSegment.simulationFrames[safeFrameEndIndex] ?? frameStart;
+  const frameT = frameEnd.time > frameStart.time
+    ? clamp01((segmentTime - frameStart.time) / (frameEnd.time - frameStart.time))
+    : 0;
+  const pathDistance = interpolateNumber(frameStart.distance, frameEnd.distance, frameT);
   const startIndex = Math.max(
     0,
     activeSegment.cumulativeDistances.findIndex((distance) => distance >= pathDistance) - 1
@@ -355,20 +503,9 @@ export const getPlaybackPoseAtTime = (
   const endDistance = activeSegment.cumulativeDistances[endIndex] ?? startDistance;
   const localT =
     endDistance > startDistance ? Math.max(0, Math.min(1, (pathDistance - startDistance) / (endDistance - startDistance))) : 0;
-  const bezierT = (startIndex + localT) / Math.max(1, activeSegment.samples.length - 1);
   const startSample = activeSegment.samples[startIndex] ?? initialPose;
   const endSample = activeSegment.samples[endIndex] ?? startSample;
-  const headingMode = activeSegment.point.headingMode ?? "constant";
-  const heading =
-    headingMode === "linear"
-      ? interpolateHeadingRange(
-          activeSegment.point.startHeading ?? 0,
-          activeSegment.point.endHeading ?? 0,
-          bezierT,
-          activeSegment.point.linearStartT ?? 0,
-          activeSegment.point.linearEndT ?? 1
-        )
-      : interpolateHeading(startSample.heading, endSample.heading, localT);
+  const heading = interpolateHeading(frameStart.heading, frameEnd.heading, frameT);
 
   return {
     pose: {
@@ -434,8 +571,8 @@ const createAutonomousDeadlineMarker = (totalTime: number) => {
 };
 
 /**
- * Seconds each path costs the auton, counting the turn onto its start heading:
- * the sequence cannot skip that rotation, so it belongs to the path that needs it.
+ * Seconds each path costs the auton. Pedro changes heading while following the
+ * curve, so heading interpolation does not create a separate rotation segment.
  */
 export const getPathDurationsByPointId = (timeline: PlaybackTimeline) => {
   const durations = new Map<string, number>();

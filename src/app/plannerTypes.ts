@@ -87,12 +87,6 @@ export type PlannerHistoryState = {
 
 export type PersistedPlannerDraft = PlannerSnapshot & Partial<PlannerHistoryState>;
 
-export type MotionParameters = {
-  maxAngularVelocity: number;
-  maxForwardAcceleration: number;
-  maxLateralAcceleration: number;
-};
-
 export type DragTarget =
   | { kind: "point"; index: number }
   | { kind: "segmentEnd"; pathIndex: number; segmentIndex: number }

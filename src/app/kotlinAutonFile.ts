@@ -46,10 +46,35 @@ export type SavedPose = {
 export type RobotConstants = {
   width: number;
   length: number;
-  forwardBrakeStrength: number;
-  lateralBrakeStrength: number;
-  maxForwardVelocity: number;
-  maxLateralVelocity: number;
+  maxAchievableForwardVelocity: number;
+  maxAchievableStrafeVelocity: number;
+  naturalForwardDeceleration: number;
+  naturalStrafeDeceleration: number;
+  linearBrakeForward: number;
+  linearBrakeStrafe: number;
+  quadraticBrakeForward: number;
+  quadraticBrakeStrafe: number;
+  maxAccelerationConstraint: number | null;
+  maxVelocityConstraint: number | null;
+  maxDecelerationConstraint: number | null;
+  maxDecelerationScale: number | null;
+  coastDownToVelocity: number;
+  brakeAggression: number;
+  maxBrakingPower: number;
+  headingFeedback: number;
+  headingBrakeLinear: number;
+  headingBrakeQuadratic: number;
+  headingDriveRatio: number;
+  headingDeviationTolerance: number;
+  translationalDeviationTolerance: number;
+  cosineScale: boolean;
+  turnBeforeDriving: boolean;
+  brakeAtEnd: boolean;
+  parametricTConstraint: number;
+  headingConstraint: number;
+  translationalConstraint: number;
+  velocityConstraint: number;
+  timeoutConstraint: number;
 };
 
 type ParsedPoseReference = {
@@ -71,10 +96,35 @@ const withStartPosePrefix = (name: string) =>
 export const DEFAULT_ROBOT_CONSTANTS: RobotConstants = {
   width: DEFAULT_ROBOT_WIDTH,
   length: DEFAULT_ROBOT_LENGTH,
-  forwardBrakeStrength: 35,
-  lateralBrakeStrength: 70,
-  maxForwardVelocity: 60,
-  maxLateralVelocity: 45,
+  maxAchievableForwardVelocity: 60,
+  maxAchievableStrafeVelocity: 45,
+  naturalForwardDeceleration: 35,
+  naturalStrafeDeceleration: 70,
+  linearBrakeForward: 0.10605894992901523,
+  linearBrakeStrafe: 0.08719146175596092,
+  quadraticBrakeForward: 0.0014663966976606565,
+  quadraticBrakeStrafe: 0.0013837064502458813,
+  maxAccelerationConstraint: null,
+  maxVelocityConstraint: null,
+  maxDecelerationConstraint: null,
+  maxDecelerationScale: null,
+  coastDownToVelocity: 0,
+  brakeAggression: 1,
+  maxBrakingPower: 0.2,
+  headingFeedback: 5.258721785960744,
+  headingBrakeLinear: 0.05642143125655298,
+  headingBrakeQuadratic: 0.0063829525363003695,
+  headingDriveRatio: 0.5,
+  headingDeviationTolerance: 11.25,
+  translationalDeviationTolerance: 2.5,
+  cosineScale: false,
+  turnBeforeDriving: false,
+  brakeAtEnd: true,
+  parametricTConstraint: 0.025,
+  headingConstraint: 0.007 * (180 / Math.PI),
+  translationalConstraint: 0.1,
+  velocityConstraint: 0.1,
+  timeoutConstraint: 100,
 };
 
 const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: string }, savedPoses: SavedPose[]) => {
@@ -144,47 +194,116 @@ const evaluatePoseExpression = (expression: string, width = DEFAULT_ROBOT_WIDTH,
   }
 };
 
-const parseConstantValue = (contents: string, name: string) => {
-  const match = contents.match(new RegExp(`\\bconst\\s+val\\s+${name}\\s*:\\s*(?:Double|Int)\\s*=\\s*([^\\n]+)`));
-  if (!match) return null;
-
-  return evaluatePoseExpression(stripLineComment(match[1]));
-};
-
 const parseChainedMethodValue = (contents: string, name: string) => {
-  const match = contents.match(new RegExp(`\\.${name}\\s*\\(\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*\\)`));
+  const numberPattern = "[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?";
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*(${numberPattern})[fFdD]?\\s*\\)`));
   if (!match) return null;
 
   const value = Number(match[1]);
   return Number.isFinite(value) ? value : null;
 };
 
-export const parseRobotConstantsKotlin = (contents: string): RobotConstants | null => {
-  const width = parseConstantValue(contents, "WIDTH");
-  const length = parseConstantValue(contents, "LENGTH");
-  const forwardBrakeStrength = parseChainedMethodValue(contents, "forwardZeroPowerAcceleration");
-  const lateralBrakeStrength = parseChainedMethodValue(contents, "lateralZeroPowerAcceleration");
-  const maxForwardVelocity = parseChainedMethodValue(contents, "xVelocity");
-  const maxLateralVelocity = parseChainedMethodValue(contents, "yVelocity");
+const parseOptionalConstraint = (contents: string, name: string) => {
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*([^)]+?)\\s*\\)`));
+  if (!match) return null;
+  if (/\b(?:ForesightConfig\s*\.\s*)?Constraint\s*\.\s*NONE\b/.test(match[1])) return null;
+
+  const value = Number(match[1].trim().replace(/[fFdD]$/, ""));
+  return Number.isFinite(value) ? value : null;
+};
+
+const parseConfiguredNumber = (contents: string, name: string, fallback: number) => {
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*(Math\\.toRadians\\s*\\()?\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)[fFdD]?\\s*\\)?\\s*\\)`));
+  if (!match) return fallback;
+  const value = Number(match[2]);
+  if (!Number.isFinite(value)) return fallback;
+  return match[1] ? value : value;
+};
+
+const parseConfiguredAngle = (contents: string, name: string, fallbackDegrees: number) => {
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*(Math\\.toRadians\\s*\\()?\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)[fFdD]?\\s*\\)?\\s*\\)`));
+  if (!match) return fallbackDegrees;
+  const value = Number(match[2]);
+  return Number.isFinite(value) ? (match[1] ? value : value * (180 / Math.PI)) : fallbackDegrees;
+};
+
+const parseConfiguredBoolean = (contents: string, name: string, fallback: boolean) => {
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*(true|false)\\s*\\)`, "i"));
+  return match ? match[1].toLowerCase() === "true" : fallback;
+};
+
+const parseHeadingFeedback = (contents: string) => {
+  const match = contents.match(/\.headingFeedback\s*\.\s*set\s*\(\s*Controller\.proportional\s*\(\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*\)\s*\)/);
+  return match ? Number(match[1]) : DEFAULT_ROBOT_CONSTANTS.headingFeedback;
+};
+
+const parseHeadingBrakeCoefficients = (contents: string) => {
+  const match = contents.match(/\.headingBrakeCoefficients\s*\.\s*set\s*\(\s*Vector2D\.cartesian\s*\(\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*\)\s*\)/);
+  return match
+    ? { linear: Number(match[1]), quadratic: Number(match[2]) }
+    : { linear: DEFAULT_ROBOT_CONSTANTS.headingBrakeLinear, quadratic: DEFAULT_ROBOT_CONSTANTS.headingBrakeQuadratic };
+};
+
+const parseBrakeMatrix = (contents: string, name: string, forwardFallback: number, strafeFallback: number) => {
+  const match = contents.match(new RegExp(`\\.${name}\\s*\\.\\s*set\\s*\\(\\s*Matrix\\.diag\\s*\\(\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)\\s*,\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)\\s*\\)\\s*\\)`));
+  return match
+    ? { forward: Number(match[1]), strafe: Number(match[2]) }
+    : { forward: forwardFallback, strafe: strafeFallback };
+};
+
+export const parsePedroConstants = (
+  contents: string,
+  dimensions: Pick<RobotConstants, "width" | "length"> = DEFAULT_ROBOT_CONSTANTS
+): RobotConstants | null => {
+  const maxAchievableForwardVelocity = parseChainedMethodValue(contents, "maxAchievableForwardVelocity");
+  const maxAchievableStrafeVelocity = parseChainedMethodValue(contents, "maxAchievableStrafeVelocity");
+  const naturalForwardDeceleration = parseChainedMethodValue(contents, "naturalForwardDeceleration");
+  const naturalStrafeDeceleration = parseChainedMethodValue(contents, "naturalStrafeDeceleration");
+  const headingBrake = parseHeadingBrakeCoefficients(contents);
+  const linearBrake = parseBrakeMatrix(contents, "linearBrakeCoefficients", DEFAULT_ROBOT_CONSTANTS.linearBrakeForward, DEFAULT_ROBOT_CONSTANTS.linearBrakeStrafe);
+  const quadraticBrake = parseBrakeMatrix(contents, "quadraticBrakeCoefficients", DEFAULT_ROBOT_CONSTANTS.quadraticBrakeForward, DEFAULT_ROBOT_CONSTANTS.quadraticBrakeStrafe);
 
   if (
-    width === null ||
-    length === null ||
-    forwardBrakeStrength === null ||
-    lateralBrakeStrength === null ||
-    maxForwardVelocity === null ||
-    maxLateralVelocity === null
+    maxAchievableForwardVelocity === null ||
+    maxAchievableStrafeVelocity === null ||
+    naturalForwardDeceleration === null ||
+    naturalStrafeDeceleration === null
   ) {
     return null;
   }
 
   return {
-    width,
-    length,
-    forwardBrakeStrength,
-    lateralBrakeStrength,
-    maxForwardVelocity,
-    maxLateralVelocity,
+    width: dimensions.width,
+    length: dimensions.length,
+    maxAchievableForwardVelocity,
+    maxAchievableStrafeVelocity,
+    naturalForwardDeceleration,
+    naturalStrafeDeceleration,
+    linearBrakeForward: linearBrake.forward,
+    linearBrakeStrafe: linearBrake.strafe,
+    quadraticBrakeForward: quadraticBrake.forward,
+    quadraticBrakeStrafe: quadraticBrake.strafe,
+    maxAccelerationConstraint: parseOptionalConstraint(contents, "maxAccelerationConstraint"),
+    maxVelocityConstraint: parseOptionalConstraint(contents, "maxVelocityConstraint"),
+    maxDecelerationConstraint: parseOptionalConstraint(contents, "maxDecelerationConstraint"),
+    maxDecelerationScale: parseOptionalConstraint(contents, "maxDecelerationScale"),
+    coastDownToVelocity: parseConfiguredNumber(contents, "coastDownToVelocity", DEFAULT_ROBOT_CONSTANTS.coastDownToVelocity),
+    brakeAggression: parseConfiguredNumber(contents, "brakeAggression", DEFAULT_ROBOT_CONSTANTS.brakeAggression),
+    maxBrakingPower: parseConfiguredNumber(contents, "maxBrakingPower", DEFAULT_ROBOT_CONSTANTS.maxBrakingPower),
+    headingFeedback: parseHeadingFeedback(contents),
+    headingBrakeLinear: headingBrake.linear,
+    headingBrakeQuadratic: headingBrake.quadratic,
+    headingDriveRatio: parseConfiguredNumber(contents, "headingDriveRatio", DEFAULT_ROBOT_CONSTANTS.headingDriveRatio),
+    headingDeviationTolerance: parseConfiguredAngle(contents, "headingDeviationTolerance", DEFAULT_ROBOT_CONSTANTS.headingDeviationTolerance),
+    translationalDeviationTolerance: parseConfiguredNumber(contents, "translationalDeviationTolerance", DEFAULT_ROBOT_CONSTANTS.translationalDeviationTolerance),
+    cosineScale: parseConfiguredBoolean(contents, "cosineScale", DEFAULT_ROBOT_CONSTANTS.cosineScale),
+    turnBeforeDriving: parseConfiguredBoolean(contents, "turnBeforeDriving", DEFAULT_ROBOT_CONSTANTS.turnBeforeDriving),
+    brakeAtEnd: parseConfiguredBoolean(contents, "brakeAtEnd", DEFAULT_ROBOT_CONSTANTS.brakeAtEnd),
+    parametricTConstraint: parseConfiguredNumber(contents, "parametricTConstraint", DEFAULT_ROBOT_CONSTANTS.parametricTConstraint),
+    headingConstraint: parseConfiguredAngle(contents, "headingConstraint", DEFAULT_ROBOT_CONSTANTS.headingConstraint),
+    translationalConstraint: parseConfiguredNumber(contents, "translationalConstraint", DEFAULT_ROBOT_CONSTANTS.translationalConstraint),
+    velocityConstraint: parseConfiguredNumber(contents, "velocityConstraint", DEFAULT_ROBOT_CONSTANTS.velocityConstraint),
+    timeoutConstraint: parseConfiguredNumber(contents, "timeoutConstraint", DEFAULT_ROBOT_CONSTANTS.timeoutConstraint),
   };
 };
 

@@ -14,7 +14,6 @@ import type {
   AutonSequenceItem,
   DragTarget,
   HeadingInterpolation,
-  MotionParameters,
   PathGeometry,
   PathHeadingField,
   Point,
@@ -51,7 +50,7 @@ type PlannerSidebarProps = {
   autonAlliance: AutonAlliance;
   savedPoses: SavedPose[];
   robotConstants: RobotConstants;
-  motionParameterDrafts: Record<keyof MotionParameters, string>;
+  robotDimensionDrafts: Record<"width" | "length", string>;
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
   undoStackLength: number;
@@ -123,8 +122,8 @@ type PlannerSidebarProps = {
   onAddAction: () => void;
   onToggleControlPointsHidden: () => void;
   onToggleActionsHidden: () => void;
-  onUpdateMotionParameter: (key: keyof MotionParameters, value: string) => void;
-  onFormatMotionParameter: (key: keyof MotionParameters) => void;
+  onUpdateRobotDimension: (key: "width" | "length", value: string) => void;
+  onFormatRobotDimension: (key: "width" | "length") => void;
 };
 
 export function PlannerSidebar({
@@ -134,7 +133,7 @@ export function PlannerSidebar({
   autonAlliance,
   savedPoses,
   robotConstants,
-  motionParameterDrafts,
+  robotDimensionDrafts,
   hoverTarget,
   activeTarget,
   undoStackLength,
@@ -201,8 +200,8 @@ export function PlannerSidebar({
   onAddAction,
   onToggleControlPointsHidden,
   onToggleActionsHidden,
-  onUpdateMotionParameter,
-  onFormatMotionParameter,
+  onUpdateRobotDimension,
+  onFormatRobotDimension,
 }: PlannerSidebarProps) {
   const handleClearClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
     if (!event.shiftKey) return;
@@ -343,7 +342,7 @@ export function PlannerSidebar({
             </button>
             <input ref={importInputRef} className={styles.hiddenFileInput} type="file" accept=".kt,text/x-kotlin,text/plain" onChange={onImportKotlin} />
             <input ref={posesInputRef} className={styles.hiddenFileInput} type="file" accept=".kt,text/x-kotlin,text/plain" onChange={onImportPoses} />
-            <input ref={constantsInputRef} className={styles.hiddenFileInput} type="file" accept=".kt,text/x-kotlin,text/plain" onChange={onImportConstants} />
+            <input ref={constantsInputRef} className={styles.hiddenFileInput} type="file" accept=".java,text/x-java-source,text/plain" onChange={onImportConstants} />
           </div>
         </div>
       </div>
@@ -507,9 +506,9 @@ export function PlannerSidebar({
       ) : (
         <ConstantsPanel
           robotConstants={robotConstants}
-          motionParameterDrafts={motionParameterDrafts}
-          onUpdateMotionParameter={onUpdateMotionParameter}
-          onFormatMotionParameter={onFormatMotionParameter}
+          robotDimensionDrafts={robotDimensionDrafts}
+          onUpdateRobotDimension={onUpdateRobotDimension}
+          onFormatRobotDimension={onFormatRobotDimension}
         />
       )}
     </aside>
@@ -813,28 +812,39 @@ function StartPosesPanel({ savedPoses }: { savedPoses: SavedPose[] }) {
 
 type ConstantsPanelProps = {
   robotConstants: RobotConstants;
-  motionParameterDrafts: Record<keyof MotionParameters, string>;
-  onUpdateMotionParameter: (key: keyof MotionParameters, value: string) => void;
-  onFormatMotionParameter: (key: keyof MotionParameters) => void;
+  robotDimensionDrafts: Record<"width" | "length", string>;
+  onUpdateRobotDimension: (key: "width" | "length", value: string) => void;
+  onFormatRobotDimension: (key: "width" | "length") => void;
 };
 
 function ConstantsPanel({
   robotConstants,
-  motionParameterDrafts,
-  onUpdateMotionParameter,
-  onFormatMotionParameter,
+  robotDimensionDrafts,
+  onUpdateRobotDimension,
+  onFormatRobotDimension,
 }: ConstantsPanelProps) {
   // Nothing else on this panel distinguishes a measured value from a placeholder,
   // so say it outright rather than letting stand-ins read as the team's own tuning.
-  const isUsingDefaultConstants = (Object.keys(DEFAULT_ROBOT_CONSTANTS) as Array<keyof RobotConstants>).every(
+  const importedConstantKeys = [
+    "maxAchievableForwardVelocity",
+    "maxAchievableStrafeVelocity",
+    "naturalForwardDeceleration",
+    "naturalStrafeDeceleration",
+    "maxAccelerationConstraint",
+    "maxVelocityConstraint",
+    "maxDecelerationConstraint",
+    "maxDecelerationScale",
+  ] as const;
+  const isUsingDefaultConstants = importedConstantKeys.every(
     (key) => robotConstants[key] === DEFAULT_ROBOT_CONSTANTS[key]
   );
+  const formatConstraint = (value: number | null) => value === null ? "None" : value.toFixed(5);
 
   return (
     <div className={styles.pointsList}>
       {isUsingDefaultConstants && (
         <div className={styles.emptyState}>
-          Showing typical values. Import your Constants.kt to plan against the real robot.
+          Showing typical values. Import your Pedro v3 Constants.java to plan against the real robot.
         </div>
       )}
       <div className={`${styles.poseCard} ${styles.constantsCard}`}>
@@ -842,90 +852,141 @@ function ConstantsPanel({
         <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
           <div className={styles.inputGroup}>
             <label className={styles.inputLabel}>Width (in)</label>
-            <input className={styles.inputField} value={robotConstants.width.toFixed(2)} readOnly />
-          </div>
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Length (in)</label>
-            <input className={styles.inputField} value={robotConstants.length.toFixed(2)} readOnly />
-          </div>
-        </div>
-      </div>
-      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
-        <div className={styles.poseName}>Braking Acceleration</div>
-        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Forward (in/s^2)</label>
-            <input className={styles.inputField} value={robotConstants.forwardBrakeStrength.toFixed(5)} readOnly />
-          </div>
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Lateral (in/s^2)</label>
-            <input className={styles.inputField} value={robotConstants.lateralBrakeStrength.toFixed(5)} readOnly />
-          </div>
-        </div>
-      </div>
-      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
-        <div className={styles.poseName}>Max Velocity</div>
-        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Forward (in/s)</label>
-            <input className={styles.inputField} value={robotConstants.maxForwardVelocity.toFixed(5)} readOnly />
-          </div>
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Lateral (in/s)</label>
-            <input className={styles.inputField} value={robotConstants.maxLateralVelocity.toFixed(5)} readOnly />
-          </div>
-        </div>
-      </div>
-      <EditableMotionParameterCard
-        title="Acceleration"
-        parameters={[
-          ["maxForwardAcceleration", "Forward (in/s^2)"],
-          ["maxLateralAcceleration", "Lateral (in/s^2)"],
-        ]}
-        motionParameterDrafts={motionParameterDrafts}
-        onUpdateMotionParameter={onUpdateMotionParameter}
-        onFormatMotionParameter={onFormatMotionParameter}
-      />
-      <EditableMotionParameterCard
-        title="Angular Velocity"
-        parameters={[["maxAngularVelocity", "(deg/s)"]]}
-        motionParameterDrafts={motionParameterDrafts}
-        onUpdateMotionParameter={onUpdateMotionParameter}
-        onFormatMotionParameter={onFormatMotionParameter}
-      />
-    </div>
-  );
-}
-
-type EditableMotionParameterCardProps = Omit<ConstantsPanelProps, "robotConstants"> & {
-  title: string;
-  parameters: Array<[keyof MotionParameters, string]>;
-};
-
-function EditableMotionParameterCard({
-  title,
-  parameters,
-  motionParameterDrafts,
-  onUpdateMotionParameter,
-  onFormatMotionParameter,
-}: EditableMotionParameterCardProps) {
-  return (
-    <div className={`${styles.poseCard} ${styles.constantsCard}`}>
-      <div className={styles.poseName}>{title}</div>
-      <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
-        {parameters.map(([key, label]) => (
-          <div className={styles.inputGroup} key={key}>
-            <label className={styles.inputLabel}>{label}</label>
             <input
               type="text"
               inputMode="decimal"
               className={styles.inputField}
-              value={motionParameterDrafts[key]}
-              onChange={(event) => onUpdateMotionParameter(key, event.target.value)}
-              onBlur={() => onFormatMotionParameter(key)}
+              value={robotDimensionDrafts.width}
+              onChange={(event) => onUpdateRobotDimension("width", event.target.value)}
+              onBlur={() => onFormatRobotDimension("width")}
             />
           </div>
-        ))}
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Length (in)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              className={styles.inputField}
+              value={robotDimensionDrafts.length}
+              onChange={(event) => onUpdateRobotDimension("length", event.target.value)}
+              onBlur={() => onFormatRobotDimension("length")}
+            />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Maximum Achievable Velocity</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Forward (in/s)</label>
+            <input className={styles.inputField} value={robotConstants.maxAchievableForwardVelocity.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Strafe (in/s)</label>
+            <input className={styles.inputField} value={robotConstants.maxAchievableStrafeVelocity.toFixed(5)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Natural Deceleration</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Forward (in/s²)</label>
+            <input className={styles.inputField} value={robotConstants.naturalForwardDeceleration.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Strafe (in/s²)</label>
+            <input className={styles.inputField} value={robotConstants.naturalStrafeDeceleration.toFixed(5)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Path Constraints</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Acceleration (in/s²)</label>
+            <input className={styles.inputField} value={formatConstraint(robotConstants.maxAccelerationConstraint)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Velocity (in/s)</label>
+            <input className={styles.inputField} value={formatConstraint(robotConstants.maxVelocityConstraint)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Deceleration (in/s²)</label>
+            <input className={styles.inputField} value={formatConstraint(robotConstants.maxDecelerationConstraint)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Deceleration Scale</label>
+            <input className={styles.inputField} value={formatConstraint(robotConstants.maxDecelerationScale)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Heading Control</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Feedback kP</label>
+            <input className={styles.inputField} value={robotConstants.headingFeedback.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Brake Linear</label>
+            <input className={styles.inputField} value={robotConstants.headingBrakeLinear.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Brake Quadratic</label>
+            <input className={styles.inputField} value={robotConstants.headingBrakeQuadratic.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Drive Ratio</label>
+            <input className={styles.inputField} value={robotConstants.headingDriveRatio.toFixed(5)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Foresight Behavior</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Cosine Scale</label>
+            <input className={styles.inputField} value={robotConstants.cosineScale ? "Enabled" : "Disabled"} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Turn Before Driving</label>
+            <input className={styles.inputField} value={robotConstants.turnBeforeDriving ? "Enabled" : "Disabled"} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Brake at End</label>
+            <input className={styles.inputField} value={robotConstants.brakeAtEnd ? "Enabled" : "Disabled"} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Heading Tolerance (deg)</label>
+            <input className={styles.inputField} value={robotConstants.headingDeviationTolerance.toFixed(5)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>End Constraints</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Parametric T</label>
+            <input className={styles.inputField} value={robotConstants.parametricTConstraint.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Heading (deg)</label>
+            <input className={styles.inputField} value={robotConstants.headingConstraint.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Translation (in)</label>
+            <input className={styles.inputField} value={robotConstants.translationalConstraint.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Velocity (in/s)</label>
+            <input className={styles.inputField} value={robotConstants.velocityConstraint.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Timeout (ms)</label>
+            <input className={styles.inputField} value={robotConstants.timeoutConstraint.toFixed(1)} readOnly />
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -13,16 +13,15 @@ import {
   interpolateHeadingRange,
 } from "../playback";
 import { DEFAULT_ROBOT_CONSTANTS, type RobotConstants } from "../kotlinAutonFile";
-import { DEFAULT_MOTION_PARAMETERS } from "../plannerStorage";
 import { INITIAL_POINT_ID } from "../plannerConstants";
 import type { AutonSequenceItem, Point } from "../plannerTypes";
 
 const ROBOT: RobotConstants = {
   ...DEFAULT_ROBOT_CONSTANTS,
-  forwardBrakeStrength: 40,
-  lateralBrakeStrength: 40,
-  maxForwardVelocity: 60,
-  maxLateralVelocity: 60,
+  naturalForwardDeceleration: 40,
+  naturalStrafeDeceleration: 40,
+  maxAchievableForwardVelocity: 60,
+  maxAchievableStrafeVelocity: 60,
 };
 
 const start: Point = {
@@ -46,7 +45,7 @@ const straightPath: Point = {
 };
 
 const timelineFor = (points: Point[], items: AutonSequenceItem[]) =>
-  buildPlaybackTimeline(points, items, ROBOT, DEFAULT_MOTION_PARAMETERS);
+  buildPlaybackTimeline(points, items, ROBOT);
 
 describe("heading interpolation", () => {
   it("takes the short way around the wrap point", () => {
@@ -138,18 +137,38 @@ describe("playback timeline", () => {
     expect(pathSegment.samples[32]).toMatchObject({ nx: 0.6, ny: 0.2 });
   });
 
-  it("adds a rotate segment when the path starts at a different heading", () => {
+  it("does not add a pre-path rotation when the path starts at a different heading", () => {
     const timeline = timelineFor(
       [start, { ...straightPath, constantHeading: 90 }],
       [{ id: "s1", kind: "path", pointId: "a" }]
     );
 
-    const kinds = timeline.segments.map((segment) => segment.kind);
-    expect(kinds).toEqual(["rotate", "path"]);
+    expect(timeline.segments.map((segment) => segment.kind)).toEqual(["path"]);
+  });
 
-    // 90 degrees at the default 180 deg/s.
-    const rotate = timeline.segments[0];
-    expect(rotate.duration).toBeCloseTo(90 / DEFAULT_MOTION_PARAMETERS.maxAngularVelocity, 6);
+  it("rotates toward a constant heading while moving instead of snapping", () => {
+    const timeline = timelineFor(
+      [start, { ...straightPath, constantHeading: 180 }],
+      [{ id: "s1", kind: "path", pointId: "a" }]
+    );
+    const early = getPlaybackPoseAtTime(timeline, 0.1, [start, straightPath]).pose;
+
+    expect(early.nx).toBeGreaterThan(start.nx);
+    expect(Math.abs(early.heading)).toBeGreaterThan(0);
+    expect(Math.abs(early.heading)).toBeLessThan(180);
+  });
+
+  it("honors Pedro turnBeforeDriving when cosine scaling is enabled", () => {
+    const point = { ...straightPath, constantHeading: 180 };
+    const timeline = buildPlaybackTimeline(
+      [start, point],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      { ...ROBOT, cosineScale: true, turnBeforeDriving: true }
+    );
+    const early = getPlaybackPoseAtTime(timeline, 0.1, [start, point]).pose;
+
+    expect(early.nx).toBeCloseTo(start.nx, 6);
+    expect(Math.abs(early.heading)).toBeGreaterThan(0);
   });
 
   it("only lets timed run actions consume time", () => {
@@ -191,15 +210,38 @@ describe("playback timeline", () => {
 
   it("takes longer when the robot is slower", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
-    const fast = buildPlaybackTimeline([start, straightPath], items, ROBOT, DEFAULT_MOTION_PARAMETERS);
+    const fast = buildPlaybackTimeline([start, straightPath], items, ROBOT);
     const slow = buildPlaybackTimeline(
       [start, straightPath],
       items,
-      { ...ROBOT, maxForwardVelocity: 15, maxLateralVelocity: 15 },
-      DEFAULT_MOTION_PARAMETERS
+      { ...ROBOT, maxAchievableForwardVelocity: 15, maxAchievableStrafeVelocity: 15 }
     );
 
     expect(slow.totalTime).toBeGreaterThan(fast.totalTime);
+  });
+
+  it("applies Pedro velocity and acceleration constraints", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const unconstrained = buildPlaybackTimeline([start, straightPath], items, ROBOT);
+    const constrained = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      { ...ROBOT, maxVelocityConstraint: 20, maxAccelerationConstraint: 10 }
+    );
+
+    expect(constrained.totalTime).toBeGreaterThan(unconstrained.totalTime);
+  });
+
+  it("uses Pedro natural deceleration for the stop at a path endpoint", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const normal = buildPlaybackTimeline([start, straightPath], items, ROBOT);
+    const lowNaturalDeceleration = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      { ...ROBOT, naturalForwardDeceleration: 5, naturalStrafeDeceleration: 5 }
+    );
+
+    expect(lowNaturalDeceleration.totalTime).toBeGreaterThan(normal.totalTime);
   });
 });
 
@@ -265,7 +307,7 @@ describe("autonomous period budget", () => {
 });
 
 describe("per-path durations", () => {
-  it("charges a path for the turn onto its start heading", () => {
+  it("includes concurrent heading correction and endpoint settling time", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
     const straight = timelineFor([start, straightPath], items);
     const turned = timelineFor([start, { ...straightPath, constantHeading: 90 }], items);
