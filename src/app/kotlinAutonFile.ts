@@ -114,20 +114,38 @@ const formatKotlinPose = (
 
 const stripLineComment = (line: string) => line.replace(/\/\/.*$/, "");
 
+// Half the 144 inch field: myrelib poses are centred on the field.
+const HALF_FIELD_SIZE = 72;
+
 const evaluatePoseExpression = (expression: string, width = DEFAULT_ROBOT_WIDTH, length = DEFAULT_ROBOT_LENGTH) => {
-  const constants: Record<string, number> = {
-    "Constants.WIDTH": width,
-    "Constants.LENGTH": length,
-    "Constants.HEIGHT": length,
-    "Constants.HALF_WIDTH": width / 2,
-    "Constants.HALF_LENGTH": length / 2,
-    "Constants.HALF_HEIGHT": length / 2,
+  // Names a pose may be written in terms of. `Constants.*` is how older seasons
+  // wrote robot dimensions; this season they live on `Robot`, and poses are laid
+  // out from the field's half size.
+  const dimensions: Record<string, number> = {
+    WIDTH: width,
+    LENGTH: length,
+    HEIGHT: length,
+    HALF_WIDTH: width / 2,
+    HALF_LENGTH: length / 2,
+    HALF_HEIGHT: length / 2,
   };
-  const normalizedExpression = Object.entries(constants).reduce(
-    (currentExpression, [constantName, value]) =>
-      currentExpression.replaceAll(constantName, String(value)),
-    expression.trim()
-  );
+  const constants: Record<string, number> = {
+    HALF_FIELD_SIZE,
+    FIELD_SIZE: HALF_FIELD_SIZE * 2,
+    "FieldCoordinateSystem.HALF_FIELD_SIZE": HALF_FIELD_SIZE,
+    "FieldCoordinateSystem.FIELD_SIZE": HALF_FIELD_SIZE * 2,
+  };
+  for(const [name, value] of Object.entries(dimensions)) {
+    constants[`Constants.${name}`] = value;
+    constants[`Robot.${name}`] = value;
+  }
+
+  // Replace whole identifiers only, so FIELD_SIZE cannot eat into HALF_FIELD_SIZE.
+  const normalizedExpression = expression
+    .trim()
+    .replace(/[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/g, (name) =>
+      name in constants ? `(${constants[name]})` : name
+    );
 
   if (!/^[\d\s.+\-*/()]+$/.test(normalizedExpression)) return null;
 
@@ -183,26 +201,123 @@ export const parseRobotConstantsKotlin = (contents: string): RobotConstants | nu
   };
 };
 
+type AxisAlignment = { coordinate: number; sign: number };
+
+const OFFSET_SIGNS: Record<string, number> = { NEG: -1, NONE: 0, POS: 1 };
+
+// myrelib headings are clockwise from +y.
+const CARDINAL_HEADINGS: Record<string, number> = { NORTH: 0, EAST: 90, SOUTH: 180, WEST: -90 };
+
+const lastSegment = (name: string) => name.trim().split(".").pop() ?? "";
+
+/**
+ * Reads `Horizontal(x, Offset.NEG)` or `Vertical(y, Offset.POS)`, optionally
+ * qualified with `Poses.`, from a `startPose` argument or a named declaration.
+ */
+const parseAxisCall = (
+  source: string,
+  kind: "Horizontal" | "Vertical",
+  width: number,
+  length: number
+): AxisAlignment | null => {
+  const match = source.match(new RegExp(`^\\s*(?:Poses\\.)?${kind}\\s*\\(`));
+  if (!match) return null;
+  const openParenIndex = source.indexOf("(", match.index);
+  const closeParenIndex = findMatchingParen(source, openParenIndex);
+  if (closeParenIndex < 0) return null;
+
+  const [coordinateArg, offsetArg] = splitTopLevelArgs(source.slice(openParenIndex + 1, closeParenIndex));
+  const coordinate = evaluatePoseExpression(coordinateArg ?? "", width, length);
+  const sign = OFFSET_SIGNS[lastSegment(offsetArg ?? "")];
+  if (coordinate === null || sign === undefined) return null;
+  return { coordinate, sign };
+};
+
+/** Named `Horizontal`/`Vertical` values, such as `private val WEST_WALL = Horizontal(...)`. */
+const parseNamedAxes = (contents: string, width: number, length: number) => {
+  const axes = new Map<string, { kind: "Horizontal" | "Vertical"; axis: AxisAlignment }>();
+  const declarationRegex = /\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?=(?:Poses\.)?(Horizontal|Vertical)\s*\()/g;
+  let declaration: RegExpExecArray | null;
+
+  while ((declaration = declarationRegex.exec(contents)) !== null) {
+    const kind = declaration[2] as "Horizontal" | "Vertical";
+    const start = declaration.index + declaration[0].length;
+    const axis = parseAxisCall(contents.slice(start), kind, width, length);
+    if (axis) axes.set(declaration[1], { kind, axis });
+  }
+  return axes;
+};
+
+const resolveAxis = (
+  arg: string,
+  kind: "Horizontal" | "Vertical",
+  namedAxes: ReturnType<typeof parseNamedAxes>,
+  width: number,
+  length: number
+): AxisAlignment | null => {
+  const inline = parseAxisCall(arg, kind, width, length);
+  if (inline) return inline;
+  const named = namedAxes.get(lastSegment(arg));
+  return named && named.kind === kind ? named.axis : null;
+};
+
+/**
+ * `startPose(horizontal, vertical, Heading.X)` puts the robot's edge on each
+ * coordinate. Facing north or south its width lies along x and its length
+ * along y; facing east or west they trade places, as in myrelib's `Poses`.
+ */
+const parseStartPoseCall = (
+  args: string[],
+  namedAxes: ReturnType<typeof parseNamedAxes>,
+  width: number,
+  length: number
+) => {
+  const horizontal = resolveAxis(args[0] ?? "", "Horizontal", namedAxes, width, length);
+  const vertical = resolveAxis(args[1] ?? "", "Vertical", namedAxes, width, length);
+  const heading = CARDINAL_HEADINGS[lastSegment(args[2] ?? "")];
+  if (!horizontal || !vertical || heading === undefined) return null;
+
+  const sideways = heading === 90 || heading === -90;
+  const reachX = (sideways ? length : width) / 2;
+  const reachY = (sideways ? width : length) / 2;
+  return {
+    x: horizontal.coordinate + horizontal.sign * reachX,
+    y: vertical.coordinate + vertical.sign * reachY,
+    heading,
+  };
+};
+
 export const parseSavedPosesKotlin = (
   contents: string,
   dimensions: { width?: number; length?: number } = {}
 ): SavedPose[] => {
   const width = dimensions.width ?? DEFAULT_ROBOT_WIDTH;
   const length = dimensions.length ?? DEFAULT_ROBOT_LENGTH;
+  const namedAxes = parseNamedAxes(contents, width, length);
   const savedPoses: SavedPose[] = [];
   const usedNames = new Set<string>();
-  const poseRegex = /\bval\s+(START[A-Za-z0-9_]*)\s*=\s*Pose\s*\(/g;
+  const poseRegex = /\bval\s+(START[A-Za-z0-9_]*)\s*=\s*(?:Poses\.)?(startPose|Pose)\s*\(/g;
   let poseMatch: RegExpExecArray | null;
 
   while ((poseMatch = poseRegex.exec(contents)) !== null) {
     const name = stripStartPosePrefix(poseMatch[1]);
     if (usedNames.has(name)) continue;
 
-    const openParenIndex = contents.indexOf("(", poseMatch.index);
+    const openParenIndex = contents.indexOf("(", poseMatch.index + poseMatch[0].length - 1);
     const closeParenIndex = findMatchingParen(contents, openParenIndex);
     if (closeParenIndex < 0) continue;
 
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex)).map(stripLineComment);
+    poseRegex.lastIndex = closeParenIndex + 1;
+
+    if (poseMatch[2] === "startPose") {
+      const pose = parseStartPoseCall(args, namedAxes, width, length);
+      if (!pose) continue;
+      usedNames.add(name);
+      savedPoses.push({ name, x: pose.x, y: pose.y, heading: normalizeHeading(pose.heading) });
+      continue;
+    }
+
     const x = evaluatePoseExpression(args[0] ?? "", width, length);
     const y = evaluatePoseExpression(args[1] ?? "", width, length);
     const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
@@ -210,7 +325,6 @@ export const parseSavedPosesKotlin = (
 
     usedNames.add(name);
     savedPoses.push({ name, x, y, heading: normalizeHeading(heading ?? 0) });
-    poseRegex.lastIndex = closeParenIndex + 1;
   }
 
   return savedPoses;

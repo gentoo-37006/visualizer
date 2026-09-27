@@ -338,6 +338,160 @@ autonSequence(Alliance.BLUE)
     expect(twice).toBe(once);
   });
 
+  it("imports the biobuzz-2027 Poses.kt, built from startPose and wall constants", () => {
+    // gentoo-37006/biobuzz-2027 config/Poses.kt as of 2026-09-27, verbatim
+    const posesKt = `package org.firstinspires.ftc.teamcode.config
+
+import gentoo.myrelib.math.FieldCoordinateSystem.HALF_FIELD_SIZE
+import gentoo.myrelib.math.Pose
+import org.firstinspires.ftc.teamcode.Robot
+import org.firstinspires.ftc.teamcode.config.Poses.startPose
+
+object Poses {
+    private val NORTH_WALL = Vertical(HALF_FIELD_SIZE, Offset.NEG)
+    private val EAST_WALL = Horizontal(HALF_FIELD_SIZE, Offset.NEG)
+    private val SOUTH_WALL = Vertical(-HALF_FIELD_SIZE, Offset.POS)
+    private val WEST_WALL = Horizontal(-HALF_FIELD_SIZE, Offset.POS)
+
+    val START_RED_DEFAULT = startPose(
+        WEST_WALL,
+        NORTH_WALL,
+        Heading.SOUTH
+    )
+    val START_BLUE_DEFAULT = startPose(
+        EAST_WALL,
+        SOUTH_WALL,
+        Heading.NORTH
+    )
+
+    /**
+     * A pose for the robot lined up against a [horizontal] and [vertical] coordinate,
+     * such as a wall or a tile seam, facing [heading].
+     *
+     * Each offset says which side of its coordinate the robot sits on. For
+     * example, \`startPose(Horizontal(-24.0, Offset.NEG), Vertical(-72.0, Offset.POS), Heading.NORTH)\`
+     * puts the robot against the bottom wall with its right-hand edge on
+     * x = -24, which is \`Pose(-24.0 - Robot.HALF_WIDTH, -72.0 + Robot.HALF_LENGTH, 0.0)\`.
+     */
+    fun startPose(
+        horizontal: Horizontal,
+        vertical: Vertical,
+        heading: Heading
+    ): Pose = startPose(
+        horizontal,
+        vertical,
+        heading,
+        Robot.HALF_LENGTH,
+        Robot.HALF_WIDTH
+    )
+
+    internal fun startPose(
+        horizontal: Horizontal,
+        vertical: Vertical,
+        heading: Heading,
+        halfLength: Double,
+        halfWidth: Double
+    ): Pose {
+        val sideways = heading == Heading.EAST || heading == Heading.WEST
+        val reachX = if(sideways) halfLength else halfWidth
+        val reachY = if(sideways) halfWidth else halfLength
+        return Pose(
+            horizontal.x + horizontal.offset.sign * reachX,
+            vertical.y + vertical.offset.sign * reachY,
+            heading.theta
+        )
+    }
+
+    /** Which side of a field coordinate the robot sits on in [startPose]. */
+    enum class Offset(internal val sign: Int) {
+        /** On the negative side, with the robot's edge on the coordinate. */
+        NEG(-1),
+
+        /** Centered on the coordinate. */
+        NONE(0),
+
+        /** On the positive side, with the robot's edge on the coordinate. */
+        POS(1),
+    }
+
+    data class Horizontal(val x: Double, val offset: Offset)
+
+    data class Vertical(val y: Double, val offset: Offset)
+
+    /** The way the robot faces, as a myrelib heading: clockwise from +y. */
+    enum class Heading(val theta: Double) {
+        NORTH(0.0),
+        EAST(90.0),
+        SOUTH(180.0),
+        WEST(-90.0),
+    }
+}
+`;
+
+    const poses = parseSavedPosesKotlin(posesKt, DEFAULT_ROBOT_CONSTANTS);
+
+    expect(poses.map((pose) => pose.name).sort()).toEqual(["BLUE_DEFAULT", "RED_DEFAULT"]);
+    const red = poses.find((pose) => pose.name === "RED_DEFAULT")!;
+    expect(red.x).toBeCloseTo(-64, 6);
+    expect(red.y).toBeCloseTo(64, 6);
+    expect(red.heading).toBe(180);
+    const blue = poses.find((pose) => pose.name === "BLUE_DEFAULT")!;
+    expect(blue.x).toBeCloseTo(64, 6);
+    expect(blue.y).toBeCloseTo(-64, 6);
+    expect(blue.heading).toBe(0);
+  });
+
+  it("resolves the field size and Robot dimensions in pose expressions", () => {
+    const poses = parseSavedPosesKotlin(
+      `val START_BLUE_DEFAULT = Pose(
+        HALF_FIELD_SIZE - Robot.HALF_WIDTH,
+        -FieldCoordinateSystem.HALF_FIELD_SIZE + Robot.HALF_LENGTH,
+        0.0
+      )`,
+      { width: 18, length: 14 }
+    );
+
+    expect(poses).toHaveLength(1);
+    expect(poses[0].x).toBeCloseTo(72 - 9, 6);
+    expect(poses[0].y).toBeCloseTo(-72 + 7, 6);
+  });
+
+  it("swaps which axis gets the robot's length when a start pose faces east or west", () => {
+    // facing sideways the robot reaches a side wall with its front, so on a
+    // non-square robot the half length goes on x and the half width on y
+    const source = `
+      val START_SIDE = startPose(Horizontal(-72.0, Offset.POS), Vertical(0.0, Offset.NEG), Heading.EAST)
+      val START_UP = startPose(Horizontal(-72.0, Offset.POS), Vertical(0.0, Offset.NEG), Heading.NORTH)
+    `;
+
+    const poses = parseSavedPosesKotlin(source, { width: 18, length: 14 });
+
+    const side = poses.find((pose) => pose.name === "SIDE")!;
+    expect(side.x).toBeCloseTo(-72 + 7, 6);
+    expect(side.y).toBeCloseTo(0 - 9, 6);
+    expect(side.heading).toBe(90);
+    const up = poses.find((pose) => pose.name === "UP")!;
+    expect(up.x).toBeCloseTo(-72 + 9, 6);
+    expect(up.y).toBeCloseTo(0 - 7, 6);
+    expect(up.heading).toBe(0);
+  });
+
+  it("accepts qualified names and a centred coordinate in startPose", () => {
+    const poses = parseSavedPosesKotlin(
+      `val START_MID = Poses.startPose(
+        Poses.Horizontal(0.0, Poses.Offset.NONE),
+        Poses.Vertical(-HALF_FIELD_SIZE, Poses.Offset.POS),
+        Poses.Heading.WEST,
+      )`,
+      DEFAULT_ROBOT_CONSTANTS
+    );
+
+    expect(poses).toHaveLength(1);
+    expect(poses[0].x).toBeCloseTo(0, 6);
+    expect(poses[0].y).toBeCloseTo(-72 + 8, 6);
+    expect(poses[0].heading).toBe(-90);
+  });
+
   it("returns null when the constants file is missing required values", () => {
     expect(parseRobotConstantsKotlin("object Constants { const val WIDTH: Double = 18.0 }")).toBeNull();
   });
