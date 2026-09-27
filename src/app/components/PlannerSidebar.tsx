@@ -17,6 +17,7 @@ import type {
   PathGeometry,
   PathHeadingField,
   Point,
+  SimulationParameters,
 } from "../plannerTypes";
 import { getPathSegments, targetPathIndex, toFieldCoords } from "../plannerUtils";
 import styles from "../page.module.css";
@@ -51,6 +52,7 @@ type PlannerSidebarProps = {
   savedPoses: SavedPose[];
   robotConstants: RobotConstants;
   robotDimensionDrafts: Record<"width" | "length", string>;
+  simulationParameterDrafts: Record<keyof SimulationParameters, string>;
   hoverTarget: DragTarget | null;
   activeTarget: DragTarget | null;
   undoStackLength: number;
@@ -124,6 +126,8 @@ type PlannerSidebarProps = {
   onToggleActionsHidden: () => void;
   onUpdateRobotDimension: (key: "width" | "length", value: string) => void;
   onFormatRobotDimension: (key: "width" | "length") => void;
+  onUpdateSimulationParameter: (key: keyof SimulationParameters, value: string) => void;
+  onFormatSimulationParameter: (key: keyof SimulationParameters) => void;
 };
 
 export function PlannerSidebar({
@@ -134,6 +138,7 @@ export function PlannerSidebar({
   savedPoses,
   robotConstants,
   robotDimensionDrafts,
+  simulationParameterDrafts,
   hoverTarget,
   activeTarget,
   undoStackLength,
@@ -202,6 +207,8 @@ export function PlannerSidebar({
   onToggleActionsHidden,
   onUpdateRobotDimension,
   onFormatRobotDimension,
+  onUpdateSimulationParameter,
+  onFormatSimulationParameter,
 }: PlannerSidebarProps) {
   const handleClearClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
     if (!event.shiftKey) return;
@@ -507,8 +514,11 @@ export function PlannerSidebar({
         <ConstantsPanel
           robotConstants={robotConstants}
           robotDimensionDrafts={robotDimensionDrafts}
+          simulationParameterDrafts={simulationParameterDrafts}
           onUpdateRobotDimension={onUpdateRobotDimension}
           onFormatRobotDimension={onFormatRobotDimension}
+          onUpdateSimulationParameter={onUpdateSimulationParameter}
+          onFormatSimulationParameter={onFormatSimulationParameter}
         />
       )}
     </aside>
@@ -813,15 +823,21 @@ function StartPosesPanel({ savedPoses }: { savedPoses: SavedPose[] }) {
 type ConstantsPanelProps = {
   robotConstants: RobotConstants;
   robotDimensionDrafts: Record<"width" | "length", string>;
+  simulationParameterDrafts: Record<keyof SimulationParameters, string>;
   onUpdateRobotDimension: (key: "width" | "length", value: string) => void;
   onFormatRobotDimension: (key: "width" | "length") => void;
+  onUpdateSimulationParameter: (key: keyof SimulationParameters, value: string) => void;
+  onFormatSimulationParameter: (key: keyof SimulationParameters) => void;
 };
 
 function ConstantsPanel({
   robotConstants,
   robotDimensionDrafts,
+  simulationParameterDrafts,
   onUpdateRobotDimension,
   onFormatRobotDimension,
+  onUpdateSimulationParameter,
+  onFormatSimulationParameter,
 }: ConstantsPanelProps) {
   // Nothing else on this panel distinguishes a measured value from a placeholder,
   // so say it outright rather than letting stand-ins read as the team's own tuning.
@@ -918,6 +934,33 @@ function ConstantsPanel({
           <div className={styles.inputGroup}>
             <label className={styles.inputLabel}>Deceleration Scale</label>
             <input className={styles.inputField} value={formatConstraint(robotConstants.maxDecelerationScale)} readOnly />
+          </div>
+        </div>
+      </div>
+      <div className={`${styles.poseCard} ${styles.constantsCard}`}>
+        <div className={styles.poseName}>Simulated Inertia</div>
+        <div className={`${styles.poseCoordRow} ${styles.constantsCoordRow}`}>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Translation (in/s²)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              className={styles.inputField}
+              value={simulationParameterDrafts.translationalAcceleration}
+              onChange={(event) => onUpdateSimulationParameter("translationalAcceleration", event.target.value)}
+              onBlur={() => onFormatSimulationParameter("translationalAcceleration")}
+            />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Rotation (deg/s²)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              className={styles.inputField}
+              value={simulationParameterDrafts.angularAcceleration}
+              onChange={(event) => onUpdateSimulationParameter("angularAcceleration", event.target.value)}
+              onBlur={() => onFormatSimulationParameter("angularAcceleration")}
+            />
           </div>
         </div>
       </div>

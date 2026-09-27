@@ -1,6 +1,7 @@
 import type { RobotConstants } from "./kotlinAutonFile";
 import { FIELD_SIZE_INCHES, INITIAL_POINT_COLOR } from "./plannerConstants";
-import type { AutonSequenceItem, Point } from "./plannerTypes";
+import type { AutonSequenceItem, Point, SimulationParameters } from "./plannerTypes";
+import { DEFAULT_SIMULATION_PARAMETERS } from "./plannerStorage";
 import { getPathSegments, normalizeHeading, samplePathSegments } from "./plannerUtils";
 
 export type PlaybackPose = {
@@ -258,7 +259,8 @@ const simulatePedroHeading = (
   samples: PlaybackPose[],
   cumulativeDistances: number[],
   initialHeading: number,
-  constants: RobotConstants
+  constants: RobotConstants,
+  angularAcceleration: number
 ) => {
   const step = 1 / 100;
   const profileDuration = getMotionProfileDuration(profile);
@@ -266,6 +268,7 @@ const simulatePedroHeading = (
   let elapsed = 0;
   let profileTime = 0;
   let heading = normalizeHeading(initialHeading);
+  let angularVelocity = 0;
   let holdElapsed = 0;
   const timeoutSeconds = Math.max(0, constants.timeoutConstraint) / 1000;
 
@@ -273,8 +276,13 @@ const simulatePedroHeading = (
     const distance = getMotionProfileDistanceAtTime(profile, profileTime);
     const targetHeading = getSampleHeadingAtDistance(samples, cumulativeDistances, distance);
     const headingError = normalizeHeading(targetHeading - heading);
-    const maxHeadingStep = headingVelocityForError(headingError, constants) * step;
-    heading = normalizeHeading(heading + Math.sign(headingError) * Math.min(Math.abs(headingError), maxHeadingStep));
+    const targetAngularVelocity = Math.sign(headingError) * headingVelocityForError(headingError, constants);
+    const maxAngularVelocityChange = safeMotionLimit(angularAcceleration) * step;
+    angularVelocity += Math.max(
+      -maxAngularVelocityChange,
+      Math.min(maxAngularVelocityChange, targetAngularVelocity - angularVelocity)
+    );
+    heading = normalizeHeading(heading + angularVelocity * step);
 
     let driveScale = 1;
     if (constants.cosineScale && Math.abs(headingError) > constants.headingDeviationTolerance) {
@@ -303,15 +311,19 @@ const simulatePedroHeading = (
 export const buildPlaybackTimeline = (
   points: Point[],
   orderedSequenceItems: AutonSequenceItem[],
-  robotConstants: RobotConstants
+  robotConstants: RobotConstants,
+  simulationParameters: SimulationParameters = DEFAULT_SIMULATION_PARAMETERS
 ): PlaybackTimeline => {
   const maxForwardVelocity = safeMotionLimit(robotConstants.maxAchievableForwardVelocity);
   const maxLateralVelocity = safeMotionLimit(robotConstants.maxAchievableStrafeVelocity);
   const forwardBrakeAcceleration = safeMotionLimit(robotConstants.naturalForwardDeceleration);
   const lateralBrakeAcceleration = safeMotionLimit(robotConstants.naturalStrafeDeceleration);
-  const accelerationConstraint = robotConstants.maxAccelerationConstraint !== null
-    ? safeMotionLimit(robotConstants.maxAccelerationConstraint)
-    : Number.POSITIVE_INFINITY;
+  const accelerationConstraint = Math.min(
+    safeMotionLimit(simulationParameters.translationalAcceleration),
+    robotConstants.maxAccelerationConstraint !== null
+      ? safeMotionLimit(robotConstants.maxAccelerationConstraint)
+      : Number.POSITIVE_INFINITY
+  );
   const velocityConstraint = robotConstants.maxVelocityConstraint !== null
     ? safeMotionLimit(robotConstants.maxVelocityConstraint)
     : Number.POSITIVE_INFINITY;
@@ -428,7 +440,8 @@ export const buildPlaybackTimeline = (
         samples,
         cumulativeDistances,
         currentPose.heading,
-        robotConstants
+        robotConstants,
+        simulationParameters.angularAcceleration
       );
       const duration = Math.max(simulationFrames[simulationFrames.length - 1]?.time ?? 0, 0.001);
 

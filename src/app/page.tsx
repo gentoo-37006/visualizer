@@ -46,6 +46,7 @@ import type {
   PathHeadingField,
   PlannerSnapshot,
   Point,
+  SimulationParameters,
 } from "./plannerTypes";
 import {
   applyPathSegments,
@@ -83,11 +84,14 @@ import {
 import {
   AUTON_SETTINGS_STORAGE_KEY,
   ROBOT_CONSTANTS_STORAGE_KEY,
+  SIMULATION_PARAMETERS_STORAGE_KEY,
   SAVED_POSES_STORAGE_KEY,
   loadAutonDraft,
   loadAutonSettings,
   loadRobotConstants,
   loadSavedPoses,
+  loadSimulationParameters,
+  DEFAULT_SIMULATION_PARAMETERS,
   saveAutonDraft,
 } from "./plannerStorage";
 import {
@@ -124,6 +128,11 @@ export default function PathPlannerPage() {
   const [robotDimensionDrafts, setRobotDimensionDrafts] = useState({
     width: String(DEFAULT_ROBOT_CONSTANTS.width),
     length: String(DEFAULT_ROBOT_CONSTANTS.length),
+  });
+  const [simulationParameters, setSimulationParameters] = useState<SimulationParameters>(DEFAULT_SIMULATION_PARAMETERS);
+  const [simulationParameterDrafts, setSimulationParameterDrafts] = useState({
+    translationalAcceleration: String(DEFAULT_SIMULATION_PARAMETERS.translationalAcceleration),
+    angularAcceleration: String(DEFAULT_SIMULATION_PARAMETERS.angularAcceleration),
   });
   const [didLoadStoredSettings, setDidLoadStoredSettings] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
@@ -226,8 +235,8 @@ export default function PathPlannerPage() {
   );
 
   const playbackTimeline = useMemo(
-    () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants),
-    [orderedSequenceItems, points, robotConstants]
+    () => buildPlaybackTimeline(points, orderedSequenceItems, robotConstants, simulationParameters),
+    [orderedSequenceItems, points, robotConstants, simulationParameters]
   );
   const clampedPlaybackTime = Math.min(playbackTime, playbackTimeline.totalTime);
 
@@ -382,7 +391,9 @@ export default function PathPlannerPage() {
       }
       setSavedPoses(loadSavedPoses());
       const storedRobotConstants = loadRobotConstants();
+      const storedSimulationParameters = loadSimulationParameters();
       setRobotConstants(storedRobotConstants);
+      setSimulationParameters(storedSimulationParameters);
       setCustomFieldImage(storedCustomFieldImage);
       // A stored custom selection is meaningless if the image itself is gone.
       setFieldImageSelection(
@@ -393,6 +404,10 @@ export default function PathPlannerPage() {
       setRobotDimensionDrafts({
         width: String(storedRobotConstants.width),
         length: String(storedRobotConstants.length),
+      });
+      setSimulationParameterDrafts({
+        translationalAcceleration: String(storedSimulationParameters.translationalAcceleration),
+        angularAcceleration: String(storedSimulationParameters.angularAcceleration),
       });
       setDidLoadStoredSettings(true);
     }, 0);
@@ -435,6 +450,11 @@ export default function PathPlannerPage() {
     if (!didLoadStoredSettings) return;
     window.localStorage.setItem(ROBOT_CONSTANTS_STORAGE_KEY, JSON.stringify(robotConstants));
   }, [didLoadStoredSettings, robotConstants]);
+
+  useEffect(() => {
+    if (!didLoadStoredSettings) return;
+    window.localStorage.setItem(SIMULATION_PARAMETERS_STORAGE_KEY, JSON.stringify(simulationParameters));
+  }, [didLoadStoredSettings, simulationParameters]);
 
   // Dragging a point fires on every frame, so the draft is only written once the edit settles.
   useEffect(() => {
@@ -513,6 +533,24 @@ export default function PathPlannerPage() {
     setRobotDimensionDrafts((currentDrafts) => ({
       ...currentDrafts,
       [key]: robotConstants[key].toFixed(2),
+    }));
+  };
+
+  const updateSimulationParameter = (key: keyof SimulationParameters, value: string) => {
+    if (!isNumericDraft(value)) return;
+    setSimulationParameterDrafts((currentDrafts) => ({ ...currentDrafts, [key]: value }));
+    const parsedValue = Number.parseFloat(value);
+    if (!Number.isFinite(parsedValue)) return;
+    setSimulationParameters((currentParameters) => ({
+      ...currentParameters,
+      [key]: Math.max(0.1, parsedValue),
+    }));
+  };
+
+  const formatSimulationParameter = (key: keyof SimulationParameters) => {
+    setSimulationParameterDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [key]: simulationParameters[key].toFixed(1),
     }));
   };
 
@@ -1687,6 +1725,7 @@ export default function PathPlannerPage() {
           savedPoses={savedPoses}
           robotConstants={robotConstants}
           robotDimensionDrafts={robotDimensionDrafts}
+          simulationParameterDrafts={simulationParameterDrafts}
           hoverTarget={hoverTarget}
           activeTarget={activeTarget}
           undoStackLength={undoStack.length}
@@ -1755,6 +1794,8 @@ export default function PathPlannerPage() {
           onToggleActionsHidden={() => setAreActionsHidden((currentValue) => !currentValue)}
           onUpdateRobotDimension={updateRobotDimension}
           onFormatRobotDimension={formatRobotDimension}
+          onUpdateSimulationParameter={updateSimulationParameter}
+          onFormatSimulationParameter={formatSimulationParameter}
         />
         <PlaybackControls
           isRunning={isPlaybackRunning}

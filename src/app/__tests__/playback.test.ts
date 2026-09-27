@@ -232,6 +232,45 @@ describe("playback timeline", () => {
     expect(constrained.totalTime).toBeGreaterThan(unconstrained.totalTime);
   });
 
+  it("applies the configured translational inertia", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const highAcceleration = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      ROBOT,
+      { translationalAcceleration: 120, angularAcceleration: 360 }
+    );
+    const lowAcceleration = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      ROBOT,
+      { translationalAcceleration: 10, angularAcceleration: 360 }
+    );
+
+    expect(lowAcceleration.totalTime).toBeGreaterThan(highAcceleration.totalTime);
+  });
+
+  it("applies the configured angular inertia", () => {
+    const point = { ...straightPath, constantHeading: 180 };
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const slowTurn = buildPlaybackTimeline(
+      [start, point],
+      items,
+      ROBOT,
+      { translationalAcceleration: 60, angularAcceleration: 90 }
+    );
+    const fastTurn = buildPlaybackTimeline(
+      [start, point],
+      items,
+      ROBOT,
+      { translationalAcceleration: 60, angularAcceleration: 720 }
+    );
+
+    const slowHeading = Math.abs(getPlaybackPoseAtTime(slowTurn, 0.25, [start, point]).pose.heading);
+    const fastHeading = Math.abs(getPlaybackPoseAtTime(fastTurn, 0.25, [start, point]).pose.heading);
+    expect(slowHeading).toBeLessThan(fastHeading);
+  });
+
   it("uses Pedro natural deceleration for the stop at a path endpoint", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
     const normal = buildPlaybackTimeline([start, straightPath], items, ROBOT);

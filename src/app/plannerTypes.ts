@@ -87,6 +87,11 @@ export type PlannerHistoryState = {
 
 export type PersistedPlannerDraft = PlannerSnapshot & Partial<PlannerHistoryState>;
 
+export type SimulationParameters = {
+  translationalAcceleration: number;
+  angularAcceleration: number;
+};
+
 export type DragTarget =
   | { kind: "point"; index: number }
   | { kind: "segmentEnd"; pathIndex: number; segmentIndex: number }

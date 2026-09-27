@@ -18,11 +18,13 @@ import type {
   PersistedPlannerDraft,
   PlannerSnapshot,
   Point,
+  SimulationParameters,
 } from "./plannerTypes";
 import { generateId } from "./plannerUtils";
 
 export const SAVED_POSES_STORAGE_KEY = "auton-visualizer:saved-poses";
 export const ROBOT_CONSTANTS_STORAGE_KEY = "auton-visualizer:robot-constants";
+export const SIMULATION_PARAMETERS_STORAGE_KEY = "auton-visualizer:simulation-parameters";
 export const AUTON_SETTINGS_STORAGE_KEY = "auton-visualizer:auton-settings";
 export const AUTON_DRAFT_STORAGE_KEY = "auton-visualizer:auton-draft";
 
@@ -35,6 +37,11 @@ export const MAX_HISTORY_DEPTH = 100;
 
 export const limitHistoryDepth = <T,>(stack: T[]) =>
   stack.length > MAX_HISTORY_DEPTH ? stack.slice(stack.length - MAX_HISTORY_DEPTH) : stack;
+
+export const DEFAULT_SIMULATION_PARAMETERS: SimulationParameters = {
+  translationalAcceleration: 60,
+  angularAcceleration: 360,
+};
 
 export type AutonSettings = {
   alliance: AutonAlliance;
@@ -100,6 +107,28 @@ export const loadRobotConstants = () => {
   } catch {
     window.localStorage.removeItem(ROBOT_CONSTANTS_STORAGE_KEY);
     return DEFAULT_ROBOT_CONSTANTS;
+  }
+};
+
+const isSimulationParameters = (value: unknown): value is SimulationParameters =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as SimulationParameters).translationalAcceleration === "number" &&
+  typeof (value as SimulationParameters).angularAcceleration === "number";
+
+export const loadSimulationParameters = () => {
+  if (typeof window === "undefined") return DEFAULT_SIMULATION_PARAMETERS;
+  const stored = window.localStorage.getItem(SIMULATION_PARAMETERS_STORAGE_KEY);
+  if (!stored) return DEFAULT_SIMULATION_PARAMETERS;
+
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return isSimulationParameters(parsed)
+      ? { ...DEFAULT_SIMULATION_PARAMETERS, ...parsed }
+      : DEFAULT_SIMULATION_PARAMETERS;
+  } catch {
+    window.localStorage.removeItem(SIMULATION_PARAMETERS_STORAGE_KEY);
+    return DEFAULT_SIMULATION_PARAMETERS;
   }
 };
 
