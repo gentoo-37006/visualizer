@@ -849,7 +849,6 @@ function ConstantsPanel({
     "maxAccelerationConstraint",
     "maxVelocityConstraint",
     "maxDecelerationConstraint",
-    "maxDecelerationScale",
   ] as const;
   const isUsingDefaultConstants = importedConstantKeys.every(
     (key) => robotConstants[key] === DEFAULT_ROBOT_CONSTANTS[key]
@@ -932,8 +931,12 @@ function ConstantsPanel({
             <input className={styles.inputField} value={formatConstraint(robotConstants.maxDecelerationConstraint)} readOnly />
           </div>
           <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Deceleration Scale</label>
-            <input className={styles.inputField} value={formatConstraint(robotConstants.maxDecelerationScale)} readOnly />
+            <label className={styles.inputLabel}>Coast Down To (in/s)</label>
+            <input className={styles.inputField} value={robotConstants.coastDownToVelocity.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Brake Aggression</label>
+            <input className={styles.inputField} value={robotConstants.brakeAggression.toFixed(5)} readOnly />
           </div>
         </div>
       </div>
@@ -970,6 +973,10 @@ function ConstantsPanel({
           <div className={styles.inputGroup}>
             <label className={styles.inputLabel}>Feedback kP</label>
             <input className={styles.inputField} value={robotConstants.headingFeedback.toFixed(5)} readOnly />
+          </div>
+          <div className={styles.inputGroup}>
+            <label className={styles.inputLabel}>Static Feedforward</label>
+            <input className={styles.inputField} value={robotConstants.headingStaticFeedforward.toFixed(5)} readOnly />
           </div>
           <div className={styles.inputGroup}>
             <label className={styles.inputLabel}>Brake Linear</label>

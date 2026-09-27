@@ -62,6 +62,7 @@ describe("heading interpolation", () => {
     expect(interpolateHeadingRange(0, 90, 0.1, 0.25, 0.75)).toBe(0);
     expect(interpolateHeadingRange(0, 90, 0.9, 0.25, 0.75)).toBe(90);
     expect(interpolateHeadingRange(0, 90, 0.5, 0.25, 0.75)).toBeCloseTo(45, 6);
+    expect(interpolateHeadingRange(0, 90, 0.375, 0.25, 0.75)).toBeCloseTo(22.5, 6);
   });
 
   it("degenerates to a step when the window is empty or inverted", () => {
@@ -113,9 +114,9 @@ describe("playback timeline", () => {
     expect(pathSegment.kind).toBe("path");
     if (pathSegment.kind !== "path") return;
 
-    expect(pathSegment.samples).toHaveLength(97);
-    expect(pathSegment.samples[32]).toMatchObject({ nx: 0.58, ny: 0.35 });
-    expect(pathSegment.samples[64]).toMatchObject({ nx: 0.68, ny: 0.62 });
+    expect(pathSegment.samples).toHaveLength(193);
+    expect(pathSegment.samples[64]).toMatchObject({ nx: 0.58, ny: 0.35 });
+    expect(pathSegment.samples[128]).toMatchObject({ nx: 0.68, ny: 0.62 });
   });
 
   it("connects linear segment endpoints with straight lines", () => {
@@ -132,9 +133,27 @@ describe("playback timeline", () => {
     expect(pathSegment.kind).toBe("path");
     if (pathSegment.kind !== "path") return;
 
-    expect(pathSegment.samples).toHaveLength(65);
-    expect(pathSegment.samples[16]).toMatchObject({ nx: 0.55, ny: 0.35 });
-    expect(pathSegment.samples[32]).toMatchObject({ nx: 0.6, ny: 0.2 });
+    expect(pathSegment.samples).toHaveLength(129);
+    expect(pathSegment.samples[32]).toMatchObject({ nx: 0.55, ny: 0.35 });
+    expect(pathSegment.samples[64]).toMatchObject({ nx: 0.6, ny: 0.2 });
+  });
+
+  it("weights compound-path heading t by segment length like Pedro", () => {
+    const path: Point = {
+      ...straightPath,
+      nx: 1,
+      pathGeometry: "linear",
+      controlPoints: [{ id: "short", nx: 0.6, ny: 0.5, pathGeometry: "linear" }],
+      headingMode: "linear",
+      startHeading: 0,
+      endHeading: 100,
+    };
+    const timeline = timelineFor([start, path], [{ id: "s1", kind: "path", pointId: path.id }]);
+    const segment = timeline.segments[0];
+
+    expect(segment.kind).toBe("path");
+    if (segment.kind !== "path") return;
+    expect(segment.samples[64].heading).toBeCloseTo(20, 1);
   });
 
   it("does not add a pre-path rotation when the path starts at a different heading", () => {
@@ -146,14 +165,14 @@ describe("playback timeline", () => {
     expect(timeline.segments.map((segment) => segment.kind)).toEqual(["path"]);
   });
 
-  it("rotates toward a constant heading while moving instead of snapping", () => {
+  it("lets a large heading correction consume drivetrain power without creating a separate turn segment", () => {
     const timeline = timelineFor(
       [start, { ...straightPath, constantHeading: 180 }],
       [{ id: "s1", kind: "path", pointId: "a" }]
     );
     const early = getPlaybackPoseAtTime(timeline, 0.1, [start, straightPath]).pose;
 
-    expect(early.nx).toBeGreaterThan(start.nx);
+    expect(early.nx).toBeCloseTo(start.nx, 6);
     expect(Math.abs(early.heading)).toBeGreaterThan(0);
     expect(Math.abs(early.heading)).toBeLessThan(180);
   });
@@ -220,6 +239,23 @@ describe("playback timeline", () => {
     expect(slow.totalTime).toBeGreaterThan(fast.totalTime);
   });
 
+  it("reaches Pedro's maximum achievable velocity when the path is long enough", () => {
+    const longStart = { ...start, nx: 0 };
+    const longForwardPath = { ...straightPath, nx: 1, constantHeading: 90 };
+    const timeline = buildPlaybackTimeline(
+      [longStart, longForwardPath],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      ROBOT
+    );
+    const path = timeline.segments[0];
+
+    expect(path.kind).toBe("path");
+    if (path.kind !== "path") return;
+    expect(path.profile.cruiseVelocity).toBeGreaterThan(ROBOT.maxAchievableForwardVelocity * 0.98);
+    expect(path.profile.cruiseVelocity).toBeLessThanOrEqual(ROBOT.maxAchievableForwardVelocity);
+    expect(path.profile.cruiseTime).toBeGreaterThan(0);
+  });
+
   it("applies Pedro velocity and acceleration constraints", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
     const unconstrained = buildPlaybackTimeline([start, straightPath], items, ROBOT);
@@ -230,6 +266,46 @@ describe("playback timeline", () => {
     );
 
     expect(constrained.totalTime).toBeGreaterThan(unconstrained.totalTime);
+  });
+
+  it("precomputes Pedro's constrained coasting phase", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const unconstrained = buildPlaybackTimeline([start, straightPath], items, ROBOT);
+    const constrained = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      { ...ROBOT, maxDecelerationConstraint: 8, coastDownToVelocity: 5 }
+    );
+
+    expect(constrained.totalTime).toBeGreaterThan(unconstrained.totalTime);
+  });
+
+  it("honors brakeAtEnd when precomputing the endpoint", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const braking = buildPlaybackTimeline([start, straightPath], items, ROBOT);
+    const coasting = buildPlaybackTimeline([start, straightPath], items, { ...ROBOT, brakeAtEnd: false });
+    const coastPath = coasting.segments[0];
+
+    expect(coasting.totalTime).toBeLessThan(braking.totalTime);
+    expect(coastPath.kind).toBe("path");
+    if (coastPath.kind !== "path") return;
+    expect(coastPath.simulationFrames.at(-1)?.velocity).toBeGreaterThan(0);
+  });
+
+  it("applies Pedro's brake-aggression bias", () => {
+    const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
+    const conservative = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      { ...ROBOT, brakeAggression: 0.5 }
+    );
+    const overshootBiased = buildPlaybackTimeline(
+      [start, straightPath],
+      items,
+      { ...ROBOT, brakeAggression: 2 }
+    );
+
+    expect(overshootBiased.totalTime).toBeGreaterThan(conservative.totalTime);
   });
 
   it("applies the configured translational inertia", () => {
@@ -271,7 +347,59 @@ describe("playback timeline", () => {
     expect(slowHeading).toBeLessThan(fastHeading);
   });
 
-  it("uses Pedro natural deceleration for the stop at a path endpoint", () => {
+  it("uses Pedro's projected stopping heading to keep constant-heading overshoot bounded", () => {
+    const point = { ...straightPath, constantHeading: 90 };
+    const timeline = buildPlaybackTimeline(
+      [start, point],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      ROBOT,
+      { translationalAcceleration: 60, angularAcceleration: 360 }
+    );
+    const path = timeline.segments[0];
+
+    expect(path.kind).toBe("path");
+    if (path.kind !== "path") return;
+
+    const headings = path.simulationFrames.map((frame) => frame.heading);
+    expect(Math.abs((headings.at(-1) ?? 0) - 90)).toBeLessThan(2);
+    expect(Math.max(...headings)).toBeLessThan(92);
+  });
+
+  it("keeps heading feedback on the short side of the wrap boundary", () => {
+    const wrappedStart = { ...start, heading: 170 };
+    const point = { ...straightPath, constantHeading: -170 };
+    const timeline = buildPlaybackTimeline(
+      [wrappedStart, point],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      ROBOT
+    );
+    const early = getPlaybackPoseAtTime(timeline, 0.1, [wrappedStart, point]).pose;
+
+    expect(early.heading).toBeGreaterThan(170);
+  });
+
+  it("anticipates a changing path heading instead of waiting for the local target to move", () => {
+    const point = {
+      ...straightPath,
+      headingMode: "linear" as const,
+      startHeading: 0,
+      endHeading: 90,
+      linearStartT: 0,
+      linearEndT: 1,
+    };
+    const timeline = buildPlaybackTimeline(
+      [start, point],
+      [{ id: "s1", kind: "path", pointId: "a" }],
+      ROBOT
+    );
+    const path = timeline.segments[0];
+
+    expect(path.kind).toBe("path");
+    if (path.kind !== "path") return;
+    expect(path.simulationFrames[5].heading).toBeGreaterThan(0);
+  });
+
+  it("does not confuse natural coasting deceleration with active endpoint braking", () => {
     const items: AutonSequenceItem[] = [{ id: "s1", kind: "path", pointId: "a" }];
     const normal = buildPlaybackTimeline([start, straightPath], items, ROBOT);
     const lowNaturalDeceleration = buildPlaybackTimeline(
@@ -280,7 +408,7 @@ describe("playback timeline", () => {
       { ...ROBOT, naturalForwardDeceleration: 5, naturalStrafeDeceleration: 5 }
     );
 
-    expect(lowNaturalDeceleration.totalTime).toBeGreaterThan(normal.totalTime);
+    expect(lowNaturalDeceleration.totalTime).toBeCloseTo(normal.totalTime, 6);
   });
 });
 

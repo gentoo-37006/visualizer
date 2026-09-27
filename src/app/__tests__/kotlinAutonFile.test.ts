@@ -222,8 +222,10 @@ describe("robot constants and saved poses", () => {
         c.maxAccelerationConstraint.set(40.0);
         c.maxVelocityConstraint.set(ForesightConfig.Constraint.NONE);
         c.maxDecelerationConstraint.set(50.0);
-        c.maxDecelerationScale.set(0.8);
+        c.coastDownToVelocity.set(7.5);
+        c.brakeAggression.set(0.9);
         c.headingFeedback.set(Controller.proportional(4.5));
+        c.headingStaticFF.set(Controller.staticFeedforward(0.03));
         c.headingBrakeCoefficients.set(Vector2D.cartesian(0.05, 0.006));
         c.linearBrakeCoefficients.set(Matrix.diag(0.11, 0.09));
         c.quadraticBrakeCoefficients.set(Matrix.diag(0.0015, 0.0014));
@@ -243,8 +245,10 @@ describe("robot constants and saved poses", () => {
       maxAccelerationConstraint: 40,
       maxVelocityConstraint: null,
       maxDecelerationConstraint: 50,
-      maxDecelerationScale: 0.8,
+      coastDownToVelocity: 7.5,
+      brakeAggression: 0.9,
       headingFeedback: 4.5,
+      headingStaticFeedforward: 0.03,
       headingBrakeLinear: 0.05,
       headingBrakeQuadratic: 0.006,
       linearBrakeForward: 0.11,

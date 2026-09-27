@@ -2,7 +2,12 @@ import type { RobotConstants } from "./kotlinAutonFile";
 import { FIELD_SIZE_INCHES, INITIAL_POINT_COLOR } from "./plannerConstants";
 import type { AutonSequenceItem, Point, SimulationParameters } from "./plannerTypes";
 import { DEFAULT_SIMULATION_PARAMETERS } from "./plannerStorage";
-import { getPathSegments, normalizeHeading, samplePathSegments } from "./plannerUtils";
+import {
+  getPathSegments,
+  normalizeHeading,
+  samplePathSegmentsWithParameters,
+  type ParameterizedPathSample,
+} from "./plannerUtils";
 
 export type PlaybackPose = {
   nx: number;
@@ -32,7 +37,7 @@ export type PlaybackSegment =
       samples: PlaybackPose[];
       cumulativeDistances: number[];
       profile: MotionProfile;
-      simulationFrames: Array<{ time: number; distance: number; heading: number }>;
+      simulationFrames: Array<{ time: number; distance: number; heading: number; velocity: number }>;
     }
   | {
       kind: "wait";
@@ -64,7 +69,21 @@ export const interpolateHeading = (start: number, end: number, t: number) => {
 
 export const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
-const smoothInterpolationT = (t: number) => t * t * (3 - 2 * t);
+const findFirstIndexAtOrAfter = (
+  length: number,
+  valueAt: (index: number) => number,
+  target: number
+) => {
+  if (length === 0 || valueAt(length - 1) < target) return -1;
+  let low = 0;
+  let high = length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (valueAt(middle) < target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+};
 
 export const interpolateHeadingRange = (start: number, end: number, t: number, startT = 0, endT = 1) => {
   const clampedStartT = clamp01(startT);
@@ -73,7 +92,7 @@ export const interpolateHeadingRange = (start: number, end: number, t: number, s
   if (t <= clampedStartT) return normalizeHeading(start);
   if (t >= clampedEndT) return normalizeHeading(end);
   const localT = (t - clampedStartT) / (clampedEndT - clampedStartT);
-  return interpolateHeading(start, end, smoothInterpolationT(localT));
+  return interpolateHeading(start, end, localT);
 };
 
 const measureFieldDistance = (a: { nx: number; ny: number }, b: { nx: number; ny: number }) => {
@@ -119,21 +138,97 @@ const getDirectionalVelocityLimit = (
   return 1 / (components.forward / forwardLimit + components.strafe / strafeLimit);
 };
 
-const getDirectionalAccelerationLimit = (
+const getPedroVelocityToBrakeInTime = (
+  distanceRemaining: number,
   dx: number,
   dy: number,
   heading: number,
-  forwardLimit: number,
-  strafeLimit: number
+  constants: RobotConstants
 ) => {
   const components = getDirectionalComponents(dx, dy, heading);
-  return 1 / (
-    Math.pow(components.forward, 3) / forwardLimit +
-    Math.pow(components.strafe, 3) / strafeLimit
-  );
+  const k2 = constants.linearBrakeForward * Math.pow(components.forward, 2) +
+    constants.linearBrakeStrafe * Math.pow(components.strafe, 2);
+  const k1 = constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
+    constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3);
+  const distance = Math.abs(distanceRemaining) / Math.max(1e-6, constants.brakeAggression);
+  const velocity = k1 > 1e-9
+    ? (-k2 + Math.sqrt(k2 * k2 + 4 * k1 * distance)) / (2 * k1)
+    : k2 > 1e-9
+      ? distance / k2
+      : 0;
+  return velocity * Math.sign(distanceRemaining);
 };
 
-const getPedroBrakingAcceleration = (
+const cosineScale = (error: number, tolerance: number) => {
+  const safeTolerance = Math.max(1e-6, Math.abs(tolerance));
+  const radians = Math.min(Math.abs(error) * ((Math.PI / 2) / safeTolerance), Math.PI / 2);
+  return Math.cos(radians);
+};
+
+const getHeadingBrakeDisplacement = (angularVelocityDegrees: number, constants: RobotConstants) => {
+  const angularVelocity = angularVelocityDegrees * (Math.PI / 180);
+  const displacement = angularVelocity * Math.abs(angularVelocity) * constants.headingBrakeQuadratic +
+    angularVelocity * constants.headingBrakeLinear;
+  return displacement * (180 / Math.PI);
+};
+
+const clampDrivePower = (power: number) => Math.max(-1, Math.min(1, power));
+
+const getAngularVelocityToBrakeInTime = (errorDegrees: number, constants: RobotConstants) => {
+  const error = Math.abs(errorDegrees) * (Math.PI / 180);
+  if (error <= 1e-9) return 0;
+
+  const linear = Math.max(0, Math.abs(constants.headingBrakeLinear));
+  const quadratic = Math.max(0, Math.abs(constants.headingBrakeQuadratic));
+  let velocity: number;
+  if (quadratic > 1e-9) {
+    velocity = (-linear + Math.sqrt(linear * linear + 4 * quadratic * error)) / (2 * quadratic);
+  } else if (linear > 1e-9) {
+    velocity = error / linear;
+  } else {
+    velocity = error;
+  }
+  return Math.sign(errorDegrees) * velocity * (180 / Math.PI);
+};
+
+type ForesightSample = PlaybackPose & ParameterizedPathSample;
+
+const getSampleContextAtDistance = (
+  samples: ForesightSample[],
+  cumulativeDistances: number[],
+  distance: number
+) => {
+  const foundEndIndex = findFirstIndexAtOrAfter(
+    cumulativeDistances.length,
+    (index) => cumulativeDistances[index],
+    distance
+  );
+  const endIndex = foundEndIndex < 0 ? cumulativeDistances.length - 1 : Math.max(1, foundEndIndex);
+  const startIndex = Math.max(0, endIndex - 1);
+  const startDistance = cumulativeDistances[startIndex] ?? 0;
+  const endDistance = cumulativeDistances[endIndex] ?? startDistance;
+  const t = endDistance > startDistance ? clamp01((distance - startDistance) / (endDistance - startDistance)) : 0;
+  const start = samples[startIndex] ?? samples[0];
+  const end = samples[endIndex] ?? start;
+  return {
+    heading: interpolateHeading(start?.heading ?? 0, end?.heading ?? 0, t),
+    pathT: interpolateNumber(start?.pathT ?? 0, end?.pathT ?? 0, t),
+    localT: start?.segmentIndex === end?.segmentIndex
+      ? interpolateNumber(start?.localT ?? 0, end?.localT ?? 0, t)
+      : end?.localT ?? 0,
+    segmentIndex: t < 1 ? start?.segmentIndex ?? 0 : end?.segmentIndex ?? 0,
+    tangentX: interpolateNumber(start?.tangentX ?? 0, end?.tangentX ?? 0, t),
+    tangentY: interpolateNumber(start?.tangentY ?? 0, end?.tangentY ?? 0, t),
+  };
+};
+
+const getDirectionAtSample = (sample: Pick<ForesightSample, "tangentX" | "tangentY">) => {
+  const magnitude = Math.hypot(sample.tangentX, sample.tangentY);
+  if (magnitude <= 1e-9) return { dx: 0, dy: 1 };
+  return { dx: sample.tangentX / magnitude, dy: -sample.tangentY / magnitude };
+};
+
+const getPedroBrakeDisplacement = (
   dx: number,
   dy: number,
   heading: number,
@@ -145,139 +240,144 @@ const getPedroBrakingAcceleration = (
     constants.linearBrakeStrafe * Math.pow(components.strafe, 2);
   const quadratic = constants.quadraticBrakeForward * Math.pow(components.forward, 3) +
     constants.quadraticBrakeStrafe * Math.pow(components.strafe, 3);
-  const stoppingDistance = Math.max(
-    1e-6,
-    (quadratic * velocity * velocity + linear * velocity) * Math.max(1e-6, constants.brakeAggression)
-  );
-  return (velocity * velocity) / (2 * stoppingDistance);
+  return Math.max(0, quadratic * velocity * velocity + linear * velocity);
 };
 
-const createMotionProfile = (
+const getDirectionalNaturalDeceleration = (
+  dx: number,
+  dy: number,
+  heading: number,
+  constants: RobotConstants
+) => {
+  const components = getDirectionalComponents(dx, dy, heading);
+  const denominator = Math.pow(components.forward, 3) / safeMotionLimit(constants.naturalForwardDeceleration) +
+    Math.pow(components.strafe, 3) / safeMotionLimit(constants.naturalStrafeDeceleration);
+  return denominator > 1e-9 ? 1 / denominator : safeMotionLimit(constants.naturalForwardDeceleration);
+};
+
+const splitPedroHeadingPower = (
+  projectedError: number,
+  currentError: number,
+  constants: RobotConstants
+) => {
+  const calculate = (error: number) => constants.headingFeedback * error * (Math.PI / 180);
+  const total = calculate(projectedError);
+  let feedback = calculate(currentError);
+  let feedforward: number;
+
+  if (Math.abs(total) <= 1e-3) {
+    feedback = 0;
+    feedforward = 0;
+  } else if (total * feedback < 0) {
+    feedforward = total;
+    feedback = 0;
+  } else if (Math.abs(feedback) >= Math.abs(total)) {
+    feedforward = 0;
+    feedback = total;
+  } else {
+    feedforward = total - feedback;
+  }
+
+  if (Math.abs(projectedError) > 1e-9) {
+    feedforward += Math.sign(projectedError) * constants.headingStaticFeedforward;
+  }
+  feedforward += feedback * constants.headingDriveRatio;
+  feedback *= 1 - constants.headingDriveRatio;
+
+  return {
+    feedforward: clampDrivePower(feedforward),
+    feedback: clampDrivePower(feedback),
+    total: clampDrivePower(feedforward + feedback),
+  };
+};
+
+const createProfileSummary = (
+  frames: Array<{ time: number; distance: number; velocity: number }>,
   distance: number,
-  maxVelocity: number,
   acceleration: number,
   brakeAcceleration: number
 ): MotionProfile => {
-  const safeDistance = Math.max(0, distance);
-  const safeMaxVelocity = safeMotionLimit(maxVelocity);
-  const safeAcceleration = Number.isFinite(acceleration)
-    ? safeMotionLimit(acceleration)
-    : Number.POSITIVE_INFINITY;
-  const safeBrakeAcceleration = safeMotionLimit(brakeAcceleration, safeAcceleration);
-  const peakVelocity = Number.isFinite(safeAcceleration)
-    ? Math.sqrt(
-        (2 * safeAcceleration * safeBrakeAcceleration * safeDistance) /
-          (safeAcceleration + safeBrakeAcceleration)
-      )
-    : Math.sqrt(2 * safeBrakeAcceleration * safeDistance);
-  const cruiseVelocity = Math.min(safeMaxVelocity, peakVelocity);
-  const accelerationTime = Number.isFinite(safeAcceleration) ? cruiseVelocity / safeAcceleration : 0;
-  const brakeTime = cruiseVelocity / safeBrakeAcceleration;
-  const accelerationDistance = Number.isFinite(safeAcceleration)
-    ? (cruiseVelocity * cruiseVelocity) / (2 * safeAcceleration)
+  const peakVelocity = frames.reduce((peak, frame) => Math.max(peak, frame.velocity), 0);
+  const cruiseThreshold = peakVelocity * 0.995;
+  const firstCruise = frames.findIndex((frame) => peakVelocity > 0 && frame.velocity >= cruiseThreshold);
+  let lastCruise = -1;
+  frames.forEach((frame, index) => {
+    if (peakVelocity > 0 && frame.velocity >= cruiseThreshold) lastCruise = index;
+  });
+  const accelerationTime = firstCruise >= 0 ? frames[firstCruise].time : 0;
+  const cruiseTime = firstCruise >= 0 && lastCruise >= firstCruise
+    ? frames[lastCruise].time - frames[firstCruise].time
     : 0;
-  const brakeDistance = (cruiseVelocity * cruiseVelocity) / (2 * safeBrakeAcceleration);
-  const cruiseDistance = Math.max(0, safeDistance - accelerationDistance - brakeDistance);
-  const cruiseTime = cruiseDistance / cruiseVelocity;
+  const accelerationDistance = firstCruise >= 0 ? frames[firstCruise].distance : 0;
+  const cruiseDistance = firstCruise >= 0 && lastCruise >= firstCruise
+    ? frames[lastCruise].distance - accelerationDistance
+    : 0;
+  const finalTime = frames.at(-1)?.time ?? 0;
 
   return {
-    distance: safeDistance,
-    acceleration: safeAcceleration,
-    cruiseVelocity,
-    brakeAcceleration: safeBrakeAcceleration,
+    distance,
+    acceleration,
+    cruiseVelocity: peakVelocity,
+    brakeAcceleration,
     accelerationTime,
     cruiseTime,
-    brakeTime,
+    brakeTime: Math.max(0, finalTime - accelerationTime - cruiseTime),
     accelerationDistance,
     cruiseDistance,
   };
 };
 
-export const getMotionProfileDuration = (profile: MotionProfile) =>
-  profile.accelerationTime + profile.cruiseTime + profile.brakeTime;
-
-export const getMotionProfileDistanceAtTime = (profile: MotionProfile, time: number) => {
-  const safeTime = Math.max(0, Math.min(time, getMotionProfileDuration(profile)));
-  if (profile.accelerationTime > 0 && safeTime <= profile.accelerationTime) {
-    return 0.5 * profile.acceleration * safeTime * safeTime;
-  }
-
-  const cruiseEndTime = profile.accelerationTime + profile.cruiseTime;
-  if (safeTime <= cruiseEndTime) {
-    return profile.accelerationDistance + profile.cruiseVelocity * (safeTime - profile.accelerationTime);
-  }
-
-  const brakeElapsed = safeTime - cruiseEndTime;
-  return Math.min(
-    profile.distance,
-    profile.accelerationDistance +
-      profile.cruiseDistance +
-      profile.cruiseVelocity * brakeElapsed -
-      0.5 * profile.brakeAcceleration * brakeElapsed * brakeElapsed
-  );
-};
-
-const getSampleHeadingAtDistance = (
-  samples: PlaybackPose[],
-  cumulativeDistances: number[],
-  distance: number
-) => {
-  const foundEndIndex = cumulativeDistances.findIndex((value) => value >= distance);
-  const safeEndIndex = foundEndIndex < 0 ? cumulativeDistances.length - 1 : Math.max(1, foundEndIndex);
-  const startIndex = Math.max(0, safeEndIndex - 1);
-  const startDistance = cumulativeDistances[startIndex] ?? 0;
-  const endDistance = cumulativeDistances[safeEndIndex] ?? startDistance;
-  const localT = endDistance > startDistance ? clamp01((distance - startDistance) / (endDistance - startDistance)) : 0;
-  return interpolateHeading(samples[startIndex]?.heading ?? 0, samples[safeEndIndex]?.heading ?? 0, localT);
-};
-
-const cosineScale = (error: number, tolerance: number) => {
-  const safeTolerance = Math.max(1e-6, Math.abs(tolerance));
-  const radians = Math.min(Math.abs(error) * ((Math.PI / 2) / safeTolerance), Math.PI / 2);
-  return Math.cos(radians);
-};
-
-const headingVelocityForError = (errorDegrees: number, constants: RobotConstants) => {
-  const error = Math.abs(errorDegrees) * (Math.PI / 180);
-  if (error <= 1e-9) return 0;
-  const linear = Math.max(0, Math.abs(constants.headingBrakeLinear));
-  const quadratic = Math.max(0, Math.abs(constants.headingBrakeQuadratic));
-  let brakingVelocity: number;
-  if (quadratic > 1e-9) {
-    brakingVelocity = (-linear + Math.sqrt(linear * linear + 4 * quadratic * error)) / (2 * quadratic);
-  } else if (linear > 1e-9) {
-    brakingVelocity = error / linear;
-  } else {
-    brakingVelocity = error;
-  }
-  const feedbackPower = Math.min(1, Math.abs(constants.headingFeedback * (errorDegrees * Math.PI / 180)));
-  return brakingVelocity * feedbackPower * (180 / Math.PI);
-};
-
-const simulatePedroHeading = (
-  profile: MotionProfile,
-  samples: PlaybackPose[],
+const simulateForesightPath = (
+  samples: ForesightSample[],
   cumulativeDistances: number[],
   initialHeading: number,
   constants: RobotConstants,
-  angularAcceleration: number
+  simulationParameters: SimulationParameters
 ) => {
   const step = 1 / 100;
-  const profileDuration = getMotionProfileDuration(profile);
-  const frames = [{ time: 0, distance: 0, heading: normalizeHeading(initialHeading) }];
+  const totalDistance = cumulativeDistances.at(-1) ?? 0;
+  const translationalAcceleration = safeMotionLimit(simulationParameters.translationalAcceleration);
+  const angularAcceleration = safeMotionLimit(simulationParameters.angularAcceleration);
+  const frames = [{ time: 0, distance: 0, heading: normalizeHeading(initialHeading), velocity: 0 }];
   let elapsed = 0;
-  let profileTime = 0;
+  let distance = 0;
+  let velocity = 0;
   let heading = normalizeHeading(initialHeading);
   let angularVelocity = 0;
   let holdElapsed = 0;
   const timeoutSeconds = Math.max(0, constants.timeoutConstraint) / 1000;
+  let peakBrakeAcceleration = 0;
 
   while (elapsed < 120) {
-    const distance = getMotionProfileDistanceAtTime(profile, profileTime);
-    const targetHeading = getSampleHeadingAtDistance(samples, cumulativeDistances, distance);
+    const sample = getSampleContextAtDistance(samples, cumulativeDistances, distance);
+    const targetHeading = sample.heading;
     const headingError = normalizeHeading(targetHeading - heading);
-    const targetAngularVelocity = Math.sign(headingError) * headingVelocityForError(headingError, constants);
-    const maxAngularVelocityChange = safeMotionLimit(angularAcceleration) * step;
+    const direction = getDirectionAtSample(sample);
+    const brakeDisplacement = getPedroBrakeDisplacement(
+      direction.dx,
+      direction.dy,
+      heading,
+      velocity,
+      constants
+    );
+    const projectedDistance = Math.min(totalDistance, distance + brakeDisplacement);
+    const projectedSample = getSampleContextAtDistance(samples, cumulativeDistances, projectedDistance);
+    const projectedTargetHeading = projectedSample.heading;
+    const projectedHeading = normalizeHeading(
+      heading + getHeadingBrakeDisplacement(angularVelocity, constants)
+    );
+    const projectedHeadingError = normalizeHeading(projectedTargetHeading - projectedHeading);
+    const headingPowers = splitPedroHeadingPower(projectedHeadingError, headingError, constants);
+    const targetHeadingError = normalizeHeading(projectedTargetHeading - heading);
+    const pedroBrakeVelocity = getAngularVelocityToBrakeInTime(targetHeadingError, constants);
+    const inertiaLimitedVelocity = Math.sign(targetHeadingError) * Math.sqrt(
+      2 * angularAcceleration * Math.abs(targetHeadingError)
+    );
+    const brakingVelocity = Math.abs(inertiaLimitedVelocity) < Math.abs(pedroBrakeVelocity)
+      ? inertiaLimitedVelocity
+      : pedroBrakeVelocity;
+    const targetAngularVelocity = Math.sign(headingPowers.total) * Math.abs(brakingVelocity) * Math.abs(headingPowers.total);
+    const maxAngularVelocityChange = angularAcceleration * step;
     angularVelocity += Math.max(
       -maxAngularVelocityChange,
       Math.min(maxAngularVelocityChange, targetAngularVelocity - angularVelocity)
@@ -285,27 +385,120 @@ const simulatePedroHeading = (
     heading = normalizeHeading(heading + angularVelocity * step);
 
     let driveScale = 1;
-    if (constants.cosineScale && Math.abs(headingError) > constants.headingDeviationTolerance) {
-      driveScale = constants.turnBeforeDriving
-        ? 0
-        : cosineScale(headingError, constants.headingDeviationTolerance);
+    if (constants.cosineScale) {
+      const atParametricStart = projectedSample.localT <= constants.parametricTConstraint;
+      if (atParametricStart && Math.abs(projectedHeadingError) > constants.headingDeviationTolerance) {
+        driveScale = constants.turnBeforeDriving
+          ? 0
+          : cosineScale(projectedHeadingError, constants.headingDeviationTolerance);
+      } else if (!atParametricStart && Math.abs(projectedHeadingError) > 2 * constants.headingDeviationTolerance) {
+        driveScale = cosineScale(projectedHeadingError, constants.headingDeviationTolerance);
+      }
     }
-    if (profileTime < profileDuration) {
-      profileTime = Math.min(profileDuration, profileTime + step * driveScale);
+
+    const projectedDirection = getDirectionAtSample(projectedSample);
+    const directionalMaxVelocity = getDirectionalVelocityLimit(
+      projectedDirection.dx,
+      projectedDirection.dy,
+      heading,
+      safeMotionLimit(constants.maxAchievableForwardVelocity),
+      safeMotionLimit(constants.maxAchievableStrafeVelocity)
+    );
+    let targetVelocity = Math.min(
+      directionalMaxVelocity,
+      constants.maxVelocityConstraint !== null
+        ? safeMotionLimit(constants.maxVelocityConstraint)
+        : Number.POSITIVE_INFINITY
+    );
+    if (constants.maxAccelerationConstraint !== null) {
+      targetVelocity = Math.min(
+        targetVelocity,
+        velocity + safeMotionLimit(constants.maxAccelerationConstraint) * step
+      );
+    }
+    if (constants.maxDecelerationConstraint !== null) {
+      const naturalDeceleration = getDirectionalNaturalDeceleration(
+        projectedDirection.dx,
+        projectedDirection.dy,
+        heading,
+        constants
+      );
+      const coastProjection = velocity * velocity / (2 * naturalDeceleration);
+      const projectedRemaining = Math.max(0, totalDistance - distance - coastProjection);
+      const coastTarget = Math.sqrt(
+        constants.coastDownToVelocity * constants.coastDownToVelocity +
+          2 * safeMotionLimit(constants.maxDecelerationConstraint) * projectedRemaining
+      );
+      targetVelocity = Math.min(targetVelocity, coastTarget);
+    }
+
+    const headingPriority = Math.abs(projectedHeadingError) > constants.headingDeviationTolerance;
+    const headingPowerBeforeDrive = headingPriority
+      ? headingPowers.feedforward + headingPowers.feedback
+      : headingPowers.feedforward;
+    const availableDrivePower = Math.max(0, 1 - Math.min(1, Math.abs(headingPowerBeforeDrive)));
+    targetVelocity *= driveScale * availableDrivePower;
+
+    const remainingDistance = Math.max(0, totalDistance - distance);
+    const projectedRemainingDistance = remainingDistance - brakeDisplacement;
+    const velocityToBrakeInTime = getPedroVelocityToBrakeInTime(
+      projectedRemainingDistance,
+      direction.dx,
+      direction.dy,
+      heading,
+      constants
+    );
+    const isBraking = velocityToBrakeInTime <= 0 || projectedRemainingDistance <= 0;
+    let deceleration = translationalAcceleration;
+    if (isBraking && constants.brakeAtEnd) {
+      targetVelocity = 0;
+      const coefficientDeceleration = brakeDisplacement > 1e-6
+        ? velocity * velocity / (2 * brakeDisplacement)
+        : translationalAcceleration;
+      // The tuned brake coefficients already describe the real robot's
+      // stopping displacement. Scaling them again by controller power would
+      // count the drivetrain response twice and greatly overestimate braking
+      // time in an idealized visualizer plant.
+      deceleration = safeMotionLimit(
+        coefficientDeceleration / Math.max(1e-6, constants.brakeAggression)
+      );
+      peakBrakeAcceleration = Math.max(peakBrakeAcceleration, deceleration);
+    } else if (targetVelocity < velocity) {
+      deceleration = Math.min(
+        translationalAcceleration,
+        getDirectionalNaturalDeceleration(direction.dx, direction.dy, heading, constants),
+        constants.maxDecelerationConstraint !== null
+          ? safeMotionLimit(constants.maxDecelerationConstraint)
+          : Number.POSITIVE_INFINITY
+      );
+    }
+
+    const velocityDeltaLimit = (targetVelocity >= velocity ? translationalAcceleration : deceleration) * step;
+    velocity += Math.max(-velocityDeltaLimit, Math.min(velocityDeltaLimit, targetVelocity - velocity));
+    if (distance < totalDistance) {
+      distance = Math.min(totalDistance, distance + velocity * step);
     } else {
       holdElapsed += step;
     }
 
     elapsed += step;
-    const nextDistance = getMotionProfileDistanceAtTime(profile, profileTime);
-    frames.push({ time: elapsed, distance: nextDistance, heading });
+    frames.push({ time: elapsed, distance, heading, velocity });
 
     const finalHeading = samples[samples.length - 1]?.heading ?? heading;
     const headingComplete = Math.abs(normalizeHeading(finalHeading - heading)) <= constants.headingConstraint;
-    if (profileTime >= profileDuration && (headingComplete || holdElapsed >= timeoutSeconds)) break;
+    const velocityComplete = !constants.brakeAtEnd || velocity <= constants.velocityConstraint;
+    if (distance >= totalDistance && velocityComplete && (headingComplete || holdElapsed >= timeoutSeconds)) break;
   }
 
-  return frames;
+  return {
+    frames,
+    profile: createProfileSummary(
+      frames,
+      totalDistance,
+      translationalAcceleration,
+      peakBrakeAcceleration || translationalAcceleration
+    ),
+  };
 };
 
 export const buildPlaybackTimeline = (
@@ -314,25 +507,6 @@ export const buildPlaybackTimeline = (
   robotConstants: RobotConstants,
   simulationParameters: SimulationParameters = DEFAULT_SIMULATION_PARAMETERS
 ): PlaybackTimeline => {
-  const maxForwardVelocity = safeMotionLimit(robotConstants.maxAchievableForwardVelocity);
-  const maxLateralVelocity = safeMotionLimit(robotConstants.maxAchievableStrafeVelocity);
-  const forwardBrakeAcceleration = safeMotionLimit(robotConstants.naturalForwardDeceleration);
-  const lateralBrakeAcceleration = safeMotionLimit(robotConstants.naturalStrafeDeceleration);
-  const accelerationConstraint = Math.min(
-    safeMotionLimit(simulationParameters.translationalAcceleration),
-    robotConstants.maxAccelerationConstraint !== null
-      ? safeMotionLimit(robotConstants.maxAccelerationConstraint)
-      : Number.POSITIVE_INFINITY
-  );
-  const velocityConstraint = robotConstants.maxVelocityConstraint !== null
-    ? safeMotionLimit(robotConstants.maxVelocityConstraint)
-    : Number.POSITIVE_INFINITY;
-  const decelerationConstraint = robotConstants.maxDecelerationConstraint !== null
-    ? safeMotionLimit(robotConstants.maxDecelerationConstraint)
-    : Number.POSITIVE_INFINITY;
-  const decelerationScale = robotConstants.maxDecelerationScale !== null
-    ? Math.min(1, safeMotionLimit(robotConstants.maxDecelerationScale))
-    : 1;
   const segments: PlaybackSegment[] = [];
   let elapsedTime = 0;
   let currentPose: PlaybackPose = {
@@ -361,13 +535,10 @@ export const buildPlaybackTimeline = (
     const previousPoint = points[pointIndex - 1];
     if (!point || !previousPoint) return;
 
-    const positionSamples = samplePathSegments(previousPoint, getPathSegments(point), 32).map((sample) => ({
-      nx: sample.x,
-      ny: sample.y,
-    }));
+    const positionSamples = samplePathSegmentsWithParameters(previousPoint, getPathSegments(point), 64);
     const headingMode = point.headingMode ?? "constant";
-    const samples = positionSamples.map((sample, index) => {
-      const t = index / Math.max(1, positionSamples.length - 1);
+    const samples: ForesightSample[] = positionSamples.map((sample) => {
+      const t = sample.pathT;
       let heading = point.constantHeading ?? 0;
       if (headingMode === "linear") {
         heading = interpolateHeadingRange(
@@ -378,71 +549,32 @@ export const buildPlaybackTimeline = (
           point.linearEndT ?? 1
         );
       } else if (headingMode === "tangential") {
-        const nextSample = positionSamples[Math.min(positionSamples.length - 1, index + 1)];
-        const previousSample = positionSamples[Math.max(0, index - 1)];
-        const dx = (nextSample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
-        const dy = (previousSample.ny - nextSample.ny) * FIELD_SIZE_INCHES;
+        const dx = sample.tangentX * FIELD_SIZE_INCHES;
+        const dy = -sample.tangentY * FIELD_SIZE_INCHES;
         heading = normalizeHeading((Math.atan2(dx, dy) * 180) / Math.PI);
         if (point.tangentReversed) heading = normalizeHeading(heading + 180);
       }
 
-      return { nx: sample.nx, ny: sample.ny, heading };
+      return { ...sample, nx: sample.x, ny: sample.y, heading };
     });
     const cumulativeDistances = [0];
-    const motionLimits = positionSamples.slice(1).reduce(
-      (limits, sample, index) => {
-        const previousSample = positionSamples[index];
-        const segmentDistance = measureFieldDistance(previousSample, sample);
-        cumulativeDistances.push(cumulativeDistances[cumulativeDistances.length - 1] + segmentDistance);
-        if (segmentDistance <= 0.001) return limits;
-
-        const dx = (sample.nx - previousSample.nx) * FIELD_SIZE_INCHES;
-        const dy = (previousSample.ny - sample.ny) * FIELD_SIZE_INCHES;
-        const heading = samples[index]?.heading ?? point.constantHeading ?? 0;
-        return {
-          maxVelocity: Math.min(
-            limits.maxVelocity,
-            velocityConstraint,
-            getDirectionalVelocityLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity)
-          ),
-          acceleration: accelerationConstraint,
-          brakeAcceleration: Math.min(
-            limits.brakeAcceleration,
-            decelerationConstraint,
-            getPedroBrakingAcceleration(
-              dx,
-              dy,
-              heading,
-              getDirectionalVelocityLimit(dx, dy, heading, maxForwardVelocity, maxLateralVelocity),
-              robotConstants
-            ),
-            getDirectionalAccelerationLimit(dx, dy, heading, forwardBrakeAcceleration, lateralBrakeAcceleration) * decelerationScale
-          ),
-        };
-      },
-      {
-        maxVelocity: Math.min(velocityConstraint, Math.max(maxForwardVelocity, maxLateralVelocity)),
-        acceleration: accelerationConstraint,
-        brakeAcceleration: Math.max(forwardBrakeAcceleration, lateralBrakeAcceleration),
-      }
-    );
+    samples.slice(1).forEach((sample, index) => {
+      cumulativeDistances.push(
+        cumulativeDistances[cumulativeDistances.length - 1] + measureFieldDistance(samples[index], sample)
+      );
+    });
     const distance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
 
     if (distance > 0.001) {
-      const profile = createMotionProfile(
-        distance,
-        motionLimits.maxVelocity,
-        motionLimits.acceleration,
-        motionLimits.brakeAcceleration
-      );
-      const simulationFrames = simulatePedroHeading(
-        profile,
+      const simulation = simulateForesightPath(
         samples,
         cumulativeDistances,
         currentPose.heading,
         robotConstants,
-        simulationParameters.angularAcceleration
+        simulationParameters
       );
+      const profile = simulation.profile;
+      const simulationFrames = simulation.frames;
       const duration = Math.max(simulationFrames[simulationFrames.length - 1]?.time ?? 0, 0.001);
 
       segments.push({
@@ -497,7 +629,11 @@ export const getPlaybackPoseAtTime = (
   }
 
   const segmentTime = clampedPlaybackTime - activeSegment.startTime;
-  const foundFrameEndIndex = activeSegment.simulationFrames.findIndex((frame) => frame.time >= segmentTime);
+  const foundFrameEndIndex = findFirstIndexAtOrAfter(
+    activeSegment.simulationFrames.length,
+    (index) => activeSegment.simulationFrames[index].time,
+    segmentTime
+  );
   const safeFrameEndIndex = foundFrameEndIndex < 0
     ? activeSegment.simulationFrames.length - 1
     : Math.max(1, foundFrameEndIndex);

@@ -57,11 +57,11 @@ export type RobotConstants = {
   maxAccelerationConstraint: number | null;
   maxVelocityConstraint: number | null;
   maxDecelerationConstraint: number | null;
-  maxDecelerationScale: number | null;
   coastDownToVelocity: number;
   brakeAggression: number;
   maxBrakingPower: number;
   headingFeedback: number;
+  headingStaticFeedforward: number;
   headingBrakeLinear: number;
   headingBrakeQuadratic: number;
   headingDriveRatio: number;
@@ -107,11 +107,11 @@ export const DEFAULT_ROBOT_CONSTANTS: RobotConstants = {
   maxAccelerationConstraint: null,
   maxVelocityConstraint: null,
   maxDecelerationConstraint: null,
-  maxDecelerationScale: null,
   coastDownToVelocity: 0,
   brakeAggression: 1,
   maxBrakingPower: 0.2,
   headingFeedback: 5.258721785960744,
+  headingStaticFeedforward: 0,
   headingBrakeLinear: 0.05642143125655298,
   headingBrakeQuadratic: 0.0063829525363003695,
   headingDriveRatio: 0.5,
@@ -237,6 +237,18 @@ const parseHeadingFeedback = (contents: string) => {
   return match ? Number(match[1]) : DEFAULT_ROBOT_CONSTANTS.headingFeedback;
 };
 
+const parseControllerGain = (
+  contents: string,
+  name: string,
+  controller: "proportionalFeedforward" | "staticFeedforward",
+  fallback: number
+) => {
+  const match = contents.match(new RegExp(
+    `\\.${name}\\s*\\.\\s*set\\s*\\(\\s*Controller\\.${controller}\\s*\\(\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)\\s*\\)\\s*\\)`
+  ));
+  return match ? Number(match[1]) : fallback;
+};
+
 const parseHeadingBrakeCoefficients = (contents: string) => {
   const match = contents.match(/\.headingBrakeCoefficients\s*\.\s*set\s*\(\s*Vector2D\.cartesian\s*\(\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*\)\s*\)/);
   return match
@@ -286,11 +298,11 @@ export const parsePedroConstants = (
     maxAccelerationConstraint: parseOptionalConstraint(contents, "maxAccelerationConstraint"),
     maxVelocityConstraint: parseOptionalConstraint(contents, "maxVelocityConstraint"),
     maxDecelerationConstraint: parseOptionalConstraint(contents, "maxDecelerationConstraint"),
-    maxDecelerationScale: parseOptionalConstraint(contents, "maxDecelerationScale"),
     coastDownToVelocity: parseConfiguredNumber(contents, "coastDownToVelocity", DEFAULT_ROBOT_CONSTANTS.coastDownToVelocity),
     brakeAggression: parseConfiguredNumber(contents, "brakeAggression", DEFAULT_ROBOT_CONSTANTS.brakeAggression),
     maxBrakingPower: parseConfiguredNumber(contents, "maxBrakingPower", DEFAULT_ROBOT_CONSTANTS.maxBrakingPower),
     headingFeedback: parseHeadingFeedback(contents),
+    headingStaticFeedforward: parseControllerGain(contents, "headingStaticFF", "staticFeedforward", DEFAULT_ROBOT_CONSTANTS.headingStaticFeedforward),
     headingBrakeLinear: headingBrake.linear,
     headingBrakeQuadratic: headingBrake.quadratic,
     headingDriveRatio: parseConfiguredNumber(contents, "headingDriveRatio", DEFAULT_ROBOT_CONSTANTS.headingDriveRatio),

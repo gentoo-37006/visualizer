@@ -351,29 +351,72 @@ export const samplePathSegments = (
   start: Pick<Point, "nx" | "ny">,
   segments: PathSegmentGeometry[],
   samplesPerSegment = 32
-): SplinePoint[] =>
-  resolvePathSegments(start, segments).flatMap((resolved, segmentIndex) =>
-    Array.from({ length: samplesPerSegment + 1 }, (_, sampleIndex) => sampleIndex)
-      .filter((sampleIndex) => segmentIndex === 0 || sampleIndex > 0)
-      .map((sampleIndex) => {
-        const t = sampleIndex / samplesPerSegment;
-        if (!resolved.control1 || !resolved.control2) {
-          return {
-            x: resolved.start.x + (resolved.end.x - resolved.start.x) * t,
-            y: resolved.start.y + (resolved.end.y - resolved.start.y) * t,
-          };
+): SplinePoint[] => samplePathSegmentsWithParameters(start, segments, samplesPerSegment);
+
+export type ParameterizedPathSample = SplinePoint & {
+  /** Pedro's raw t for the complete (possibly compound) path. */
+  pathT: number;
+  localT: number;
+  segmentIndex: number;
+  tangentX: number;
+  tangentY: number;
+};
+
+/**
+ * Samples the authored curves while retaining Pedro's parameterization.
+ * CompoundCurve assigns each child a share of global t proportional to that
+ * child's length, while t inside a Bézier remains the raw curve parameter.
+ */
+export const samplePathSegmentsWithParameters = (
+  start: Pick<Point, "nx" | "ny">,
+  segments: PathSegmentGeometry[],
+  samplesPerSegment = 64
+): ParameterizedPathSample[] => {
+  const resolvedSegments = resolvePathSegments(start, segments);
+  const sampledSegments = resolvedSegments.map((resolved, segmentIndex) => {
+    const cubic = resolved.control1 && resolved.control2
+      ? {
+          start: resolved.start,
+          control1: resolved.control1,
+          control2: resolved.control2,
+          end: resolved.end,
         }
-        return evaluateCubicSplineSegment(
-          {
-            start: resolved.start,
-            control1: resolved.control1,
-            control2: resolved.control2,
-            end: resolved.end,
-          },
-          t
-        );
-      })
-  );
+      : null;
+    const samples = Array.from({ length: samplesPerSegment + 1 }, (_, sampleIndex) => {
+      const localT = sampleIndex / samplesPerSegment;
+      const position = cubic
+        ? evaluateCubicSplineSegment(cubic, localT)
+        : {
+            x: resolved.start.x + (resolved.end.x - resolved.start.x) * localT,
+            y: resolved.start.y + (resolved.end.y - resolved.start.y) * localT,
+          };
+      const tangent = cubic
+        ? evaluateCubicSplineDerivative(cubic, localT)
+        : { x: resolved.end.x - resolved.start.x, y: resolved.end.y - resolved.start.y };
+      return { ...position, localT, segmentIndex, tangentX: tangent.x, tangentY: tangent.y };
+    });
+    const length = samples.slice(1).reduce(
+      (sum, sample, index) => sum + Math.hypot(sample.x - samples[index].x, sample.y - samples[index].y),
+      0
+    );
+    return { samples, length };
+  });
+  const totalLength = sampledSegments.reduce((sum, segment) => sum + segment.length, 0);
+  let completedLength = 0;
+
+  return sampledSegments.flatMap(({ samples, length }, segmentIndex) => {
+    const parameterized = samples
+      .filter((_, sampleIndex) => segmentIndex === 0 || sampleIndex > 0)
+      .map((sample) => ({
+        ...sample,
+        pathT: totalLength > 1e-9
+          ? (completedLength + length * sample.localT) / totalLength
+          : sample.localT,
+      }));
+    completedLength += length;
+    return parameterized;
+  });
+};
 
 export const getCubicSplineJoinControls = (
   points: SplinePoint[],
