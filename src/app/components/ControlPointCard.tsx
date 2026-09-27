@@ -105,14 +105,15 @@ export function SegmentCard({
       <div className={styles.controlPointInputs}>
         <div className={styles.selectGroup}>
           <label className={styles.inputLabel}>Type</label>
-          <button
-            className={`${styles.selectField} ${styles.headingDirectionButton}`}
-            onClick={() => onPathGeometryChange(pathGeometry === "linear" ? "spline" : "linear")}
+          <select
+            className={styles.selectField}
+            value={pathGeometry}
+            onChange={(event) => onPathGeometryChange(event.target.value as PathGeometry)}
             aria-label={`Segment ${index + 1} type`}
-            aria-pressed={pathGeometry === "spline"}
           >
-            {pathGeometry === "linear" ? "Linear" : "Spline"}
-          </button>
+            <option value="linear">Linear</option>
+            <option value="spline">Spline</option>
+          </select>
         </div>
         <div className={styles.inputGroup}>
           <label className={styles.inputLabel}>X (in)</label>

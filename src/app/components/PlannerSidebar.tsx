@@ -618,13 +618,15 @@ function StartPoseCard({
         <div className={styles.startPoseAllianceRow}>
           <div className={styles.selectGroup}>
             <span className={styles.inputLabel}>Alliance</span>
-            <button
-              className={`${styles.selectField} ${styles.allianceToggleButton} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
-              onClick={() => onAutonAllianceChange(autonAlliance === "BLUE" ? "RED" : "BLUE")}
-              aria-pressed={autonAlliance === "RED"}
+            <select
+              className={`${styles.selectField} ${styles.allianceSelect} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
+              value={autonAlliance}
+              onChange={(event) => onAutonAllianceChange(event.target.value as AutonAlliance)}
+              aria-label="Alliance"
             >
-              {autonAlliance === "BLUE" ? "Blue" : "Red"}
-            </button>
+              <option value="BLUE">Blue</option>
+              <option value="RED">Red</option>
+            </select>
           </div>
         </div>
       }

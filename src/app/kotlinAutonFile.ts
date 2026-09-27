@@ -95,12 +95,21 @@ const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: strin
   );
 };
 
-const formatKotlinPose = (point: { nx: number; ny: number; poseName?: string }, savedPoses: SavedPose[]) => {
+const formatKotlinPose = (
+  point: { nx: number; ny: number; poseName?: string },
+  savedPoses: SavedPose[],
+  heading?: number
+) => {
   const savedPose = findMatchingSavedPose(point, savedPoses);
-  if (savedPose) return `Poses.${withStartPosePrefix(savedPose.name)}`;
+  if (savedPose && (heading === undefined || Math.abs(normalizeHeading(heading - (savedPose.heading ?? 0))) <= POSE_MATCH_EPSILON)) {
+    return `Poses.${withStartPosePrefix(savedPose.name)}`;
+  }
 
   const coords = toFieldCoords(point.nx, point.ny);
-  return `Pose(${formatKotlinNumber(coords.x)}, ${formatKotlinNumber(coords.y)})`;
+  const headingArgument = heading !== undefined && normalizeHeading(heading) !== 0
+    ? `, ${formatKotlinNumber(normalizeHeading(heading))}`
+    : "";
+  return `Pose(${formatKotlinNumber(coords.x)}, ${formatKotlinNumber(coords.y)}${headingArgument})`;
 };
 
 const stripLineComment = (line: string) => line.replace(/\/\/.*$/, "");
@@ -292,7 +301,11 @@ export const serializePathPlannerKotlin = (
       const resolvedSegments = resolvePathSegments(previousPoint, segments);
       const segmentDeclarations = resolvedSegments.map((resolved, segmentIndex) => {
         const segmentStart = segmentIndex === 0 ? previousPoint : segments[segmentIndex - 1];
-        const startPose = formatKotlinPose(segmentStart, savedPoses);
+        const startPose = formatKotlinPose(
+          segmentStart,
+          savedPoses,
+          pathIndex === 0 && segmentIndex === 0 ? previousPoint.heading ?? 0 : undefined
+        );
         const endPose = formatKotlinPose(segments[segmentIndex], savedPoses);
         if (!resolved.control1 || !resolved.control2) {
           return `    Linear(\n        ${startPose},\n        ${endPose},\n    ),`;

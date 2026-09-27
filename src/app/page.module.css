@@ -603,7 +603,7 @@
   margin-bottom: 0.75rem;
 }
 
-.allianceToggleButton {
+.allianceSelect {
   color: white;
   cursor: pointer;
   font-family: inherit;
@@ -611,11 +611,11 @@
   text-align: left;
 }
 
-.allianceToggleButton.blueAllianceButton {
+.allianceSelect.blueAllianceButton {
   background: rgba(37, 99, 235, 0.88);
 }
 
-.allianceToggleButton.redAllianceButton {
+.allianceSelect.redAllianceButton {
   background: rgba(220, 38, 38, 0.88);
 }
 
@@ -660,12 +660,6 @@
   font-size: 0.875rem;
   transition: var(--transition);
   width: 100%;
-}
-
-.headingDirectionButton {
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
 }
 
 .controlPointsPanel {

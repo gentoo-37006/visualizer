@@ -634,13 +634,15 @@ export function PointCard({
             {headingMode === "tangential" && (
               <div className={styles.selectGroup}>
                 <label className={styles.inputLabel}>Direction</label>
-                <button
-                  className={`${styles.selectField} ${styles.headingDirectionButton}`}
-                  onClick={() => onTangentReversedChange?.(!tangentReversed)}
-                  aria-pressed={tangentReversed}
+                <select
+                  className={styles.selectField}
+                  value={tangentReversed ? "reversed" : "forward"}
+                  onChange={(event) => onTangentReversedChange?.(event.target.value === "reversed")}
+                  aria-label="Tangential direction"
                 >
-                  {tangentReversed ? "Reversed" : "Forward"}
-                </button>
+                  <option value="forward">Forward</option>
+                  <option value="reversed">Reversed</option>
+                </select>
               </div>
             )}
           </>

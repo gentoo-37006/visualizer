@@ -22,6 +22,20 @@ const roundTrip = (source: string, savedPoses: SavedPose[] = []) => {
 };
 
 describe("path planner kotlin round trip", () => {
+  it("preserves the manual start heading even when its coordinates match a saved pose", () => {
+    const savedPoses: SavedPose[] = [{ name: "ORIGIN", x: 0, y: 0, heading: 0 }];
+    const points = [
+      { id: "init-point", nx: 0.5, ny: 0.5, color: "#fff", locked: true, heading: -75 },
+      { id: "path", nx: 0.75, ny: 0.5, color: "#fff", locked: false, constantHeading: 30 },
+    ];
+
+    const output = serializePathPlannerKotlin(points, savedPoses);
+    expect(output).toContain("Pose(0.0, 0.0, -75.0)");
+    expect(output).toContain("constantHeading(30.0)");
+    expect(parsePathPlannerKotlin(output, savedPoses)?.points[0].heading).toBe(-75);
+    expect(roundTrip(output, savedPoses)).toBe(output);
+  });
+
   it("preserves mixed segments, headings, triggers and sequence order", () => {
     const source = `val toBasket = Path(
     Spline(
