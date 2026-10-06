@@ -328,8 +328,15 @@ export const parseSavedPosesKotlin = (
   const savedPoses: SavedPose[] = [];
 
   type FieldCoordinate = { value: number; offset: -1 | 0 | 1 };
-  const horizontalCoordinates = new Map<string, FieldCoordinate>();
-  const verticalCoordinates = new Map<string, FieldCoordinate>();
+  const halfFieldSize = FIELD_SIZE_INCHES / 2;
+  const horizontalCoordinates = new Map<string, FieldCoordinate>([
+    ["EAST_WALL", { value: halfFieldSize, offset: -1 }],
+    ["WEST_WALL", { value: -halfFieldSize, offset: 1 }],
+  ]);
+  const verticalCoordinates = new Map<string, FieldCoordinate>([
+    ["NORTH_WALL", { value: halfFieldSize, offset: -1 }],
+    ["SOUTH_WALL", { value: -halfFieldSize, offset: 1 }],
+  ]);
 
   const parseOffset = (expression: string): -1 | 0 | 1 | null => {
     const match = expression.trim().match(/(?:Offset\s*\.\s*)?(NEG|NONE|POS)\b/);

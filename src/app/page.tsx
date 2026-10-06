@@ -126,13 +126,13 @@ export default function PathPlannerPage() {
   const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
   const [robotDimensionDrafts, setRobotDimensionDrafts] = useState({
-    width: String(DEFAULT_ROBOT_CONSTANTS.width),
-    length: String(DEFAULT_ROBOT_CONSTANTS.length),
+    width: DEFAULT_ROBOT_CONSTANTS.width.toFixed(2),
+    length: DEFAULT_ROBOT_CONSTANTS.length.toFixed(2),
   });
   const [simulationParameters, setSimulationParameters] = useState<SimulationParameters>(DEFAULT_SIMULATION_PARAMETERS);
   const [simulationParameterDrafts, setSimulationParameterDrafts] = useState({
-    translationalAcceleration: String(DEFAULT_SIMULATION_PARAMETERS.translationalAcceleration),
-    angularAcceleration: String(DEFAULT_SIMULATION_PARAMETERS.angularAcceleration),
+    translationalAcceleration: DEFAULT_SIMULATION_PARAMETERS.translationalAcceleration.toFixed(1),
+    angularAcceleration: DEFAULT_SIMULATION_PARAMETERS.angularAcceleration.toFixed(1),
   });
   const [didLoadStoredSettings, setDidLoadStoredSettings] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
@@ -402,12 +402,12 @@ export default function PathPlannerPage() {
           : storedFieldImageSelection
       );
       setRobotDimensionDrafts({
-        width: String(storedRobotConstants.width),
-        length: String(storedRobotConstants.length),
+        width: storedRobotConstants.width.toFixed(2),
+        length: storedRobotConstants.length.toFixed(2),
       });
       setSimulationParameterDrafts({
-        translationalAcceleration: String(storedSimulationParameters.translationalAcceleration),
-        angularAcceleration: String(storedSimulationParameters.angularAcceleration),
+        translationalAcceleration: storedSimulationParameters.translationalAcceleration.toFixed(1),
+        angularAcceleration: storedSimulationParameters.angularAcceleration.toFixed(1),
       });
       setDidLoadStoredSettings(true);
     }, 0);

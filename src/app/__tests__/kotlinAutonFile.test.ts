@@ -294,6 +294,44 @@ val START_BLUE_DEFAULT = startPose(
     ]);
   });
 
+  it("parses biobuzz start poses using imported Pose companion walls", () => {
+    const source = `package org.firstinspires.ftc.teamcode.config
+
+import gentoo.myrelib.math.Pose
+import gentoo.myrelib.math.Pose.Companion.EAST_WALL
+import gentoo.myrelib.math.Pose.Companion.NORTH_WALL
+import gentoo.myrelib.math.Pose.Companion.SOUTH_WALL
+import gentoo.myrelib.math.Pose.Companion.WEST_WALL
+import gentoo.myrelib.math.Pose.Heading
+import gentoo.myrelib.math.Pose.Horizontal
+import gentoo.myrelib.math.Pose.Offset
+import gentoo.myrelib.math.Pose.Vertical
+import org.firstinspires.ftc.teamcode.Robot
+
+object Poses {
+    val START_RED_DEFAULT = startPose(WEST_WALL, NORTH_WALL, Heading.SOUTH,)
+    val START_RED_CLOSE = startPose(Horizontal(-24.0, Offset.POS), SOUTH_WALL, Heading.SOUTH,)
+    val START_BLUE_DEFAULT = startPose(EAST_WALL, SOUTH_WALL, Heading.NORTH,)
+    val START_BLUE_CLOSE = startPose(Horizontal(24.0, Offset.NEG), NORTH_WALL, Heading.NORTH,)
+
+    fun startPose(horizontal: Horizontal, vertical: Vertical, heading: Heading): Pose =
+        Pose.startPose(horizontal, vertical, heading, Robot.HALF_LENGTH, Robot.HALF_WIDTH)
+}`;
+
+    expect(parseSavedPosesKotlin(source)).toEqual([
+      { name: "RED_DEFAULT", x: -64, y: 64, heading: 180 },
+      { name: "RED_CLOSE", x: -16, y: -64, heading: 180 },
+      { name: "BLUE_DEFAULT", x: 64, y: -64, heading: 0 },
+      { name: "BLUE_CLOSE", x: 16, y: 64, heading: 0 },
+    ]);
+    expect(parseSavedPosesKotlin(source, { width: 18, length: 20 })).toEqual([
+      { name: "RED_DEFAULT", x: -63, y: 62, heading: 180 },
+      { name: "RED_CLOSE", x: -15, y: -62, heading: 180 },
+      { name: "BLUE_DEFAULT", x: 63, y: -62, heading: 0 },
+      { name: "BLUE_CLOSE", x: 15, y: 62, heading: 0 },
+    ]);
+  });
+
   it("parses inline field coordinates and uses the heading-relative robot footprint", () => {
     const poses = parseSavedPosesKotlin(
       `val START_SIDEWAYS = startPose(
