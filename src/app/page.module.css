@@ -79,6 +79,59 @@
   border-bottom: 1px solid var(--border);
 }
 
+.modeTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 0 0 auto;
+  min-height: 42px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modeTabs button {
+  min-width: 0;
+  padding: 10px 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modeTabs button[aria-selected="true"] {
+  color: var(--text-primary);
+  border-bottom-color: #2dd4bf;
+}
+
+.modeTabs button:hover { background: var(--surface); }
+.modeTabs button:focus-visible { outline: 2px solid #2dd4bf; outline-offset: -2px; }
+.modePanel { display: flex; flex: 1; flex-direction: column; gap: 0.75rem; min-height: 0; }
+.recordingContent { gap: 16px; }
+.recordingMeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; }
+.recordingMeta strong { overflow-wrap: anywhere; }
+.recordingMeta span { color: var(--text-secondary); }
+.recordingSection { min-width: 0; }
+.recordingSection h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+.recordingReadouts, .recordingStates { margin: 0; }
+.recordingReadouts div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.recordingReadouts dt { color: var(--text-secondary); }
+.recordingReadouts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.recordingOptions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.recordingOptions label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.recordingOptions select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.recordingTrailToggle input { accent-color: #2dd4bf; }
+.recordingImportButton, .recordingRestartButton { padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.recordingImportButton:disabled { opacity: 0.5; cursor: default; }
+.recordingRestartButton { align-self: flex-start; }
+.recordingError, .recordingWarning { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.recordingError { color: #f87171; }
+.recordingWarning { color: #fbbf24; }
+.recordingStates div { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.recordingStates dt { margin-bottom: 8px; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.recordingStates dd { margin: 0; }
+.recordingStates pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; line-height: 1.5; }
+
 .sidebarTitle {
   font-size: 1.125rem;
   font-weight: 600;
@@ -1329,6 +1382,8 @@
 .playButton:hover {
   background: var(--primary-hover);
 }
+
+.playButton:disabled { opacity: 0.45; cursor: default; }
 
 .playbackRange {
   width: 100%;

@@ -37,5 +37,6 @@ export function useReplay(active: boolean) {
   }
   return { recording, sample, pose: recordedPose(sample?.states.pose), trail, timeMs, playing, speed, error,
     load, toggle, setSpeed, setError,
+    pause: () => setPlayback((state) => ({ ...state, playing: false })),
     seek: (time: number) => setPlayback({ timeMs: Math.max(0, Math.min(recording?.durationMs ?? 0, time)), playing: false }) };
 }

@@ -6,6 +6,10 @@ export type Recording = {
   durationMs: number; incomplete: boolean; droppedSamples: number; sizeLimitReached: boolean;
 };
 export const MAX_RECORDING_BYTES = 32 * 1024 * 1024;
+export async function readRecordingFile(file: File): Promise<string> {
+  if (file.size > MAX_RECORDING_BYTES) throw new Error("Recording exceeds 32 MB");
+  return file.text();
+}
 const record = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 

@@ -12,6 +12,8 @@ type PlaybackControlsProps = {
   trackBackground: string;
   onToggle: () => void;
   onScrub: (time: number) => void;
+  mode?: "path" | "recording";
+  disabled?: boolean;
 };
 
 export function PlaybackControls({
@@ -22,17 +24,21 @@ export function PlaybackControls({
   trackBackground,
   onToggle,
   onScrub,
+  mode = "path",
+  disabled = false,
 }: PlaybackControlsProps) {
   const overtime = getAutonomousOvertime(totalTime);
-  const isOverBudget = overtime > 0.05;
+  const isOverBudget = mode === "path" && overtime > 0.05;
+  const playbackLabel = mode === "path" ? "Path playback" : "Recording playback";
 
   return (
-    <section className={styles.playbackSidebar} aria-label="Path playback">
+    <section className={styles.playbackSidebar} aria-label={playbackLabel}>
       <div className={styles.playbackRow}>
         <button
           className={styles.playButton}
           onClick={onToggle}
-          aria-label={isRunning ? "Pause path playback" : "Play path playback"}
+          aria-label={`${isRunning ? "Pause" : "Play"} ${playbackLabel.toLowerCase()}`}
+          disabled={disabled}
           title={isRunning ? "Pause" : "Play"}
         >
           {isRunning ? (
@@ -61,7 +67,8 @@ export function PlaybackControls({
             } as CSSProperties
           }
           onChange={(event) => onScrub(Number(event.target.value))}
-          aria-label="Path playback progress"
+          aria-label={`${playbackLabel} progress`}
+          disabled={disabled}
         />
         <div
           className={`${styles.playbackTime} ${isOverBudget ? styles.playbackTimeOverBudget : ""}`}

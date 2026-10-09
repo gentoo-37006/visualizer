@@ -13,6 +13,8 @@ import { FieldImageModal } from "./components/FieldImageModal";
 import { FieldCanvas } from "./components/FieldCanvas";
 import { KotlinExportModal } from "./components/KotlinExportModal";
 import { PlaybackControls } from "./components/PlaybackControls";
+import { RecordingSidebar } from "./components/RecordingSidebar";
+import { useReplay } from "../tracker/useReplay";
 import { PlannerSidebar, type SidebarPage } from "./components/PlannerSidebar";
 import { usePlannerState } from "./hooks/usePlannerState";
 import {
@@ -113,6 +115,9 @@ const FIELD_BACKGROUND_DOUBLE_CLICK_MS = 500;
 const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function PathPlannerPage() {
+  const [applicationMode, setApplicationMode] = useState<"planner" | "recording">("planner");
+  const [showRecordingTrail, setShowRecordingTrail] = useState(true);
+  const replay = useReplay(applicationMode === "recording");
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -270,7 +275,7 @@ export default function PathPlannerPage() {
 
   useEffect(() => {
     const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (kotlinExport) return;
+      if (kotlinExport || applicationMode !== "planner") return;
 
       const isHistoryModifier = event.ctrlKey || event.metaKey;
       if (!isHistoryModifier || event.altKey) return;
@@ -290,7 +295,7 @@ export default function PathPlannerPage() {
 
     window.addEventListener("keydown", handleHistoryKeyDown);
     return () => window.removeEventListener("keydown", handleHistoryKeyDown);
-  }, [handleUndo, handleRedo, kotlinExport]);
+  }, [handleUndo, handleRedo, kotlinExport, applicationMode]);
 
   useEffect(() => {
     if (!kotlinExport && !isFieldImageModalOpen) return;
@@ -1659,6 +1664,14 @@ export default function PathPlannerPage() {
     }
   };
 
+  const changeApplicationMode = (mode: "planner" | "recording") => {
+    setIsPlaybackRunning(false);
+    replay.pause();
+    setApplicationMode(mode);
+    setHoverTarget(null);
+    setActiveTarget(null);
+  };
+
   return (
     <main className={styles.container}>
       <FieldCanvas
@@ -1680,9 +1693,27 @@ export default function PathPlannerPage() {
         onPointerUp={handlePointerUp}
         onPointerLeave={() => { if (!isDragging) setHoverTarget(null); }}
         onClick={handleFieldClick}
+        recordingView={applicationMode === "recording" ? {
+          pose: replay.pose,
+          robot: replay.recording?.robot ?? robotConstants,
+          trail: replay.trail,
+          showTrail: showRecordingTrail,
+        } : undefined}
       />
 
       <div className={styles.sidebarColumn}>
+        <div className={styles.modeTabs} role="tablist" aria-label="Visualizer mode" onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const mode = event.key === "Home" ? "planner" : event.key === "End" ? "recording" : applicationMode === "planner" ? "recording" : "planner";
+          changeApplicationMode(mode);
+          event.currentTarget.querySelector<HTMLButtonElement>(`#${mode}-tab`)?.focus();
+        }}>
+          <button id="planner-tab" role="tab" aria-selected={applicationMode === "planner"} aria-controls="planner-panel" tabIndex={applicationMode === "planner" ? 0 : -1} onClick={() => changeApplicationMode("planner")}>Path Planner</button>
+          <button id="recording-tab" role="tab" aria-selected={applicationMode === "recording"} aria-controls="recording-panel" tabIndex={applicationMode === "recording" ? 0 : -1} onClick={() => changeApplicationMode("recording")}>Flashback</button>
+        </div>
+        <div className={styles.modePanel} role="tabpanel" id={`${applicationMode}-panel`} aria-labelledby={`${applicationMode}-tab`}>
+        {applicationMode === "planner" ? <>
         <PlannerSidebar
           sidebarPage={sidebarPage}
           points={points}
@@ -1775,6 +1806,21 @@ export default function PathPlannerPage() {
             setPlaybackTime(time);
           }}
         />
+        </> : <>
+          <RecordingSidebar replay={replay} showTrail={showRecordingTrail} onShowTrailChange={setShowRecordingTrail} />
+          <PlaybackControls
+            mode="recording"
+            disabled={!replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs}
+            isRunning={replay.playing}
+            currentTime={replay.timeMs / 1000}
+            totalTime={(replay.recording?.durationMs ?? 0) / 1000}
+            accentColor="#2dd4bf"
+            trackBackground="var(--border)"
+            onToggle={replay.toggle}
+            onScrub={(time) => replay.seek(time * 1000)}
+          />
+        </>}
+        </div>
       </div>
 
       {isFieldImageModalOpen && (

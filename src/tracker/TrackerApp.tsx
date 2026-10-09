@@ -6,7 +6,7 @@ import { RobotLayer } from "../field/RobotLayer";
 import { TrailLayer } from "../field/TrailLayer";
 import { usePoseFeed } from "./usePoseFeed";
 import { useReplay } from "./useReplay";
-import { MAX_RECORDING_BYTES } from "./replay";
+import { MAX_RECORDING_BYTES, readRecordingFile } from "./replay";
 import styles from "./tracker.module.css";
 
 const fields = [
@@ -33,9 +33,8 @@ export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBas
   const trail = mode === "live" ? live.trail : replay.trail;
   async function importFile(file?: File) {
     if (!file) return;
-    if (file.size > MAX_RECORDING_BYTES) { replay.setError("Recording exceeds 32 MB"); return; }
-    try { if (replay.load(await file.text())) setMode("replay"); }
-    catch { replay.setError("Could not read file"); }
+    try { if (replay.load(await readRecordingFile(file))) setMode("replay"); }
+    catch (error) { replay.setError(error instanceof Error ? error.message : "Could not read file"); }
   }
   async function refreshFiles() {
     setBusy(true); replay.setError(null);

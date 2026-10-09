@@ -134,6 +134,14 @@ there too — it is downscaled and stored locally, and stretched over the square
 
 ## Live tracker
 
+The main editor has **Path Planner** and **Flashback** tabs above the sidebar.
+Flashback opens a downloaded match `.jsonl` recording and replays its robot
+pose on the field, using the dimensions stored in the file. Scrub the timeline,
+change playback speed, toggle the movement trail, and inspect registered states
+at the current sample. Switching tabs pauses playback and preserves the planner
+and the loaded recording. Recording time is not subject to the planner's
+30-second autonomous warning.
+
 The planner and tracker share the React components in `src/field`: the viewport,
 robot footprint, path curves, and movement trail. These components accept field
 coordinates in inches and headings in degrees clockwise from +y. They have no
@@ -163,8 +171,9 @@ full install. The `/visualizer` route renders the same tracker in the developmen
 it expects a same-origin `/yb/pose` feed.
 
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
-Its stable web-handler namespace stays outside the hot-swapped framework
-namespace. `BaseRobot` owns feed sessions and `MotionController` publishes poses.
+Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while
+Sloth replaces TeamCode. `BaseRobot` owns feed sessions and `MotionController`
+publishes poses.
 
 The read-only `/yb/pose` endpoint returns version-1 snapshots with a session ID,
 sequence number, active flag, opmode name, sample age in milliseconds, nullable

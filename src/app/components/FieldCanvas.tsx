@@ -8,7 +8,8 @@ import type { PlaybackPose } from "../playback";
 import { FieldViewport } from "../../field/FieldViewport";
 import { PathLayer } from "../../field/PathLayer";
 import { RobotLayer } from "../../field/RobotLayer";
-import type { FieldPath, RobotSize } from "../../field/geometry";
+import { TrailLayer } from "../../field/TrailLayer";
+import type { FieldPath, FieldPose, RobotSize } from "../../field/geometry";
 import { PlannerHandles } from "./PlannerHandles";
 import styles from "../page.module.css";
 
@@ -31,10 +32,11 @@ type FieldCanvasProps = {
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerLeave: () => void;
   onClick: (event: ReactMouseEvent<SVGSVGElement>) => void;
+  recordingView?: { pose: FieldPose | null; robot: RobotSize; trail: FieldPose[]; showTrail: boolean };
 };
 
-export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points, hoverTarget, isDragging, hasMeasuredField, robotSize, playbackPose, isRobotOutOfBounds, areControlPointsHidden, isPointVisible, onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onClick }: FieldCanvasProps) {
-  const geometry = !hasMeasuredField ? [] : points.slice(1).flatMap((point, offset) => {
+export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points, hoverTarget, isDragging, hasMeasuredField, robotSize, playbackPose, isRobotOutOfBounds, areControlPointsHidden, isPointVisible, onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onClick, recordingView }: FieldCanvasProps) {
+  const geometry = !hasMeasuredField || recordingView ? [] : points.slice(1).flatMap((point, offset) => {
     if (point.hidden) return [];
     return [{ point, pathIndex: offset + 1, resolved: resolvePathSegments(points[offset], getPathSegments(point)) }];
   });
@@ -52,13 +54,18 @@ export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points
 
   return (
     <div className={styles.fieldWrapper}>
-      <FieldViewport image={fieldImageSrc} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} svgRef={svgRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay} overlayProps={{
+      <FieldViewport image={fieldImageSrc} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} svgRef={svgRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay} overlayProps={recordingView ? {} : {
         onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onPointerLeave, onClick,
         style: { cursor: isDragging ? "grabbing" : hoverTarget !== null ? "grab" : "default" },
       }}>
         <PathLayer paths={paths} viewport={viewport} />
-        {hasMeasuredField && <RobotLayer pose={{ ...toFieldCoords(playbackPose.nx, playbackPose.ny), heading: playbackPose.heading }} size={robotSize} viewport={viewport} image="/robot.png" outOfBounds={isRobotOutOfBounds} />}
-        <PlannerHandles pathGeometry={geometry} points={points} fieldSize={fieldSize} hoverTarget={hoverTarget} hasMeasuredField={hasMeasuredField} areControlPointsHidden={areControlPointsHidden} isPointVisible={isPointVisible} />
+        {recordingView ? <>
+          {recordingView.showTrail && <TrailLayer poses={recordingView.trail} viewport={viewport} />}
+          {hasMeasuredField && recordingView.pose && <RobotLayer pose={recordingView.pose} size={recordingView.robot} viewport={viewport} image="/robot.png" />}
+        </> : <>
+          {hasMeasuredField && <RobotLayer pose={{ ...toFieldCoords(playbackPose.nx, playbackPose.ny), heading: playbackPose.heading }} size={robotSize} viewport={viewport} image="/robot.png" outOfBounds={isRobotOutOfBounds} />}
+          <PlannerHandles pathGeometry={geometry} points={points} fieldSize={fieldSize} hoverTarget={hoverTarget} hasMeasuredField={hasMeasuredField} areControlPointsHidden={areControlPointsHidden} isPointVisible={isPointVisible} />
+        </>}
       </FieldViewport>
     </div>
   );
