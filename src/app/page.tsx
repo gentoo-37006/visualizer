@@ -27,7 +27,6 @@ import {
   type SavedPose,
 } from "./kotlinAutonFile";
 import {
-  FIELD_SIZE_INCHES,
   FIELD_BORDER_WIDTH,
   INITIAL_POINT_COLOR,
   INITIAL_POINT_ID,
@@ -68,7 +67,6 @@ import {
   targetPathIndex,
   toFieldCoords,
   toNormalizedCoords,
-  toSvgPixelCoords,
 } from "./plannerUtils";
 import { seededColor } from "./plannerColors";
 import {
@@ -79,7 +77,6 @@ import {
   getPathDurationsByPointId,
   getPlaybackPoseAtTime,
   isRobotInsideField,
-  snapSvgPixel,
 } from "./playback";
 import {
   AUTON_SETTINGS_STORAGE_KEY,
@@ -270,37 +267,6 @@ export default function PathPlannerPage() {
     () => createPlaybackTrackBackground(playbackTimeline),
     [playbackTimeline]
   );
-
-  const robotSvgFrame = useMemo(() => {
-    const safeNx = Number.isFinite(playbackPose.nx) ? clamp01(playbackPose.nx) : 0.5;
-    const safeNy = Number.isFinite(playbackPose.ny) ? clamp01(playbackPose.ny) : 0.5;
-    const safeRobotWidth =
-      Number.isFinite(robotConstants.width) && robotConstants.width > 0
-        ? robotConstants.width
-        : DEFAULT_ROBOT_CONSTANTS.width;
-    const safeRobotLength =
-      Number.isFinite(robotConstants.length) && robotConstants.length > 0
-        ? robotConstants.length
-        : DEFAULT_ROBOT_CONSTANTS.length;
-    const center = toSvgPixelCoords(safeNx, safeNy, fieldSize);
-    const innerFieldWidth = Math.max(1, fieldSize.width - FIELD_BORDER_WIDTH * 2);
-    const innerFieldHeight = Math.max(1, fieldSize.height - FIELD_BORDER_WIDTH * 2);
-    const width = (safeRobotWidth / FIELD_SIZE_INCHES) * innerFieldWidth;
-    const height = (safeRobotLength / FIELD_SIZE_INCHES) * innerFieldHeight;
-    const x = snapSvgPixel(center.x - width / 2);
-    const y = snapSvgPixel(center.y - height / 2);
-    const snappedWidth = Math.max(1, snapSvgPixel(width));
-    const snappedHeight = Math.max(1, snapSvgPixel(height));
-
-    return {
-      x,
-      y,
-      width: snappedWidth,
-      height: snappedHeight,
-      centerX: x + snappedWidth / 2,
-      centerY: y + snappedHeight / 2,
-    };
-  }, [fieldSize, playbackPose.nx, playbackPose.ny, robotConstants.length, robotConstants.width]);
 
   useEffect(() => {
     const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1704,7 +1670,7 @@ export default function PathPlannerPage() {
         hoverTarget={hoverTarget}
         isDragging={isDragging}
         hasMeasuredField={hasMeasuredField}
-        robotSvgFrame={robotSvgFrame}
+        robotSize={robotConstants}
         isRobotOutOfBounds={isRobotOutOfBounds}
         playbackPose={playbackPose}
         isPointVisible={isPointVisible}

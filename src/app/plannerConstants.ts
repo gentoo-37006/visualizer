@@ -1,6 +1,6 @@
 import { seededColor } from "./plannerColors";
 
-export const FIELD_SIZE_INCHES = 144;
+export { FIELD_SIZE_INCHES } from "../field/geometry";
 export const DEFAULT_SEGMENT_LENGTH_INCHES = 24;
 export const POINT_DIAMETER = 20;
 export const CONTROL_POINT_DIAMETER = POINT_DIAMETER;

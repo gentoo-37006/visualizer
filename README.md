@@ -131,3 +131,46 @@ The field defaults to the current season's image and can be switched by
 double-clicking an empty part of the field. A custom image can be uploaded
 there too — it is downscaled and stored locally, and stretched over the square
 144 × 144 inch field the same way the built-in presets are.
+
+## Live tracker
+
+The planner and tracker share the React components in `src/field`: the viewport,
+robot footprint, path curves, and movement trail. These components accept field
+coordinates in inches and headings in degrees clockwise from +y. They have no
+Next.js, telemetry, or simulation dependencies. Planner editing handles remain
+in `PlannerHandles`; the tracker owns its polling and connection state separately.
+
+Build the standalone tracker, including React, CSS, field images, and the robot
+image, with:
+
+```bash
+npm ci
+npm run build:tracker
+```
+
+The output is `dist/tracker`. To update the version packaged in the sibling
+robot project:
+
+```bash
+npm run build:tracker -- ../biobuzz-2027/myrelib/src/main/assets/field-viewer
+```
+
+After a full `yb push teamcode`, connect to the Control Hub's Wi-Fi and open
+`http://192.168.43.1:8080/visualizer/`. The Hub serves every asset locally; the page
+does not need internet access, Next.js, or ADB. Robot-code changes can continue
+to use Sloth after that initial installation. Viewer/bridge changes need another
+full install. The `/visualizer` route renders the same tracker in the development app;
+it expects a same-origin `/yb/pose` feed.
+
+The robot-side implementation, bundled assets, and tests belong to `myrelib`.
+Its stable web-handler namespace stays outside the hot-swapped framework
+namespace. `BaseRobot` owns feed sessions and `MotionController` publishes poses.
+
+The read-only `/yb/pose` endpoint returns version-1 snapshots with a session ID,
+sequence number, active flag, opmode name, sample age in milliseconds, nullable
+`{x, y, heading}` pose, and nullable `{width, length}` robot dimensions. The
+viewer polls without overlapping requests at up to 20 Hz, keeps at most 30
+seconds/600 trail samples, and resets the trail when a new opmode starts.
+It distinguishes idle, unavailable, stale, disconnected, and paused feeds.
+Live tracking displays the robot's localization estimate; it does not update
+localization or command movement. All tracker responses bypass browser caching.
