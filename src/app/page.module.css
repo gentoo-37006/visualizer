@@ -102,10 +102,10 @@
   flex: 0 0 auto;
   min-height: 44px;
   background-color: var(--background);
-  border-bottom: 1px solid var(--border);
 }
 
 .modeTabs button {
+  position: relative;
   min-width: 0;
   padding: 12px 8px;
   border: 0;
@@ -119,13 +119,37 @@
 }
 
 .modeTabs button[aria-selected="true"] {
+  z-index: 1;
   color: var(--text-primary);
   background-color: var(--surface);
 }
 
-.modeTabs button + button { border-left: 1px solid var(--border); }
-.modeTabs button:hover { background: var(--surface-hover); }
-.modeTabs button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.modeTabs button[aria-selected="true"]::before,
+.modeTabs button[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--border-radius);
+  height: var(--border-radius);
+  pointer-events: none;
+}
+
+.modeTabs button[aria-selected="true"]::before {
+  right: 100%;
+  background: radial-gradient(circle at top left, transparent var(--border-radius), var(--surface) var(--border-radius));
+}
+
+.modeTabs button[aria-selected="true"]::after {
+  left: 100%;
+  background: radial-gradient(circle at top right, transparent var(--border-radius), var(--surface) var(--border-radius));
+}
+
+.modeTabs button[aria-selected="false"]:hover { background: var(--surface-hover); }
+.modeTabs button:focus-visible {
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
 .modePanel { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .recordingContent { gap: 16px; }
 .recordingMeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; }

@@ -1,40 +1,13 @@
-.app { min-height: 100dvh; background: #151515; color: #eee; font: 14px ui-monospace, SFMono-Regular, Consolas, monospace; padding: 20px; box-sizing: border-box; }
-.app * { box-sizing: border-box; letter-spacing: 0; }
-.header { display: flex; align-items: center; gap: 16px; min-height: 40px; margin-bottom: 20px; flex-wrap: wrap; }
-.header h1 { font-size: 20px; margin: 0; }
-.status { color: #fbbf24; font-size: 13px; }
+.container { letter-spacing: 0; }
+.fieldWrapper { width: min(calc(100dvh - 2rem), calc(100% - 320px - 1rem)); height: auto; align-self: flex-start; flex-shrink: 0; }
+.status { color: #fbbf24; font-size: 12px; }
 .status[data-live="true"] { color: #2dd4bf; }
-.opMode { color: #aaa; overflow-wrap: anywhere; }
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; max-width: 1380px; margin: auto; }
-.field { width: min(100%, calc(100dvh - 120px)); aspect-ratio: 1; justify-self: center; min-width: 0; }
-.fieldImage { border: 3px solid #666; border-radius: 6px; }
-.sidebar { padding: 8px 0; min-width: 0; }
-.sidebar h2 { font-size: 15px; margin: 0 0 20px; }
-.readouts { margin: 0 0 28px; }
-.readouts div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #333; }
-.readouts dt { color: #aaa; }
-.readouts dd { margin: 0; font-variant-numeric: tabular-nums; }
-.fieldLabel { display: flex; flex-direction: column; gap: 8px; color: #aaa; margin-bottom: 24px; }
-.fieldLabel select { width: 100%; padding: 10px; border: 1px solid #555; border-radius: 4px; background: #222; color: #eee; font: inherit; }
-.toggle { display: flex; gap: 10px; align-items: center; margin: 18px 0; }
-.toggle input { accent-color: #2dd4bf; width: 16px; height: 16px; }
-.clear { padding: 10px 14px; background: #282828; border: 1px solid #555; border-radius: 4px; color: #eee; font: inherit; cursor: pointer; }
-.clear:disabled { opacity: 0.4; cursor: default; }
-.clear:hover:not(:disabled) { background: #363636; }
-.app :focus-visible { outline: 2px solid #2dd4bf; outline-offset: 3px; }
-.modes { display: flex; border: 1px solid #555; border-radius: 4px; overflow: hidden; }
-.modes button, .actions button, .actions a, .actions select { font: inherit; color: #eee; background: #282828; padding: 9px 10px; border: 1px solid #555; border-radius: 4px; cursor: pointer; text-decoration: none; }
-.modes button { border: 0; border-radius: 0; }
-.modes button[aria-pressed="true"] { background: #246158; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.actions button:disabled { opacity: 0.4; cursor: default; }
-.replay { margin-top: 28px; border-top: 1px solid #444; padding-top: 20px; }
-.timeline { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
-.seek { width: 100%; margin: 16px 0; accent-color: #2dd4bf; }
-.warning { color: #fbbf24; }
-.error { color: #fb7185; overflow-wrap: anywhere; }
-.states { margin: 0; }
-.states div { border-bottom: 1px solid #333; padding: 10px 0; }
-.states dt { color: #aaa; margin-bottom: 6px; overflow-wrap: anywhere; }
-.states dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-@media (max-width: 760px) { .app { padding: 16px; } .workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; } .field { width: 100%; } .header { gap: 10px 16px; } .opMode { flex-basis: 100%; } .sidebar { max-width: 100%; } }
+.selectLabel { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
+.selectLabel select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.hubHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.hubHeading h3 { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.actions a { text-decoration: none; }
+.container button:disabled { opacity: 0.4; cursor: default; }
+.container :focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+@media (max-width: 768px) { .fieldWrapper { width: 100%; } }

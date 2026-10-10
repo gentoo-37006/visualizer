@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { useReplay } from "../../tracker/useReplay";
 import { readRecordingFile } from "../../tracker/replay";
 import styles from "../page.module.css";
@@ -9,9 +9,10 @@ type Props = {
   replay: ReturnType<typeof useReplay>;
   showTrail: boolean;
   onShowTrailChange: (show: boolean) => void;
+  children?: ReactNode;
 };
 
-export function RecordingSidebar({ replay, showTrail, onShowTrailChange }: Props) {
+export function RecordingSidebar({ replay, showTrail, onShowTrailChange, children }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const recording = replay.recording;
@@ -40,6 +41,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange }: Props
       }} />
     </header>
     <div className={`${styles.pointsList} ${styles.recordingContent}`}>
+      {children}
       {replay.error && <p role="alert" className={styles.recordingError}>{replay.error}</p>}
       {!recording ? <div className={styles.emptyState}>No recording selected</div> : <>
         <div className={styles.recordingMeta}>
