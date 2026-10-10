@@ -10,9 +10,10 @@ type Props = {
   showTrail: boolean;
   onShowTrailChange: (show: boolean) => void;
   children?: ReactNode;
+  sourceControl?: ReactNode;
 };
 
-export function RecordingSidebar({ replay, showTrail, onShowTrailChange, children }: Props) {
+export function RecordingSidebar({ replay, showTrail, onShowTrailChange, children, sourceControl }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const recording = replay.recording;
@@ -32,13 +33,14 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, childre
     <header className={styles.sidebarHeader}>
       <div className={styles.sidebarTitleRow}>
         <h2 className={styles.sidebarTitle}>Replay</h2>
-        <button className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} disabled={isLoading} onClick={() => input.current?.click()}>{isLoading ? "Loading..." : "Open Recording"}</button>
+        {sourceControl === undefined && <button className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} disabled={isLoading} onClick={() => input.current?.click()}>{isLoading ? "Loading..." : "Open Recording"}</button>}
       </div>
-      <input ref={input} aria-label="Import recording" type="file" accept=".jsonl,.ndjson" hidden onChange={(event) => {
+      {sourceControl === undefined && <input ref={input} aria-label="Import recording" type="file" accept=".jsonl,.ndjson" hidden onChange={(event) => {
         const file = event.target.files?.[0];
         event.target.value = "";
         void importFile(file);
-      }} />
+      }} />}
+      {sourceControl}
     </header>
     <div className={`${styles.pointsList} ${styles.recordingContent}`}>
       {children}

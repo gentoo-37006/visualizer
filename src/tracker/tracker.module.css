@@ -4,10 +4,10 @@
 .status[data-live="true"] { color: #2dd4bf; }
 .selectLabel { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
 .selectLabel select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
-.hubHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.hubHeading h3 { margin: 0; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sourceControl { display: flex; flex-direction: column; gap: 12px; padding: 12px 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .actions a { text-decoration: none; }
+.loading { font-size: 12px; color: var(--text-secondary); }
 .container button:disabled { opacity: 0.4; cursor: default; }
-.container :focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.sourceControl :focus-visible, .fieldWrapper svg:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 @media (max-width: 768px) { .fieldWrapper { width: 100%; } }

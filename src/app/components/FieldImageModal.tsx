@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import type { ChangeEvent, RefObject } from "react";
 import {
   FIELD_IMAGE_PRESETS,
@@ -22,6 +21,7 @@ type FieldImageModalProps = {
   onSelectCustom: () => void;
   onRemoveCustom: () => void;
   onUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  assetBase?: string;
 };
 
 export function FieldImageModal({
@@ -37,6 +37,7 @@ export function FieldImageModal({
   onSelectCustom,
   onRemoveCustom,
   onUpload,
+  assetBase = "",
 }: FieldImageModalProps) {
   return (
     <div
@@ -73,7 +74,9 @@ export function FieldImageModal({
                 onClick={() => onSelectPreset(preset)}
               >
                 <span className={styles.fieldPresetPreview}>
-                  <Image src={preset.src} alt="" fill sizes="8rem" className={styles.fieldPresetImage} />
+                  {/* Native images keep the shared picker usable on the Control Hub. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={`${assetBase}${preset.src}`} alt="" className={styles.fieldPresetImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
                 </span>
                 <span>{preset.name}</span>
               </button>
@@ -86,13 +89,12 @@ export function FieldImageModal({
                   title={customFieldImage.name}
                 >
                   <span className={styles.fieldPresetPreview}>
-                    <Image
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                       src={customFieldImage.dataUrl}
                       alt=""
-                      fill
-                      sizes="8rem"
-                      unoptimized
                       className={styles.fieldPresetImage}
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
                     />
                   </span>
                   <span className={styles.customFieldPresetName}>{customFieldImage.name}</span>

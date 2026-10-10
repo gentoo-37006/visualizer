@@ -68,6 +68,23 @@ export function sampleIndex(samples: RecordedSample[], timeMs: number): number {
   return lo - 1;
 }
 
+export function replayPose(samples: RecordedSample[], timeMs: number): FieldPose | null {
+  const index = sampleIndex(samples, timeMs);
+  const current = samples[index];
+  const pose = recordedPose(current?.states.pose);
+  if (!pose || !current) return null;
+  const next = samples[index + 1];
+  const nextPose = recordedPose(next?.states.pose);
+  if (!next || !nextPose || timeMs <= current.timeMs) return pose;
+  const progress = Math.min(1, (timeMs - current.timeMs) / (next.timeMs - current.timeMs));
+  const turn = ((nextPose.heading - pose.heading) % 360 + 540) % 360 - 180;
+  return {
+    x: pose.x + (nextPose.x - pose.x) * progress,
+    y: pose.y + (nextPose.y - pose.y) * progress,
+    heading: pose.heading + turn * progress,
+  };
+}
+
 export function replayTrail(recording: Recording, index: number, timeMs: number): FieldPose[] {
   const trail: FieldPose[] = [];
   for (let i = Math.max(0, index - 599); i <= index; i++) {

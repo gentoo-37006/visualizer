@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRecording, recordedPose, replayTrail, sampleIndex } from "./replay";
+import { parseRecording, recordedPose, replayPose, replayTrail, sampleIndex } from "./replay";
 
 const header = { type: "header", version: 1, opMode: "Teleop", robot: { width: 16, length: 16 }, states: ["pose", "intake"] };
 const sample = (timeMs: number, pose: unknown = { x: 1, y: 2, heading: 90 }) => ({ type: "sample", timeMs, phase: "RUNNING", states: { pose, intake: true }, errors: {} });
@@ -7,6 +7,24 @@ const end = { type: "end", droppedSamples: 2, sizeLimitReached: false };
 const encode = (...values: unknown[]) => values.map((v) => JSON.stringify(v)).join("\n") + "\n";
 
 describe("recording replay", () => {
+  it("interpolates coordinates and takes the shortest turn across heading wrap", () => {
+    const log = parseRecording(encode(header, sample(0, { x: 0, y: 10, heading: 350 }), sample(100, { x: 20, y: -10, heading: 10 }), end));
+    expect(replayPose(log.samples, 25)).toEqual({ x: 5, y: 5, heading: 355 });
+    expect(replayPose(log.samples, 50)).toEqual({ x: 10, y: 0, heading: 360 });
+    expect(replayPose(log.samples, 100)).toEqual({ x: 20, y: -10, heading: 10 });
+    expect(replayPose(log.samples, 200)).toEqual({ x: 20, y: -10, heading: 10 });
+    expect(replayPose(log.samples, -1)).toBeNull();
+  });
+  it("turns backwards across zero without a full rotation", () => {
+    const log = parseRecording(encode(header, sample(0, { x: 0, y: 0, heading: 10 }), sample(100, { x: 0, y: 0, heading: 350 }), end));
+    expect(replayPose(log.samples, 50)?.heading).toBe(0);
+  });
+  it("does not interpolate through missing poses and handles duplicate timestamps", () => {
+    const log = parseRecording(encode(header, sample(0), sample(100, null), sample(200), sample(200, { x: 8, y: 9, heading: 0 }), end));
+    expect(replayPose(log.samples, 50)).toEqual({ x: 1, y: 2, heading: 90 });
+    expect(replayPose(log.samples, 150)).toBeNull();
+    expect(replayPose(log.samples, 200)).toEqual({ x: 8, y: 9, heading: 0 });
+  });
   it("preserves arbitrary states, metadata, and dropped samples", () => {
     const log = parseRecording(encode(header, sample(0), sample(50), end));
     expect(log.states).toEqual(["pose", "intake"]);

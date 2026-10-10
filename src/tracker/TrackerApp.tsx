@@ -6,28 +6,21 @@ import { RobotLayer } from "../field/RobotLayer";
 import { TrailLayer } from "../field/TrailLayer";
 import { PlaybackControls } from "../app/components/PlaybackControls";
 import { RecordingSidebar } from "../app/components/RecordingSidebar";
+import { FieldImageModal } from "../app/components/FieldImageModal";
 import { FIELD_BORDER_WIDTH, POINT_RADIUS } from "../app/plannerConstants";
 import { usePoseFeed } from "./usePoseFeed";
 import { useReplay } from "./useReplay";
-import { MAX_RECORDING_BYTES } from "./replay";
+import { useHubRecordings } from "./useHubRecordings";
+import { useFieldImage } from "./useFieldImage";
 import styles from "../app/page.module.css";
 import tracker from "./tracker.module.css";
 
-const fields = [
-  { id: "biobuzz", name: "Biobuzz" },
-  { id: "decode", name: "Decode" },
-  { id: "intothedeep", name: "Into The Deep" },
-  { id: "centerstage", name: "Centerstage" },
-];
-
-export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBase?: string; endpoint?: string }) {
-  const [field, setField] = useState("biobuzz");
+export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { assetBase?: string; endpoint?: string }) {
+  const field = useFieldImage(assetBase);
   const [showTrail, setShowTrail] = useState(true);
   const [paused, setPaused] = useState(false);
   const [mode, setMode] = useState<"live" | "replay">("live");
-  const [files, setFiles] = useState<{ name: string; bytes: number }[]>([]);
-  const [selected, setSelected] = useState("");
-  const [busy, setBusy] = useState(false);
+  const lastFieldClick = useRef<number | null>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const [fieldSize, setFieldSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -41,6 +34,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBas
   }, []);
   const live = usePoseFeed(endpoint, paused || mode === "replay");
   const replay = useReplay(mode === "replay");
+  const hub = useHubRecordings(replay.load, replay.setError, replay.pause);
   const pose = mode === "live" ? live.snapshot?.pose : replay.pose;
   const robot = mode === "live" ? live.snapshot?.robot : replay.recording?.robot;
   const trail = mode === "live" ? live.trail : replay.trail;
@@ -49,32 +43,30 @@ export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBas
     if (next === "live") replay.pause();
     setMode(next);
   }
-  async function refreshFiles() {
-    setBusy(true); replay.setError(null);
-    try {
-      const response = await fetch("/yb/recordings", { cache: "no-store", signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw new Error();
-      const data: unknown = await response.json();
-      if (!Array.isArray(data) || !data.every((f) => typeof f?.name === "string" && typeof f?.bytes === "number")) throw new Error();
-      setFiles(data); setSelected(data[0]?.name ?? "");
-    } catch { replay.setError("Could not list Hub recordings"); }
-    finally { setBusy(false); }
-  }
-  async function openHubFile() {
-    setBusy(true);
-    try {
-      if ((files.find((f) => f.name === selected)?.bytes ?? 0) > MAX_RECORDING_BYTES) throw new Error();
-      const response = await fetch(`/yb/recording?name=${encodeURIComponent(selected)}`, { cache: "no-store", signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error();
-      replay.load(await response.text());
-    } catch { replay.setError("Could not open Hub recording"); }
-    finally { setBusy(false); }
-  }
-  const fieldControl = <label className={tracker.selectLabel}>Field<select value={field} onChange={(event) => setField(event.target.value)}>{fields.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>;
+  const sourceControl = <div className={tracker.sourceControl}>
+    <label className={tracker.selectLabel}>Hub Recording<select aria-label="Hub recording" value={hub.selected} onChange={(event) => hub.select(event.target.value)} disabled={hub.files.length === 0}>
+      {hub.files.length === 0 && <option value="">{hub.busy ? "Loading..." : "No recordings"}</option>}
+      {hub.files.map((file) => <option key={file.name} value={file.name}>{new Date(Number(file.name.split("-")[0])).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}
+    </select></label>
+    <div className={tracker.actions}>
+      <button className={styles.recordingRestartButton} disabled={hub.busy} onClick={() => void hub.refresh()}>Refresh Hub</button>
+      {hub.selected && <a className={styles.recordingRestartButton} href={`/visualizer/recording?name=${encodeURIComponent(hub.selected)}`} download>Download</a>}
+    </div>
+    {hub.busy && <span className={tracker.loading} role="status">Loading recording...</span>}
+  </div>;
 
   return <main className={`${styles.container} ${tracker.container}`}>
     <div className={`${styles.fieldWrapper} ${tracker.fieldWrapper}`}>
-      <FieldViewport image={`${assetBase}/fields/${field}.webp`} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay}>
+      <FieldViewport image={field.src} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay} overlayProps={{
+        role: "button", tabIndex: 0, "aria-label": "Change field image",
+        onKeyDown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); field.show(); } },
+        onClick: (event) => {
+          if (event.target !== event.currentTarget) return;
+          if (lastFieldClick.current !== null && event.timeStamp - lastFieldClick.current <= 500) {
+            lastFieldClick.current = null; event.preventDefault(); field.show();
+          } else lastFieldClick.current = event.timeStamp;
+        },
+      }}>
         {fieldSize.width > 0 && <>
           {showTrail && <TrailLayer poses={trail} viewport={viewport} />}
           {pose && robot && <RobotLayer pose={pose} size={robot} viewport={viewport} image={`${assetBase}/robot.png`} />}
@@ -112,7 +104,6 @@ export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBas
                 <div><dt>Length (in)</dt><dd>{robot?.length.toFixed(2) ?? "--"}</dd></div>
               </dl>
             </section>
-            {fieldControl}
             <div className={styles.recordingOptions}>
               <label className={styles.recordingTrailToggle}><input type="checkbox" checked={!paused} onChange={(event) => setPaused(!event.target.checked)} />Live updates</label>
               <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showTrail} onChange={(event) => setShowTrail(event.target.checked)} />Movement trail</label>
@@ -120,19 +111,11 @@ export function TrackerApp({ assetBase = "", endpoint = "/yb/pose" }: { assetBas
             <button className={styles.recordingRestartButton} onClick={live.clearTrail} disabled={trail.length === 0}>Clear Trail</button>
           </div>
         </aside> : <>
-          <RecordingSidebar replay={replay} showTrail={showTrail} onShowTrailChange={setShowTrail}>
-            {fieldControl}
-            <section className={styles.recordingSection} aria-label="Hub recordings">
-              <div className={tracker.hubHeading}><h3>Hub Recordings</h3><button className={styles.recordingRestartButton} disabled={busy} onClick={() => void refreshFiles()}>{busy ? "Loading..." : "Refresh Hub"}</button></div>
-              {files.length > 0 && <>
-                <label className={tracker.selectLabel}>Recording<select value={selected} onChange={(event) => setSelected(event.target.value)}>{files.map((file) => <option key={file.name} value={file.name}>{new Date(Number(file.name.split("-")[0])).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}</select></label>
-                <div className={tracker.actions}><button className={styles.recordingRestartButton} disabled={busy || !selected} onClick={() => void openHubFile()}>Open</button><a className={styles.recordingRestartButton} href={`/yb/recording?name=${encodeURIComponent(selected)}`} download>Download</a></div>
-              </>}
-            </section>
-          </RecordingSidebar>
-          <PlaybackControls mode="recording" disabled={!replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs} isRunning={replay.playing} currentTime={replay.timeMs / 1000} totalTime={(replay.recording?.durationMs ?? 0) / 1000} accentColor="#2dd4bf" trackBackground="var(--border)" onToggle={replay.toggle} onScrub={(time) => replay.seek(time * 1000)} />
+          <RecordingSidebar replay={replay} showTrail={showTrail} onShowTrailChange={setShowTrail} sourceControl={sourceControl} />
+          <PlaybackControls mode="recording" disabled={hub.busy || !replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs} isRunning={replay.playing} currentTime={replay.timeMs / 1000} totalTime={(replay.recording?.durationMs ?? 0) / 1000} accentColor="#2dd4bf" trackBackground="var(--border)" onToggle={replay.toggle} onScrub={(time) => replay.seek(time * 1000)} />
         </>}
       </div>
     </div>
+    {field.open && <FieldImageModal isVisible selection={field.selection} customFieldImage={field.custom} uploadError={field.error} isUploading={field.uploading} fileInputRef={field.fileInput} onClose={field.close} onFadeOutComplete={field.close} onSelectPreset={(preset) => field.apply({ kind: "preset", id: preset.id })} onSelectCustom={() => field.apply({ kind: "custom" })} onRemoveCustom={field.remove} onUpload={field.upload} assetBase={assetBase} />}
   </main>;
 }

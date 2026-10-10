@@ -168,14 +168,14 @@ After a full `yb push teamcode`, connect to the Control Hub's Wi-Fi and open
 does not need internet access, Next.js, or ADB. Robot-code changes can continue
 to use Sloth after that initial installation. Viewer/bridge changes need another
 full install. The `/visualizer` route renders the same tracker in the development app;
-it expects a same-origin `/yb/pose` feed.
+it expects a same-origin `/visualizer/pose` feed.
 
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
 Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while
 Sloth replaces TeamCode. `BaseRobot` owns feed sessions and `MotionController`
 publishes poses.
 
-The read-only `/yb/pose` endpoint returns version-1 snapshots with a session ID,
+The read-only `/visualizer/pose` endpoint returns version-1 snapshots with a session ID,
 sequence number, active flag, opmode name, sample age in milliseconds, nullable
 `{x, y, heading}` pose, and nullable `{width, length}` robot dimensions. The
 viewer polls without overlapping requests at up to 20 Hz, keeps at most 30
@@ -183,3 +183,6 @@ seconds/600 trail samples, and resets the trail when a new opmode starts.
 It distinguishes idle, unavailable, stale, disconnected, and paused feeds.
 Live tracking displays the robot's localization estimate; it does not update
 localization or command movement. All tracker responses bypass browser caching.
+Recording lists and downloads use `/visualizer/recordings` and
+`/visualizer/recording?name=...`. The `yb` name is reserved for the robot project's
+command-line script; viewer assets and APIs share the `/visualizer/` namespace.
