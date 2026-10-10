@@ -1709,8 +1709,8 @@ export default function PathPlannerPage() {
           changeApplicationMode(mode);
           event.currentTarget.querySelector<HTMLButtonElement>(`#${mode}-tab`)?.focus();
         }}>
-          <button id="planner-tab" role="tab" aria-selected={applicationMode === "planner"} aria-controls="planner-panel" tabIndex={applicationMode === "planner" ? 0 : -1} onClick={() => changeApplicationMode("planner")}>Wayfinder</button>
-          <button id="recording-tab" role="tab" aria-selected={applicationMode === "recording"} aria-controls="recording-panel" tabIndex={applicationMode === "recording" ? 0 : -1} onClick={() => changeApplicationMode("recording")}>Flashback</button>
+          <button id="planner-tab" role="tab" aria-selected={applicationMode === "planner"} aria-controls="planner-panel" tabIndex={applicationMode === "planner" ? 0 : -1} onClick={() => changeApplicationMode("planner")}>Pathing</button>
+          <button id="recording-tab" role="tab" aria-selected={applicationMode === "recording"} aria-controls="recording-panel" tabIndex={applicationMode === "recording" ? 0 : -1} onClick={() => changeApplicationMode("recording")}>Replay</button>
         </div>
         <div className={styles.modePanel} role="tabpanel" id={`${applicationMode}-panel`} aria-labelledby={`${applicationMode}-tab`}>
         {applicationMode === "planner" ? <>

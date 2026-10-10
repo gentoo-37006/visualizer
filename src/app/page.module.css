@@ -109,7 +109,7 @@
   min-width: 0;
   padding: 12px 8px;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: var(--border-radius) var(--border-radius) 0 0;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
@@ -121,7 +121,6 @@
 .modeTabs button[aria-selected="true"] {
   color: var(--text-primary);
   background-color: var(--surface);
-  border-bottom-color: var(--primary);
 }
 
 .modeTabs button + button { border-left: 1px solid var(--border); }

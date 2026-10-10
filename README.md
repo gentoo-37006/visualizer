@@ -134,8 +134,8 @@ there too — it is downscaled and stored locally, and stretched over the square
 
 ## Live tracker
 
-The main editor has **Wayfinder** and **Flashback** tabs above the sidebar.
-Flashback opens a downloaded match `.jsonl` recording and replays its robot
+The main editor has **Pathing** and **Replay** tabs above the sidebar.
+Replay opens a downloaded match `.jsonl` recording and replays its robot
 pose on the field, using the dimensions stored in the file. Scrub the timeline,
 change playback speed, toggle the movement trail, and inspect registered states
 at the current sample. Switching tabs pauses playback and preserves the planner
