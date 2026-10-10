@@ -31,7 +31,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange }: Props
     <header className={styles.sidebarHeader}>
       <div className={styles.sidebarTitleRow}>
         <h2 className={styles.sidebarTitle}>Flashback</h2>
-        <button className={styles.recordingImportButton} disabled={isLoading} onClick={() => input.current?.click()}>{isLoading ? "Loading..." : "Open Recording"}</button>
+        <button className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} disabled={isLoading} onClick={() => input.current?.click()}>{isLoading ? "Loading..." : "Open Recording"}</button>
       </div>
       <input ref={input} aria-label="Import recording" type="file" accept=".jsonl,.ndjson" hidden onChange={(event) => {
         const file = event.target.files?.[0];

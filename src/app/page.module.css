@@ -4,7 +4,7 @@
   height: 100vh;
   height: 100dvh; /* Mobile URL bars shrink the viewport; 100vh would clip the sidebar. */
   padding: 1rem;
-  gap: 1.5rem;
+  gap: 1rem;
   overflow: hidden;
 }
 
@@ -71,7 +71,24 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.sidebarColumn .sidebar {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.sidebarColumn .playbackSidebar {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .sidebarHeader {
@@ -83,30 +100,34 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   flex: 0 0 auto;
-  min-height: 42px;
+  min-height: 44px;
+  background-color: var(--background);
   border-bottom: 1px solid var(--border);
 }
 
 .modeTabs button {
   min-width: 0;
-  padding: 10px 6px;
+  padding: 12px 8px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .modeTabs button[aria-selected="true"] {
   color: var(--text-primary);
-  border-bottom-color: #2dd4bf;
+  background-color: var(--surface);
+  border-bottom-color: var(--primary);
 }
 
-.modeTabs button:hover { background: var(--surface); }
-.modeTabs button:focus-visible { outline: 2px solid #2dd4bf; outline-offset: -2px; }
-.modePanel { display: flex; flex: 1; flex-direction: column; gap: 0.75rem; min-height: 0; }
+.modeTabs button + button { border-left: 1px solid var(--border); }
+.modeTabs button:hover { background: var(--surface-hover); }
+.modeTabs button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.modePanel { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .recordingContent { gap: 16px; }
 .recordingMeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 13px; }
 .recordingMeta strong { overflow-wrap: anywhere; }
@@ -121,8 +142,8 @@
 .recordingOptions label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .recordingOptions select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
 .recordingTrailToggle input { accent-color: #2dd4bf; }
-.recordingImportButton, .recordingRestartButton { padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
-.recordingImportButton:disabled { opacity: 0.5; cursor: default; }
+.recordingImportButton { width: auto; padding: 0 10px; font: inherit; font-size: 12px; }
+.recordingRestartButton { padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .recordingRestartButton { align-self: flex-start; }
 .recordingError, .recordingWarning { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .recordingError { color: #f87171; }
@@ -171,6 +192,10 @@
   align-items: center;
   justify-content: center;
   transition: var(--transition);
+}
+
+.secondaryIconButton.recordingImportButton {
+  width: auto;
 }
 
 .secondaryIconButton:hover {
