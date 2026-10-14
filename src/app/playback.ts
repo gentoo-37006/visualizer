@@ -34,7 +34,7 @@ export type PlaybackSegment =
       startTime: number;
       duration: number;
       point: Point;
-      samples: PlaybackPose[];
+      samples: Array<PlaybackPose & { pathT: number }>;
       cumulativeDistances: number[];
       profile: MotionProfile;
       simulationFrames: Array<{ time: number; distance: number; heading: number; velocity: number }>;
@@ -59,6 +59,34 @@ export type PlaybackTimeline = {
   segments: PlaybackSegment[];
   totalTime: number;
 };
+
+export const PLAYBACK_ACTION_COLOR = "#f97316";
+export type PlaybackActionMarker = { id: string; time: number; label: string };
+
+export const getPlaybackActionMarkers = (timeline: PlaybackTimeline): PlaybackActionMarker[] =>
+  timeline.segments.flatMap((segment, segmentIndex) => {
+    if (segment.kind !== "path") return [];
+    return (segment.point.actionTriggers ?? []).flatMap((trigger) => {
+      if (!Number.isFinite(trigger.t)) return [];
+      const t = clamp01(trigger.t);
+      const endIndex = Math.max(1, findFirstIndexAtOrAfter(segment.samples.length, (i) => segment.samples[i].pathT, t));
+      const start = segment.samples[endIndex - 1];
+      const end = segment.samples[endIndex];
+      if (!start || !end) return [];
+      const progress = end.pathT > start.pathT ? clamp01((t - start.pathT) / (end.pathT - start.pathT)) : 0;
+      const distance = interpolateNumber(segment.cumulativeDistances[endIndex - 1], segment.cumulativeDistances[endIndex], progress);
+      const frameIndex = findFirstIndexAtOrAfter(segment.simulationFrames.length, (i) => segment.simulationFrames[i].distance, distance);
+      if (frameIndex < 0) return [];
+      const frameEnd = segment.simulationFrames[frameIndex];
+      const frameStart = segment.simulationFrames[Math.max(0, frameIndex - 1)];
+      const frameProgress = frameEnd.distance > frameStart.distance ? clamp01((distance - frameStart.distance) / (frameEnd.distance - frameStart.distance)) : 0;
+      return [{
+        id: `${segmentIndex}-${trigger.id}`,
+        time: segment.startTime + interpolateNumber(frameStart.time, frameEnd.time, frameProgress),
+        label: `${trigger.mode === "remove" ? "Remove" : "Submit"} ${trigger.actionName} (${segment.point.name ?? "Path"}, t=${t.toFixed(2)})`,
+      }];
+    });
+  });
 
 export const interpolateNumber = (start: number, end: number, t: number) => start + (end - start) * t;
 
@@ -809,7 +837,7 @@ export const createPlaybackTrackBackground = (timeline: PlaybackTimeline) => {
         ? segment.point.color
         : segment.kind === "rotate"
           ? segment.point.color
-          : "rgba(148, 163, 184, 0.35)";
+          : PLAYBACK_ACTION_COLOR;
     stops.push(`${segmentColor} ${startPercent.toFixed(3)}%`, `${segmentColor} ${endPercent.toFixed(3)}%`);
   });
 

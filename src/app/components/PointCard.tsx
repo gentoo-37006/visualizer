@@ -165,7 +165,7 @@ export function PointCard({
               : axis === "startT"
                 ? linearStartT
                 : linearEndT;
-      setDraftPathHeading(value.toFixed(1));
+      setDraftPathHeading(value.toFixed(axis === "startT" || axis === "endT" ? 2 : 1));
     }
   };
 
@@ -605,7 +605,7 @@ export function PointCard({
                     type="text"
                     inputMode="decimal"
                     className={styles.inputField}
-                    value={editingAxis === "startT" ? draftPathHeading : linearStartT.toFixed(1)}
+                    value={editingAxis === "startT" ? draftPathHeading : linearStartT.toFixed(2)}
                     onFocus={() => startEditing("startT")}
                     onChange={(e) => {
                       if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
@@ -620,7 +620,7 @@ export function PointCard({
                     type="text"
                     inputMode="decimal"
                     className={styles.inputField}
-                    value={editingAxis === "endT" ? draftPathHeading : linearEndT.toFixed(1)}
+                    value={editingAxis === "endT" ? draftPathHeading : linearEndT.toFixed(2)}
                     onFocus={() => startEditing("endT")}
                     onChange={(e) => {
                       if (isNumericDraft(e.target.value)) setDraftPathHeading(e.target.value);
@@ -734,11 +734,11 @@ export function PointCard({
                         type="text"
                         inputMode="decimal"
                         className={styles.inputField}
-                        value={editingActionTrigger === trigger.id ? draftActionT : trigger.t.toFixed(1)}
-                        placeholder="0.0"
+                        value={editingActionTrigger === trigger.id ? draftActionT : trigger.t.toFixed(2)}
+                        placeholder="0.00"
                         onFocus={() => {
                           setEditingActionTrigger(trigger.id);
-                          setDraftActionT(trigger.t.toFixed(1));
+                          setDraftActionT(trigger.t.toFixed(2));
                         }}
                         onChange={(event) => {
                           if (!isNumericDraft(event.target.value)) return;

@@ -54,7 +54,7 @@ export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points
 
   return (
     <div className={styles.fieldWrapper}>
-      <FieldViewport image={fieldImageSrc} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} svgRef={svgRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay} overlayProps={recordingView ? {} : {
+      <FieldViewport image={fieldImageSrc} width={fieldSize.width} height={fieldSize.height} padding={POINT_RADIUS} containerRef={fieldRef} svgRef={svgRef} className={styles.fieldContainer} imageClassName={styles.fieldImage} overlayClassName={styles.svgOverlay} overlayProps={recordingView ? { onClick } : {
         onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onPointerLeave, onClick,
         style: { cursor: isDragging ? "grabbing" : hoverTarget !== null ? "grab" : "default" },
       }}>

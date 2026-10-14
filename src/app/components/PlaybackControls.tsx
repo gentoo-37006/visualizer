@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { AUTONOMOUS_PERIOD_SECONDS, formatPlaybackTime, getAutonomousOvertime } from "../playback";
+import { AUTONOMOUS_PERIOD_SECONDS, formatPlaybackTime, getAutonomousOvertime, type PlaybackActionMarker } from "../playback";
 import styles from "../page.module.css";
 
 type PlaybackControlsProps = {
@@ -14,6 +14,7 @@ type PlaybackControlsProps = {
   onScrub: (time: number) => void;
   mode?: "path" | "recording";
   disabled?: boolean;
+  actionMarkers?: PlaybackActionMarker[];
 };
 
 export function PlaybackControls({
@@ -26,6 +27,7 @@ export function PlaybackControls({
   onScrub,
   mode = "path",
   disabled = false,
+  actionMarkers = [],
 }: PlaybackControlsProps) {
   const overtime = getAutonomousOvertime(totalTime);
   const isOverBudget = mode === "path" && overtime > 0.05;
@@ -52,6 +54,7 @@ export function PlaybackControls({
             </svg>
           )}
         </button>
+        <div className={styles.playbackTrack}>
         <input
           className={styles.playbackRange}
           type="range"
@@ -70,6 +73,18 @@ export function PlaybackControls({
           aria-label={`${playbackLabel} progress`}
           disabled={disabled}
         />
+        {mode === "path" && totalTime > 0 && <div className={styles.playbackMarkers}>
+          {actionMarkers.map((marker) => <button
+            key={marker.id}
+            className={styles.playbackActionMarker}
+            style={{ left: `${Math.max(0, Math.min(100, marker.time / totalTime * 100))}%` }}
+            title={`${marker.label} at ${formatPlaybackTime(marker.time)}`}
+            aria-label={`Seek to ${marker.label}`}
+            disabled={disabled}
+            onClick={() => onScrub(marker.time)}
+          />)}
+        </div>}
+        </div>
         <div
           className={`${styles.playbackTime} ${isOverBudget ? styles.playbackTimeOverBudget : ""}`}
           title={

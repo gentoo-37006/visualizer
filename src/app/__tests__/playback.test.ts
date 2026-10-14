@@ -4,6 +4,8 @@ import {
   buildPlaybackTimeline,
   clamp01,
   createPlaybackTrackBackground,
+  getPlaybackActionMarkers,
+  PLAYBACK_ACTION_COLOR,
   getAutonomousOvertime,
   getOutOfBoundsPointIds,
   getPathDurationsByPointId,
@@ -470,6 +472,36 @@ describe("playback pose sampling", () => {
 });
 
 describe("autonomous period budget", () => {
+  it("colors timed action segments orange", () => {
+    const timeline = timelineFor([start], [{ id: "action", kind: "action", name: "SCORE", mode: "run", timeout: 2 }]);
+    expect(createPlaybackTrackBackground(timeline)).toContain(`${PLAYBACK_ACTION_COLOR} 0.000%`);
+    expect(createPlaybackTrackBackground(timeline)).toContain(`${PLAYBACK_ACTION_COLOR} 100.000%`);
+  });
+
+  it("places path actions at simulated travel times with preceding waits included", () => {
+    const point: Point = { ...straightPath, actionTriggers: [
+      { id: "first", mode: "submit", actionName: "INTAKE", t: 0 },
+      { id: "middle", mode: "submit", actionName: "SCORE", t: 0.5 },
+      { id: "last", mode: "remove", actionName: "INTAKE", t: 1 },
+    ] };
+    const timeline = timelineFor([start, point], [
+      { id: "wait", kind: "action", name: "WAIT", mode: "run", timeout: 2 },
+      { id: "path", kind: "path", pointId: point.id },
+    ]);
+    const markers = getPlaybackActionMarkers(timeline);
+    expect(markers).toHaveLength(3);
+    expect(markers[0].time).toBe(2);
+    expect(markers[1].time).toBeGreaterThan(2);
+    expect(markers[2].time).toBeGreaterThan(markers[1].time);
+    expect(markers[2].time).toBeLessThanOrEqual(timeline.totalTime);
+    const pose = getPlaybackPoseAtTime(timeline, markers[1].time, [start, point]).pose;
+    expect(pose.nx).toBeCloseTo((start.nx + point.nx) / 2, 4);
+    expect(markers[2].label).toContain("Remove INTAKE");
+  });
+
+  it("does not create markers for paths without triggers or wait segments", () => {
+    expect(getPlaybackActionMarkers(timelineFor([start, straightPath], [{ id: "path", kind: "path", pointId: straightPath.id }]))).toEqual([]);
+  });
   it("reports no overtime for an auton that fits", () => {
     expect(getAutonomousOvertime(AUTONOMOUS_PERIOD_SECONDS)).toBe(0);
     expect(getAutonomousOvertime(0)).toBe(0);

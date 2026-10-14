@@ -1433,6 +1433,37 @@
 
 .playButton:disabled { opacity: 0.45; cursor: default; }
 
+.playbackTrack {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 1.5rem;
+}
+
+.playbackMarkers {
+  position: absolute;
+  inset: 0 0.5rem;
+  pointer-events: none;
+}
+
+.playbackActionMarker {
+  position: absolute;
+  top: 50%;
+  width: 0.625rem;
+  height: 0.625rem;
+  padding: 0;
+  border: 1px solid var(--surface);
+  border-radius: 0;
+  background: #f97316;
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.playbackActionMarker:hover { background: #fb923c; }
+.playbackActionMarker:focus-visible { outline: 2px solid white; outline-offset: 2px; }
+
 .playbackRange {
   width: 100%;
   min-width: 0;

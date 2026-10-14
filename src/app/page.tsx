@@ -75,6 +75,8 @@ import {
   buildPlaybackTimeline,
   clamp01,
   createPlaybackTrackBackground,
+  getPlaybackActionMarkers,
+  PLAYBACK_ACTION_COLOR,
   getOutOfBoundsPointIds,
   getPathDurationsByPointId,
   getPlaybackPoseAtTime,
@@ -252,7 +254,9 @@ export default function PathPlannerPage() {
       ? activePlaybackSegment.point.color
       : activePlaybackSegment?.kind === "rotate"
         ? activePlaybackSegment.point.color
-        : activePlaybackSegment?.pose.color ?? points[0]?.color ?? INITIAL_POINT_COLOR;
+        : activePlaybackSegment?.kind === "wait"
+          ? PLAYBACK_ACTION_COLOR
+          : points[0]?.color ?? INITIAL_POINT_COLOR;
 
   const pathDurations = useMemo(() => getPathDurationsByPointId(playbackTimeline), [playbackTimeline]);
 
@@ -272,6 +276,7 @@ export default function PathPlannerPage() {
     () => createPlaybackTrackBackground(playbackTimeline),
     [playbackTimeline]
   );
+  const playbackActionMarkers = useMemo(() => getPlaybackActionMarkers(playbackTimeline), [playbackTimeline]);
 
   useEffect(() => {
     const handleHistoryKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1589,7 +1594,7 @@ export default function PathPlannerPage() {
     }
 
     const { nx, ny } = normalized;
-    if (getHitTarget(nx, ny) !== null) {
+    if (applicationMode === "planner" && getHitTarget(nx, ny) !== null) {
       lastFieldBackgroundClickAtRef.current = null;
       return;
     }
@@ -1800,6 +1805,7 @@ export default function PathPlannerPage() {
           totalTime={playbackTimeline.totalTime}
           accentColor={playbackAccentColor}
           trackBackground={playbackTrackBackground}
+          actionMarkers={playbackActionMarkers}
           onToggle={handlePlaybackToggle}
           onScrub={(time) => {
             setIsPlaybackRunning(false);
