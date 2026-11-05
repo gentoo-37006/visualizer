@@ -10,10 +10,10 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Auton Visualizer",
+  title: "Online Visualizer",
   description: "An autonomous robotics path visualizer and planner",
-  applicationName: "Auton Visualizer",
-  appleWebApp: { capable: true, title: "Auton", statusBarStyle: "black-translucent" },
+  applicationName: "Online Visualizer",
+  appleWebApp: { capable: true, title: "Online Visualizer", statusBarStyle: "black-translucent" },
   icons: { apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }] },
 };
 

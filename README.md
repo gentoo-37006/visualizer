@@ -157,18 +157,26 @@ npm run build:tracker
 ```
 
 The output is `dist/tracker`. To update the version packaged in the sibling
-robot project:
+robot project's `myrelib` module:
 
 ```bash
 npm run build:tracker -- ../biobuzz-2027/myrelib/src/main/assets/field-viewer
 ```
 
-After a full `yb push teamcode`, connect to the Control Hub's Wi-Fi and open
+Rebuild and fully install the consuming Robot Controller APK after updating
+these assets; Sloth does not replace library assets. Connect to the Control Hub's Wi-Fi and open
 `http://192.168.43.1:8080/visualizer/`. The Hub serves every asset locally; the page
 does not need internet access, Next.js, or ADB. Robot-code changes can continue
 to use Sloth after that initial installation. Viewer/bridge changes need another
 full install. The `/visualizer` route renders the same tracker in the development app;
-it expects a same-origin `/visualizer/pose` feed.
+it expects a same-origin `/visualizer/pose` feed. Both builds use the same sidebar,
+rounded mode tabs, replay controls, and field renderer. The browser titles are
+**Online Visualizer** for the planner and **Onboard Visualizer** for the Hub.
+
+`/onboard-preview` renders the same onboard UI without telemetry or recording
+requests. Use it to check Live/Replay layouts, responsive styling, and the field
+image picker on the online site or local development server. It contains no
+sample robot data and does not require rebuilding the Hub asset bundle.
 
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
 Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while

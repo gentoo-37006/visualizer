@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listHubRecordings, readHubRecording, type HubRecording } from "./hubRecordings";
 
-export function useHubRecordings(load: (text: string) => boolean, setError: (error: string | null) => void, pause: () => void) {
+export function useHubRecordings(load: (text: string) => boolean, setError: (error: string | null) => void, pause: () => void, enabled = true) {
   const [files, setFiles] = useState<HubRecording[]>([]);
   const [selected, setSelected] = useState("");
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy] = useState(enabled);
   const callbacks = useRef({ load, setError, pause });
   const selection = useRef("");
   const listRequest = useRef<AbortController | null>(null);
@@ -13,6 +13,7 @@ export function useHubRecordings(load: (text: string) => boolean, setError: (err
   useEffect(() => { callbacks.current = { load, setError, pause }; }, [load, setError, pause]);
 
   const open = useCallback(async (file: HubRecording) => {
+    if (!enabled) return;
     fileRequest.current?.abort();
     const controller = new AbortController();
     fileRequest.current = controller;
@@ -27,9 +28,10 @@ export function useHubRecordings(load: (text: string) => boolean, setError: (err
     } finally {
       if (!controller.signal.aborted && alive.current) setBusy(false);
     }
-  }, []);
+  }, [enabled]);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     listRequest.current?.abort();
     const controller = new AbortController();
     listRequest.current = controller;
@@ -47,15 +49,16 @@ export function useHubRecordings(load: (text: string) => boolean, setError: (err
         setBusy(false);
       }
     }
-  }, [open]);
+  }, [enabled, open]);
 
   useEffect(() => {
+    if (!enabled) return;
     alive.current = true;
     // Fetch once per page load, independently of the active tab.
     void Promise.resolve().then(() => { if (alive.current) void refresh(); });
     return () => { alive.current = false; listRequest.current?.abort(); fileRequest.current?.abort(); };
-  }, [refresh]);
-  return { files, selected, busy, refresh, select: (name: string) => {
+  }, [enabled, refresh]);
+  return { files, selected, busy: enabled && busy, refresh, select: (name: string) => {
     const file = files.find((item) => item.name === name);
     if (file) void open(file);
   } };

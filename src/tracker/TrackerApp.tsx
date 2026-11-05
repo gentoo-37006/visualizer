@@ -11,11 +11,12 @@ import { FIELD_BORDER_WIDTH, POINT_RADIUS } from "../app/plannerConstants";
 import { usePoseFeed } from "./usePoseFeed";
 import { useReplay } from "./useReplay";
 import { useHubRecordings } from "./useHubRecordings";
+import { hubRecordingTimestamp } from "./hubRecordings";
 import { useFieldImage } from "./useFieldImage";
 import styles from "../app/page.module.css";
 import tracker from "./tracker.module.css";
 
-export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { assetBase?: string; endpoint?: string }) {
+export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", preview = false }: { assetBase?: string; endpoint?: string; preview?: boolean }) {
   const field = useFieldImage(assetBase);
   const [showTrail, setShowTrail] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -32,9 +33,9 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { 
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const live = usePoseFeed(endpoint, paused || mode === "replay");
+  const live = usePoseFeed(endpoint, preview || paused || mode === "replay");
   const replay = useReplay(mode === "replay");
-  const hub = useHubRecordings(replay.load, replay.setError, replay.pause);
+  const hub = useHubRecordings(replay.load, replay.setError, replay.pause, !preview);
   const pose = mode === "live" ? live.snapshot?.pose : replay.pose;
   const robot = mode === "live" ? live.snapshot?.robot : replay.recording?.robot;
   const trail = mode === "live" ? live.trail : replay.trail;
@@ -46,11 +47,11 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { 
   const sourceControl = <div className={tracker.sourceControl}>
     <label className={tracker.selectLabel}>Hub Recording<select aria-label="Hub recording" value={hub.selected} onChange={(event) => hub.select(event.target.value)} disabled={hub.files.length === 0}>
       {hub.files.length === 0 && <option value="">{hub.busy ? "Loading..." : "No recordings"}</option>}
-      {hub.files.map((file) => <option key={file.name} value={file.name}>{new Date(Number(file.name.split("-")[0])).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}
+      {hub.files.map((file) => <option key={file.name} value={file.name}>{new Date(hubRecordingTimestamp(file.name)).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}
     </select></label>
     <div className={tracker.actions}>
-      <button className={styles.recordingRestartButton} disabled={hub.busy} onClick={() => void hub.refresh()}>Refresh Hub</button>
-      {hub.selected && <a className={styles.recordingRestartButton} href={`/visualizer/recording?name=${encodeURIComponent(hub.selected)}`} download>Download</a>}
+      <button className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} disabled={preview || hub.busy} onClick={() => void hub.refresh()}>Refresh Hub</button>
+      {hub.selected && <a className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} href={`/visualizer/recording?name=${encodeURIComponent(hub.selected)}`} download>Download</a>}
     </div>
     {hub.busy && <span className={tracker.loading} role="status">Loading recording...</span>}
   </div>;
@@ -89,7 +90,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { 
           <header className={styles.sidebarHeader}>
             <div className={styles.sidebarTitleRow}>
               <h2 className={styles.sidebarTitle}>Live</h2>
-              <span role="status" className={tracker.status} data-live={live.status === "Live"}>{live.status}</span>
+              <span role="status" className={tracker.status} data-live={!preview && live.status === "Live"}>{preview ? "No data" : live.status}</span>
             </div>
           </header>
           <div className={`${styles.pointsList} ${styles.recordingContent}`}>
@@ -105,7 +106,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose" }: { 
               </dl>
             </section>
             <div className={styles.recordingOptions}>
-              <label className={styles.recordingTrailToggle}><input type="checkbox" checked={!paused} onChange={(event) => setPaused(!event.target.checked)} />Live updates</label>
+              <label className={styles.recordingTrailToggle}><input type="checkbox" disabled={preview} checked={!preview && !paused} onChange={(event) => setPaused(!event.target.checked)} />Live updates</label>
               <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showTrail} onChange={(event) => setShowTrail(event.target.checked)} />Movement trail</label>
             </div>
             <button className={styles.recordingRestartButton} onClick={live.clearTrail} disabled={trail.length === 0}>Clear Trail</button>

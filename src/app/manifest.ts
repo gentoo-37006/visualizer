@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Auton Visualizer",
-    short_name: "Auton",
+    name: "Online Visualizer",
+    short_name: "Online Visualizer",
     description: "An autonomous robotics path visualizer and planner",
     start_url: "/",
     scope: "/",

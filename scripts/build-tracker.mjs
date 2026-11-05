@@ -19,6 +19,6 @@ await build({
 await cp(resolve(root, "public/fields"), resolve(output, "fields"), { recursive: true });
 await cp(resolve(root, "public/robot.png"), resolve(output, "robot.png"));
 await writeFile(resolve(output, "index.html"), `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Live Tracker</title><link rel="stylesheet" href="/visualizer/viewer.css"></head><body style="margin:0"><div id="root"></div><script src="/visualizer/viewer.js" defer></script></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Onboard Visualizer</title><link rel="stylesheet" href="/visualizer/viewer.css"></head><body style="margin:0"><div id="root"></div><script src="/visualizer/viewer.js" defer></script></body></html>
 `);
 console.log(`Tracker built in ${output}`);
