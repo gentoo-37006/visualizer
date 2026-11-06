@@ -44,7 +44,6 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
   const trail = mode === "live" ? live.trail : replay.trail;
   const livePath = live.snapshot?.active ? live.snapshot.path : null;
   const paths = mode === "live" ? (livePath ? [livePath] : []) : replay.paths;
-  const activePathId = mode === "live" ? livePath?.id : replay.pathProgress?.id;
   const stale = mode === "live" && (live.status === "Stale" || live.status === "Disconnected" || live.ageMs === null || live.ageMs > 1000);
   const viewport = { ...fieldSize, padding: POINT_RADIUS, border: FIELD_BORDER_WIDTH };
   function changeMode(next: "live" | "replay") {
@@ -76,7 +75,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
         },
       }}>
         {fieldSize.width > 0 && <>
-          {showPaths && <PathLayer paths={followedFieldPaths(paths, activePathId)} viewport={viewport} showEndpoints />}
+          {showPaths && <PathLayer paths={followedFieldPaths(paths)} viewport={viewport} showEndpoints />}
           {showTrail && <TrailLayer poses={trail} viewport={viewport} />}
           {pose && robot && <g opacity={stale ? 0.4 : 1}><RobotLayer pose={pose} size={robot} viewport={viewport} image={`${assetBase}/robot.png`} /></g>}
         </>}

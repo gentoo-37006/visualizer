@@ -1705,7 +1705,6 @@ export default function PathPlannerPage() {
           trail: replay.trail,
           showTrail: showRecordingTrail,
           paths: replay.paths,
-          activePathId: replay.pathProgress?.id,
           showPaths: showRecordingPaths,
         } : undefined}
       />

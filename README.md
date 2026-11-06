@@ -181,8 +181,12 @@ sample robot data and does not require rebuilding the Hub asset bundle.
 Live telemetry displays the active auton path, endpoint markers, progress, and
 pose age; stale robot poses fade. Replay retains timestamped `path` geometry
 events, including paths followed between pose samples. Seeking shows only paths
-started by that time and highlights the active `motionPath` state. Both replay
+started by that time and reports the active `motionPath` state. Both replay
 views include recording dates, path counts, and a Followed paths visibility toggle.
+Paths use the planner's line styling and shared full-size outer endpoint markers,
+without labels, control handles, intermediate segment markers, or completed-path fading. Updated Hub feeds and recordings
+include exact line/cubic `curves` so spline shapes and segment boundaries match
+the planner; older recordings retain their sampled geometry and final endpoint.
 
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
 Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while

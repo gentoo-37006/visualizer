@@ -1,4 +1,4 @@
-import { POINT_DIAMETER } from "../plannerConstants";
+import { ControlMarker, PointMarker, SplineGuides } from "../../field/PointMarker";
 import type { DragTarget, FieldSize, Point } from "../plannerTypes";
 import { getPathSegments, isSameTarget, isSegmentControlLockedByLinearNeighbor, resolvePathSegments, toSvgPixelCoords } from "../plannerUtils";
 
@@ -22,12 +22,12 @@ export function PlannerHandles({ pathGeometry, points, fieldSize, hoverTarget, h
                 const control1 = toSvgPixelCoords(segment.control1.x, segment.control1.y, fieldSize);
                 const control2 = toSvgPixelCoords(segment.control2.x, segment.control2.y, fieldSize);
                 const end = toSvgPixelCoords(segment.end.x, segment.end.y, fieldSize);
-                return <g key={`guides-${segment.segment.id}`}><line x1={start.x} y1={start.y} x2={control1.x} y2={control1.y} stroke={point.color} strokeWidth="1.5" opacity="0.9" /><line x1={control2.x} y1={control2.y} x2={end.x} y2={end.y} stroke={point.color} strokeWidth="1.5" opacity="0.9" /></g>;
+                return <SplineGuides key={`guides-${segment.segment.id}`} start={start} end={end} control1={control1} control2={control2} color={point.color} />;
               })}
             </g>
           ))}
 
-          {hasMeasuredField && points[0] && isPointVisible(0) && (() => { const { x, y } = toSvgPixelCoords(points[0].nx, points[0].ny, fieldSize); return <circle cx={x} cy={y} r={POINT_DIAMETER / 2} fill={points[0].color} />; })()}
+          {hasMeasuredField && points[0] && isPointVisible(0) && (() => { const { x, y } = toSvgPixelCoords(points[0].nx, points[0].ny, fieldSize); return <PointMarker x={x} y={y} color={points[0].color} />; })()}
 
           {pathGeometry.map(({ point, pathIndex, resolved }) => (
             <g key={`segment-markers-${point.id}`}>
@@ -41,7 +41,7 @@ export function PlannerHandles({ pathGeometry, points, fieldSize, hoverTarget, h
                 const control2Locked = isSegmentControlLockedByLinearNeighbor(segments, segmentIndex, "end");
                 const control1Hovered = isSameTarget(hoverTarget, { kind: "segmentControl", pathIndex, segmentIndex, control: "start" }) && !point.locked;
                 const control2Hovered = isSameTarget(hoverTarget, { kind: "segmentControl", pathIndex, segmentIndex, control: "end" }) && !point.locked;
-                return <g key={`segment-${segment.segment.id}`}>{!areControlPointsHidden && control1 && <circle cx={control1.x} cy={control1.y} r="5" fill="#262626" stroke={control1Hovered ? "white" : point.color} strokeWidth="2" opacity={control1Locked ? 0.55 : 1} />}{!areControlPointsHidden && control2 && <circle cx={control2.x} cy={control2.y} r="5" fill="#262626" stroke={control2Hovered ? "white" : point.color} strokeWidth="2" opacity={control2Locked ? 0.55 : 1} />}<circle cx={end.x} cy={end.y} r={POINT_DIAMETER / 2} fill={point.color} stroke={endpointHovered ? "white" : "transparent"} strokeWidth="2" /><text x={end.x} y={end.y} fill="#111827" fontSize="10" fontWeight="700" textAnchor="middle" dominantBaseline="central" pointerEvents="none">{segmentIndex + 1}</text></g>;
+                return <g key={`segment-${segment.segment.id}`}>{!areControlPointsHidden && control1 && <ControlMarker x={control1.x} y={control1.y} color={point.color} hovered={control1Hovered} locked={control1Locked} />}{!areControlPointsHidden && control2 && <ControlMarker x={control2.x} y={control2.y} color={point.color} hovered={control2Hovered} locked={control2Locked} />}<PointMarker x={end.x} y={end.y} color={point.color} hovered={endpointHovered} label={segmentIndex + 1} /></g>;
               })}
             </g>
           ))}

@@ -10,7 +10,7 @@ export type FieldCurve = {
   control1?: FieldPosition;
   control2?: FieldPosition;
 };
-export type FieldPath = { id: string; color: string; curves: FieldCurve[]; opacity?: number };
+export type FieldPath = { id: string; color: string; curves: FieldCurve[] };
 
 export function fieldToViewport(position: FieldPosition, viewport: ViewportGeometry) {
   return {

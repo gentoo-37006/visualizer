@@ -33,7 +33,7 @@ type FieldCanvasProps = {
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerLeave: () => void;
   onClick: (event: ReactMouseEvent<SVGSVGElement>) => void;
-  recordingView?: { pose: FieldPose | null; robot: RobotSize; trail: FieldPose[]; showTrail: boolean; paths: FollowedPath[]; activePathId?: number; showPaths: boolean };
+  recordingView?: { pose: FieldPose | null; robot: RobotSize; trail: FieldPose[]; showTrail: boolean; paths: FollowedPath[]; showPaths: boolean };
 };
 
 export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points, hoverTarget, isDragging, hasMeasuredField, robotSize, playbackPose, isRobotOutOfBounds, areControlPointsHidden, isPointVisible, onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onClick, recordingView }: FieldCanvasProps) {
@@ -59,7 +59,7 @@ export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points
         onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onPointerLeave, onClick,
         style: { cursor: isDragging ? "grabbing" : hoverTarget !== null ? "grab" : "default" },
       }}>
-        <PathLayer paths={recordingView ? (recordingView.showPaths ? followedFieldPaths(recordingView.paths, recordingView.activePathId) : []) : paths} viewport={viewport} showEndpoints={!!recordingView} />
+        <PathLayer paths={recordingView ? (recordingView.showPaths ? followedFieldPaths(recordingView.paths) : []) : paths} viewport={viewport} showEndpoints={!!recordingView} />
         {recordingView ? <>
           {recordingView.showTrail && <TrailLayer poses={recordingView.trail} viewport={viewport} />}
           {hasMeasuredField && recordingView.pose && <RobotLayer pose={recordingView.pose} size={recordingView.robot} viewport={viewport} image="/robot.png" />}
