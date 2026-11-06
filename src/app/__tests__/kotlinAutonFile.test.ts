@@ -5,6 +5,8 @@ import {
   parsePedroConstants,
   parseSavedPosesKotlin,
   serializePathPlannerKotlin,
+  serializeSavedPosesKotlin,
+  resolveSavedPose,
   type SavedPose,
 } from "../kotlinAutonFile";
 
@@ -210,7 +212,7 @@ autonSequence(Alliance.BLUE)
 });
 
 describe("robot constants and saved poses", () => {
-  it("parses robot constants and ignores direct Pose declarations as saved poses", () => {
+  it("parses robot constants and direct Pose declarations", () => {
     const constants = parsePedroConstants(`public class Constants {
     public static final double WIDTH = 99.0;
     public static final double LENGTH = 98.0;
@@ -265,7 +267,7 @@ describe("robot constants and saved poses", () => {
         `val START_WALL = Pose(-72.0 + Constants.HALF_WIDTH, 0.0, 90.0)`,
         constants ?? DEFAULT_ROBOT_CONSTANTS
       )
-    ).toEqual([]);
+    ).toMatchObject([{ name: "START_WALL", kotlinName: "START_WALL", x: -63, y: 0, heading: 90 }]);
   });
 
   it("parses start poses defined from field-coordinate constraints", () => {
@@ -288,7 +290,7 @@ val START_BLUE_DEFAULT = startPose(
       { width: 18, length: 20 }
     );
 
-    expect(poses).toEqual([
+    expect(poses).toMatchObject([
       { name: "RED_DEFAULT", x: -63, y: 62, heading: 180 },
       { name: "BLUE_DEFAULT", x: 63, y: -62, heading: 0 },
     ]);
@@ -318,13 +320,13 @@ object Poses {
         Pose.startPose(horizontal, vertical, heading, Robot.HALF_LENGTH, Robot.HALF_WIDTH)
 }`;
 
-    expect(parseSavedPosesKotlin(source)).toEqual([
+    expect(parseSavedPosesKotlin(source)).toMatchObject([
       { name: "RED_DEFAULT", x: -64, y: 64, heading: 180 },
       { name: "RED_CLOSE", x: -16, y: -64, heading: 180 },
       { name: "BLUE_DEFAULT", x: 64, y: -64, heading: 0 },
       { name: "BLUE_CLOSE", x: 16, y: 64, heading: 0 },
     ]);
-    expect(parseSavedPosesKotlin(source, { width: 18, length: 20 })).toEqual([
+    expect(parseSavedPosesKotlin(source, { width: 18, length: 20 })).toMatchObject([
       { name: "RED_DEFAULT", x: -63, y: 62, heading: 180 },
       { name: "RED_CLOSE", x: -15, y: -62, heading: 180 },
       { name: "BLUE_DEFAULT", x: 63, y: -62, heading: 0 },
@@ -342,7 +344,7 @@ object Poses {
       { width: 18, length: 20 }
     );
 
-    expect(poses).toEqual([
+    expect(poses).toMatchObject([
       { name: "SIDEWAYS", x: -34, y: -63, heading: 90 },
     ]);
   });
@@ -357,7 +359,7 @@ object Poses {
       { width: 18, length: 20 }
     );
 
-    expect(poses).toEqual([
+    expect(poses).toMatchObject([
       { name: "audienceSide", kotlinName: "audienceSide", x: 24, y: 39, heading: -90 },
     ]);
 
@@ -471,5 +473,27 @@ autonSequence(Alliance.BLUE)
 
   it("returns null when the constants file is missing required values", () => {
     expect(parsePedroConstants("public class Constants {}")).toBeNull();
+  });
+});
+
+ describe("saved pose definitions", () => {
+  it("imports regular poses and inverted aliases without renaming them", () => {
+    const poses = parseSavedPosesKotlin("val SHOOT_RED = Pose(-12.2, -59.0)\nval SHOOT_BLUE = SHOOT_RED.invert()");
+    expect(poses).toMatchObject([{ kotlinName: "SHOOT_RED", x: -12.2, y: -59, heading: 0 }, { kotlinName: "SHOOT_BLUE", x: 12.2, y: 59, heading: 180 }]);
+    expect(serializeSavedPosesKotlin(poses)).toBe("val SHOOT_RED = Pose(-12.2, -59.0)\nval SHOOT_BLUE = SHOOT_RED.invert()");
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+  it("retains start alignment and recalculates the sideways footprint", () => {
+    const [pose] = parseSavedPosesKotlin("val START_SIDE = startPose(WEST_WALL, Vertical(24.0, Offset.NEG), Heading.EAST)");
+    expect(pose.start).toEqual({ horizontal: { value: -72, offset: 1, reference: "WEST_WALL" }, vertical: { value: 24, offset: -1 }, facing: "EAST" });
+    expect(resolveSavedPose(pose, { width: 14, length: 20 })).toMatchObject({ x: -62, y: 17, heading: 90 });
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin([pose]))).toEqual([pose]);
+  });
+  it("preserves named presets on every path endpoint", () => {
+    const poses = parseSavedPosesKotlin("val START_RED = startPose(WEST_WALL, NORTH_WALL, Heading.SOUTH)\nval SHOOT = Pose(-12.2, -59.0)\nval GOAL = Pose(20.0, 30.0)");
+    const exported = roundTrip("val path = Path(Linear(Poses.START_RED, Poses.SHOOT), Linear(Poses.SHOOT, Poses.GOAL)).tangentHeading()\nautonSequence(Alliance.RED).path(path)", poses);
+    expect(exported).toContain("Poses.START_RED");
+    expect(exported).toContain("Poses.SHOOT");
+    expect(exported).toContain("Poses.GOAL");
   });
 });

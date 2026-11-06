@@ -1,5 +1,7 @@
 "use client";
 
+import { Select } from "./Select";
+
 import { useId, useState, type KeyboardEvent, type MouseEvent } from "react";
 import styles from "../page.module.css";
 import type { AutonActionMode } from "../plannerTypes";
@@ -102,15 +104,15 @@ export function ActionCard({
       <div className={styles.coordRow}>
         <div className={styles.selectGroup}>
           <label className={styles.inputLabel}>Mode</label>
-          <select
+          <Select
             className={styles.selectField}
             value={mode}
-            onChange={(event) => onModeChange(event.target.value as AutonActionMode)}
+            onChange={(value) => onModeChange(value as AutonActionMode)}
           >
             <option value="submit">Submit</option>
             <option value="run">Run</option>
             <option value="remove">Remove</option>
-          </select>
+          </Select>
         </div>
         {mode === "run" && (
           <div className={styles.inputGroup}>

@@ -59,7 +59,15 @@ const isSavedPoseArray = (value: unknown): value is SavedPose[] =>
       (typeof pose?.kotlinName === "string" || pose?.kotlinName === undefined) &&
       typeof pose?.x === "number" &&
       typeof pose?.y === "number" &&
-      (typeof pose?.heading === "number" || pose?.heading === undefined)
+      (typeof pose?.heading === "number" || pose?.heading === undefined) &&
+      (pose.source === undefined || typeof pose.source === "string") &&
+      (pose.start === undefined || (
+        ["NORTH", "EAST", "SOUTH", "WEST"].includes(pose.start?.facing) &&
+        [pose.start?.horizontal, pose.start?.vertical].every(coordinate =>
+          Number.isFinite(coordinate?.value) && [-1, 0, 1].includes(coordinate?.offset) &&
+          (coordinate?.reference === undefined || typeof coordinate.reference === "string")
+        )
+      ))
   );
 
 export const loadSavedPoses = () => {

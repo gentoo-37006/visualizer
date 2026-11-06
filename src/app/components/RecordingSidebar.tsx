@@ -1,5 +1,7 @@
 "use client";
 
+import { Select } from "./Select";
+
 import { useRef, useState, type ReactNode } from "react";
 import type { useReplay } from "../../tracker/useReplay";
 import { readRecordingFile } from "../../tracker/replay";
@@ -72,7 +74,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, showPat
           </dl>
         </section>
         <div className={styles.recordingOptions}>
-          <label>Speed<select aria-label="Recording speed" value={replay.speed} onChange={(event) => replay.setSpeed(Number(event.target.value))}>{[0.25, 0.5, 1, 2, 4].map((speed) => <option key={speed} value={speed}>{speed}x</option>)}</select></label>
+          <label>Speed<Select aria-label="Recording speed" value={replay.speed} onChange={(value) => replay.setSpeed(Number(value))}>{[0.25, 0.5, 1, 2, 4].map((speed) => <option key={speed} value={speed}>{speed}x</option>)}</Select></label>
           <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showTrail} onChange={(event) => onShowTrailChange(event.target.checked)} />Movement trail</label>
           {onShowPathsChange && <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showPaths} onChange={(event) => onShowPathsChange(event.target.checked)} />Followed paths</label>}
         </div>

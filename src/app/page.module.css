@@ -169,7 +169,7 @@
 .recordingReadouts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .recordingOptions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
 .recordingOptions label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.recordingOptions select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.recordingOptions button[aria-haspopup] { height: 36px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; }
 .recordingTrailToggle input { accent-color: #2dd4bf; }
 .recordingImportButton { width: auto; padding: 0 10px; font: inherit; font-size: 12px; }
 .recordingRestartButton { padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
@@ -638,6 +638,13 @@
   flex: 0 0 5.25rem;
 }
 
+.poseInputGroup {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 14rem;
+  min-width: 0;
+}
+
 .linearStartHeadingGroup {
   flex-basis: 7.625rem;
 }
@@ -823,7 +830,7 @@
 }
 
 .pathActionCard input,
-.pathActionCard select {
+.pathActionCard button[aria-haspopup] {
   cursor: auto;
 }
 

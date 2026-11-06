@@ -9,6 +9,7 @@ type KotlinExport = {
 };
 
 type KotlinExportModalProps = {
+  title?: string;
   isVisible: boolean;
   kotlinExport: KotlinExport;
   textAreaRef: RefObject<HTMLTextAreaElement | null>;
@@ -18,6 +19,7 @@ type KotlinExportModalProps = {
 };
 
 export function KotlinExportModal({
+  title = "Exported Path",
   isVisible,
   kotlinExport,
   textAreaRef,
@@ -46,7 +48,7 @@ export function KotlinExportModal({
       >
         <div className={styles.exportModalHeader}>
           <h2 id="export-modal-title" className={styles.exportModalTitle}>
-            Export Auton Sequence
+            {title}
           </h2>
           <button
             className={styles.copyButton}

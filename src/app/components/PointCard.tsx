@@ -1,10 +1,14 @@
 "use client";
 
+import { Select } from "./Select";
+
 import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import styles from "../page.module.css";
 import type { HeadingInterpolation, PathActionTrigger, PathActionTriggerMode, PathGeometry, PathHeadingField } from "../plannerTypes";
 import { isKotlinIdentifierDraft, isNumericDraft } from "../plannerUtils";
 import { SegmentCard } from "./ControlPointCard";
+import { PosePicker, type PoseSelection } from "./PosePicker";
+import type { SavedPose } from "../kotlinAutonFile";
 
 type PointCardProps = {
   index: number;
@@ -25,7 +29,7 @@ type PointCardProps = {
   linearStartT: number;
   linearEndT: number;
   tangentReversed?: boolean;
-  controlPoints: Array<{ id: string; x: number; y: number; pathGeometry: PathGeometry }>;
+  controlPoints: Array<{ id: string; x: number; y: number; poseName?: string; pathGeometry: PathGeometry }>;
   actionTriggers?: PathActionTrigger[];
   actionsExpanded: boolean;
   controlPointCount: number;
@@ -33,7 +37,8 @@ type PointCardProps = {
   isActive: boolean;
   cardSubheader?: ReactNode;
   onChange: (axis: "x" | "y", val: string) => void;
-  startPoseOptions?: Array<{ name: string }>;
+  startPoseOptions?: SavedPose[];
+  onPoseChange?: (segmentIndex: number | null, pose: PoseSelection) => void;
   onStartPoseSelect?: (name: string) => void;
   onPositionEditStart: () => void;
   onPositionEditCommit: () => void;
@@ -93,15 +98,11 @@ export function PointCard({
   controlsExpanded,
   isActive,
   cardSubheader,
-  onChange,
   startPoseOptions = [],
-  onStartPoseSelect,
-  onPositionEditStart,
-  onPositionEditCommit,
+  onPoseChange,
   onRename,
   onNameEditStart,
   onNameEditCommit,
-  onHeadingChange,
   onInterpolationChange,
   onPathHeadingChange,
   onMatchPreviousHeading,
@@ -124,9 +125,6 @@ export function PointCard({
   onDelete,
 }: PointCardProps) {
   const [editingAxis, setEditingAxis] = useState<"x" | "y" | "heading" | PathHeadingField | null>(null);
-  const [draftX, setDraftX] = useState("");
-  const [draftY, setDraftY] = useState("");
-  const [draftHeading, setDraftHeading] = useState("");
   const [draftPathHeading, setDraftPathHeading] = useState("");
   const [editingActionTrigger, setEditingActionTrigger] = useState<string | null>(null);
   const [draftActionT, setDraftActionT] = useState("");
@@ -146,15 +144,6 @@ export function PointCard({
 
   const startEditing = (axis: "x" | "y" | "heading" | PathHeadingField) => {
     setEditingAxis(axis);
-    if (axis === "x") {
-      onPositionEditStart();
-      setDraftX(x.toFixed(1));
-    } else if (axis === "y") {
-      onPositionEditStart();
-      setDraftY(y.toFixed(1));
-    } else if (axis === "heading") {
-      setDraftHeading((heading ?? 0).toFixed(1));
-    } else {
       const value =
         axis === "constant"
           ? constantHeading
@@ -166,31 +155,11 @@ export function PointCard({
                 ? linearStartT
                 : linearEndT;
       setDraftPathHeading(value.toFixed(axis === "startT" || axis === "endT" ? 2 : 1));
-    }
   };
 
   const commitEdit = (axis: "x" | "y" | "heading" | PathHeadingField, val: string) => {
-    if (axis === "heading") {
-      onHeadingChange?.(val);
-    } else if (axis === "constant" || axis === "start" || axis === "end" || axis === "startT" || axis === "endT") {
-      onPathHeadingChange?.(axis, val);
-    } else {
-      onChange(axis, val);
-      onPositionEditCommit();
-    }
+    if (axis === "constant" || axis === "start" || axis === "end" || axis === "startT" || axis === "endT") onPathHeadingChange?.(axis, val);
     setEditingAxis(null);
-  };
-
-  const updateCoordinateDraft = (axis: "x" | "y", val: string) => {
-    if (!isNumericDraft(val)) return;
-
-    if (axis === "x") {
-      setDraftX(val);
-    } else {
-      setDraftY(val);
-    }
-
-    onChange(axis, val);
   };
 
   const handleKeyDown = (
@@ -439,83 +408,20 @@ export function PointCard({
       </div>
       {cardSubheader}
       <div className={styles.coordRow}>
-        {index === 0 && (
-          <div className={`${styles.selectGroup} ${styles.startPoseSelectGroup}`}>
-            <label className={styles.inputLabel}>Preset</label>
-            <select
-              className={styles.selectField}
-              value={poseName ?? ""}
-              onChange={(e) => onStartPoseSelect?.(e.target.value)}
-            >
-              <option value="">Manual</option>
-              {startPoseOptions.map((startPose) => (
-                <option key={startPose.name} value={startPose.name}>
-                  {startPose.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {index === 0 && !poseName && (
-          <>
-            <div className={styles.inputGroup}>
-              <label className={styles.inputLabel}>X (in)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                className={styles.inputField}
-                value={editingAxis === "x" ? draftX : x.toFixed(1)}
-                onFocus={() => startEditing("x")}
-                onChange={(e) => updateCoordinateDraft("x", e.target.value)}
-                onBlur={(e) => commitEdit("x", e.target.value)}
-                onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
-              />
-            </div>
-            <div className={styles.inputGroup}>
-              <label className={styles.inputLabel}>Y (in)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                className={styles.inputField}
-                value={editingAxis === "y" ? draftY : y.toFixed(1)}
-                onFocus={() => startEditing("y")}
-                onChange={(e) => updateCoordinateDraft("y", e.target.value)}
-                onBlur={(e) => commitEdit("y", e.target.value)}
-                onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
-              />
-            </div>
-          </>
-        )}
-        {index === 0 && !poseName && (
-          <div className={styles.inputGroup}>
-            <label className={styles.inputLabel}>Heading (deg)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              className={styles.inputField}
-              value={editingAxis === "heading" ? draftHeading : (heading ?? 0).toFixed(1)}
-              onFocus={() => startEditing("heading")}
-              onChange={(e) => {
-                if (isNumericDraft(e.target.value)) setDraftHeading(e.target.value);
-              }}
-              onBlur={(e) => commitEdit("heading", e.target.value)}
-              onKeyDown={(e) => handleKeyDown(e, "heading", e.currentTarget.value)}
-            />
-          </div>
-        )}
+        {index === 0 && <div className={styles.poseInputGroup}><span className={styles.inputLabel}>Pose (in, deg)</span><PosePicker x={x} y={y} heading={heading ?? 0} poseName={poseName} savedPoses={startPoseOptions} label="Start pose" onChange={pose => onPoseChange?.(null, pose)} /></div>}
         {index > 0 && (
           <>
             <div className={styles.selectGroup}>
               <label className={styles.inputLabel}>Heading</label>
-              <select
+              <Select
                 className={styles.selectField}
                 value={headingMode}
-                onChange={(e) => onInterpolationChange?.(e.target.value as HeadingInterpolation)}
+                onChange={(value) => onInterpolationChange?.(value as HeadingInterpolation)}
               >
                 <option value="constant">Constant</option>
                 <option value="linear">Linear</option>
                 <option value="tangential">Tangential</option>
-              </select>
+              </Select>
             </div>
             {headingMode === "constant" && (
               <div className={styles.inputGroup}>
@@ -634,15 +540,15 @@ export function PointCard({
             {headingMode === "tangential" && (
               <div className={styles.selectGroup}>
                 <label className={styles.inputLabel}>Direction</label>
-                <select
+                <Select
                   className={styles.selectField}
                   value={tangentReversed ? "reversed" : "forward"}
-                  onChange={(event) => onTangentReversedChange?.(event.target.value === "reversed")}
+                  onChange={(value) => onTangentReversedChange?.(value === "reversed")}
                   aria-label="Tangential direction"
                 >
                   <option value="forward">Forward</option>
                   <option value="reversed">Reversed</option>
-                </select>
+                </Select>
               </div>
             )}
           </>
@@ -750,16 +656,16 @@ export function PointCard({
                     </div>
                     <div className={styles.actionTriggerModeGroup}>
                       <label className={styles.inputLabel}>Mode</label>
-                      <select
+                      <Select
                         className={styles.selectField}
                         value={trigger.mode}
-                        onChange={(event) =>
-                          onPathActionTriggerChange?.(trigger.id, "mode", event.target.value as PathActionTriggerMode)
+                        onChange={(value) =>
+                          onPathActionTriggerChange?.(trigger.id, "mode", value as PathActionTriggerMode)
                         }
                       >
                         <option value="submit">Submit</option>
                         <option value="remove">Remove</option>
-                      </select>
+                      </Select>
                     </div>
                   </div>
                 </div>
@@ -817,6 +723,9 @@ export function PointCard({
                     pathGeometry={controlPoint.pathGeometry}
                     x={controlPoint.x}
                     y={controlPoint.y}
+                    poseName={controlPoint.poseName}
+                    savedPoses={startPoseOptions}
+                    onPoseChange={pose => onPoseChange?.(controlIndex, pose)}
                     onPathGeometryChange={(pathGeometry) => onSegmentGeometryChange?.(controlIndex, pathGeometry)}
                     onChange={(axis, val) => onControlPointChange?.(controlIndex, axis, val)}
                     onEditStart={onControlPointEditStart}

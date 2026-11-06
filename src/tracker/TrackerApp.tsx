@@ -1,5 +1,7 @@
 "use client";
 
+import { Select } from "../app/components/Select";
+
 import { useEffect, useRef, useState } from "react";
 import { FieldViewport } from "../field/FieldViewport";
 import { RobotLayer } from "../field/RobotLayer";
@@ -54,10 +56,10 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
     setMode(next);
   }
   const sourceControl = <div className={`${styles.importExportActions} ${tracker.sourceControl}`} aria-busy={hub.busy}>
-    <select className={tracker.recordingSelect} aria-label="Hub recording" value={hub.selected} onChange={(event) => hub.select(event.target.value)} disabled={hub.files.length === 0}>
+    <Select className={tracker.recordingSelect} aria-label="Hub recording" value={hub.selected} onChange={(value) => hub.select(value)} disabled={hub.files.length === 0}>
       {hub.files.length === 0 && <option value="">{hub.busy ? "Loading..." : "No recordings"}</option>}
       {hub.files.map((file) => <option key={file.name} value={file.name}>{new Date(hubRecordingTimestamp(file.name)).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}
-    </select>
+    </Select>
     <button className={styles.secondaryIconButton} disabled={preview || hub.busy} onClick={() => void hub.refresh()} aria-label="Refresh Hub recordings" title="Refresh recordings">
       <RefreshIcon />
     </button>

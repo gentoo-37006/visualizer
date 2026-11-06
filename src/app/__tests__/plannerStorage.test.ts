@@ -5,6 +5,8 @@ import {
   limitHistoryDepth,
   loadAutonDraft,
   saveAutonDraft,
+  loadSavedPoses,
+  SAVED_POSES_STORAGE_KEY,
 } from "../plannerStorage";
 import { INITIAL_POINT_ID } from "../plannerConstants";
 import type { PlannerSnapshot } from "../plannerTypes";
@@ -39,6 +41,21 @@ const store = (value: unknown) =>
   );
 
 const startPoint = { id: INITIAL_POINT_ID, nx: 0.5, ny: 0.5, color: "#fff", locked: true, heading: 0 };
+
+it("preserves saved pose definitions and legacy names on refresh", () => {
+  const poses = [
+    { name: "START_OLD", x: 1, y: 2 },
+    { name: "SHOOT", kotlinName: "SHOOT", x: -12, y: -59, heading: 0, source: "Pose(-12.0, -59.0)" },
+    { name: "SIDE", x: -64, y: 64, heading: 180, start: { horizontal: { value: -72, offset: 1 }, vertical: { value: 72, offset: -1 }, facing: "SOUTH" } },
+  ];
+  window.localStorage.setItem(SAVED_POSES_STORAGE_KEY, JSON.stringify(poses));
+  expect(loadSavedPoses()).toEqual([{ name: "OLD", x: 1, y: 2, heading: 0 }, poses[1], poses[2]]);
+});
+
+it("rejects malformed saved start metadata", () => {
+  window.localStorage.setItem(SAVED_POSES_STORAGE_KEY, JSON.stringify([{ name: "BROKEN", x: 0, y: 0, start: { facing: "NORTH" } }]));
+  expect(loadSavedPoses()).toEqual([]);
+});
 
 describe("auton draft persistence", () => {
   it("round trips a draft through storage", () => {

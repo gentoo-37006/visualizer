@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Select } from "./Select";
+
+import { type MouseEvent } from "react";
 import styles from "../page.module.css";
 import type { PathGeometry } from "../plannerTypes";
-import { isNumericDraft } from "../plannerUtils";
+import { PosePicker, type PoseSelection } from "./PosePicker";
+import type { SavedPose } from "../kotlinAutonFile";
 
 type SegmentCardProps = {
   index: number;
   pathGeometry: PathGeometry;
   x: number;
   y: number;
+  poseName?: string;
+  savedPoses: SavedPose[];
+  onPoseChange: (pose: PoseSelection) => void;
   onPathGeometryChange: (pathGeometry: PathGeometry) => void;
   onChange: (axis: "x" | "y", val: string) => void;
   onEditStart: () => void;
@@ -24,52 +30,14 @@ export function SegmentCard({
   pathGeometry,
   x,
   y,
+  poseName,
+  savedPoses,
+  onPoseChange,
   onPathGeometryChange,
-  onChange,
-  onEditStart,
-  onEditCommit,
   canDelete,
   canRemove,
   onDelete,
 }: SegmentCardProps) {
-  const [editingAxis, setEditingAxis] = useState<"x" | "y" | null>(null);
-  const [draftX, setDraftX] = useState("");
-  const [draftY, setDraftY] = useState("");
-
-  const startEditing = (axis: "x" | "y") => {
-    setEditingAxis(axis);
-    onEditStart();
-    if (axis === "x") {
-      setDraftX(x.toFixed(1));
-    } else {
-      setDraftY(y.toFixed(1));
-    }
-  };
-
-  const updateDraft = (axis: "x" | "y", val: string) => {
-    if (!isNumericDraft(val)) return;
-
-    if (axis === "x") {
-      setDraftX(val);
-    } else {
-      setDraftY(val);
-    }
-    onChange(axis, val);
-  };
-
-  const commitEdit = (axis: "x" | "y", val: string) => {
-    onChange(axis, val);
-    onEditCommit();
-    setEditingAxis(null);
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, axis: "x" | "y", val: string) => {
-    if (e.key === "Enter") {
-      commitEdit(axis, val);
-      (e.target as HTMLInputElement).blur();
-    }
-  };
-
   const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (!event.shiftKey || !canRemove) return;
     onDelete();
@@ -105,42 +73,18 @@ export function SegmentCard({
       <div className={styles.controlPointInputs}>
         <div className={styles.selectGroup}>
           <label className={styles.inputLabel}>Type</label>
-          <select
+          <Select
             className={styles.selectField}
             value={pathGeometry}
-            onChange={(event) => onPathGeometryChange(event.target.value as PathGeometry)}
+            onChange={(value) => onPathGeometryChange(value as PathGeometry)}
             aria-label={`Segment ${index + 1} type`}
           >
             <option value="linear">Linear</option>
             <option value="spline">Spline</option>
-          </select>
+          </Select>
         </div>
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>X (in)</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={styles.inputField}
-            value={editingAxis === "x" ? draftX : x.toFixed(1)}
-            onFocus={() => startEditing("x")}
-            onChange={(e) => updateDraft("x", e.target.value)}
-            onBlur={(e) => commitEdit("x", e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, "x", e.currentTarget.value)}
-          />
-        </div>
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Y (in)</label>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={styles.inputField}
-            value={editingAxis === "y" ? draftY : y.toFixed(1)}
-            onFocus={() => startEditing("y")}
-            onChange={(e) => updateDraft("y", e.target.value)}
-            onBlur={(e) => commitEdit("y", e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, "y", e.currentTarget.value)}
-          />
-        </div>
+        <div className={styles.poseInputGroup}><span className={styles.inputLabel}>Pose (in)</span><PosePicker x={x} y={y} poseName={poseName} savedPoses={savedPoses} label={`Segment ${index + 1} pose`} onChange={onPoseChange} /></div>
+
       </div>
     </div>
   );

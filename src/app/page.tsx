@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import { PlaybackControls } from "./components/PlaybackControls";
 import { RecordingSidebar } from "./components/RecordingSidebar";
 import { useReplay } from "../tracker/useReplay";
 import { usePlaybackShortcut } from "./hooks/usePlaybackShortcut";
+import type { PoseSelection } from "./components/PosePicker";
 import { PlannerSidebar, type SidebarPage } from "./components/PlannerSidebar";
 import { usePlannerState } from "./hooks/usePlannerState";
 import {
@@ -23,7 +25,10 @@ import {
   parsePathPlannerKotlin,
   parsePedroConstants,
   parseSavedPosesKotlin,
-  stripStartPosePrefix,
+  findSavedPose,
+  savedPoseVariable,
+  resolveSavedPose,
+  serializeSavedPosesKotlin,
   DEFAULT_AUTON_ALLIANCE,
   DEFAULT_ROBOT_CONSTANTS,
   type RobotConstants,
@@ -129,8 +134,9 @@ export default function PathPlannerPage() {
   const [fieldSize, setFieldSize] = useState<FieldSize>({ width: 0, height: 0 });
   const [kotlinExport, setKotlinExport] = useState<{ contents: string } | null>(null);
   const [isKotlinExportVisible, setIsKotlinExportVisible] = useState(false);
-  const [savedPoses, setSavedPoses] = useState<SavedPose[]>([]);
+  const [savedPoseDefinitions, setSavedPoses] = useState<SavedPose[]>([]);
   const [robotConstants, setRobotConstants] = useState<RobotConstants>(DEFAULT_ROBOT_CONSTANTS);
+  const savedPoses = useMemo(() => savedPoseDefinitions.map(pose => resolveSavedPose(pose, robotConstants)), [savedPoseDefinitions, robotConstants]);
   const [robotDimensionDrafts, setRobotDimensionDrafts] = useState({
     width: DEFAULT_ROBOT_CONSTANTS.width.toFixed(2),
     length: DEFAULT_ROBOT_CONSTANTS.length.toFixed(2),
@@ -918,7 +924,7 @@ export default function PathPlannerPage() {
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
     setPlannerPoints((currentPoints) =>
       currentPoints.map((point, i) =>
-        i === index ? { ...point, nx, ny, poseName: index === 0 ? undefined : point.poseName } : point
+        i === index ? { ...point, nx, ny, poseName: undefined } : point
       )
     );
   };
@@ -1130,28 +1136,20 @@ export default function PathPlannerPage() {
     updatePoint(index, nx, ny);
   };
 
-  const handleStartPoseSelect = (poseName: string) => {
-    if (!poseName) {
-      pushCurrentSnapshot();
-      setPlannerPoints((currentPoints) =>
-        currentPoints.map((point, index) =>
-          index === 0 ? { ...point, poseName: undefined } : point
-        )
-      );
-      return;
-    }
-
-    const savedPose = savedPoses.find((pose) => stripStartPosePrefix(pose.name) === stripStartPosePrefix(poseName));
-    if (!savedPose) return;
-
-    const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
-    const nextPoints = pointsRef.current.map((point, index) =>
-      index === 0
-        ? { ...point, nx, ny, heading: savedPose.heading ?? 0, poseName: stripStartPosePrefix(savedPose.name) }
-        : point
-    );
+  const handlePoseChange = (index: number, segmentIndex: number | null, value: PoseSelection) => {
+    const { nx, ny } = toNormalizedCoords(value.x, value.y);
+    const nextPoints = pointsRef.current.map((point, i) => {
+      if (i !== index) return point;
+      if (segmentIndex === null) return { ...point, nx, ny, heading: value.heading ?? point.heading, poseName: value.poseName };
+      return applyPathSegments(point, getPathSegments(point).map((segment, j) => j === segmentIndex ? { ...segment, nx, ny, poseName: value.poseName } : segment));
+    });
     pushCurrentSnapshotIfChanged(nextPoints);
     setPlannerPoints(nextPoints);
+  };
+
+  const handleStartPoseSelect = (name: string) => {
+    const pose = findSavedPose(savedPoses, name);
+    if (pose) handlePoseChange(0, null, { ...pose, poseName: savedPoseVariable(pose) });
   };
 
   const handleHeadingChange = (value: string) => {
@@ -1313,7 +1311,7 @@ export default function PathPlannerPage() {
           return;
         }
 
-        const contents = serializePathPlannerKotlin(
+        const contents = sidebarPage === "poses" ? serializeSavedPosesKotlin(savedPoses) : serializePathPlannerKotlin(
           points,
           savedPoses,
           getSequenceItemsWithPaths(sequenceItems, points),
@@ -1377,23 +1375,23 @@ export default function PathPlannerPage() {
     posesInputRef.current?.click();
   };
 
-  const syncStartPoseFromSavedPoses = (nextSavedPoses: SavedPose[]) => {
-    const startPoseName = pointsRef.current[0]?.poseName;
-    if (!startPoseName) return;
+  const syncSavedPoses = useEffectEvent((nextSavedPoses: SavedPose[]) => {
+    const nextPoints = pointsRef.current.map((point, index) => {
+      if (index === 0) {
+        const preset = point.poseName ? findSavedPose(nextSavedPoses, point.poseName) : undefined;
+        return preset ? { ...point, ...toNormalizedCoords(preset.x, preset.y), heading: preset.heading, poseName: savedPoseVariable(preset) } : point;
+      }
+      return applyPathSegments(point, getPathSegments(point).map(segment => {
+        const preset = segment.poseName ? findSavedPose(nextSavedPoses, segment.poseName) : undefined;
+        return preset ? { ...segment, ...toNormalizedCoords(preset.x, preset.y), poseName: savedPoseVariable(preset) } : segment;
+      }));
+    });
+    if (!arePointSnapshotsEqual(pointsRef.current, nextPoints)) setPlannerPoints(nextPoints);
+  });
 
-    const savedPose = nextSavedPoses.find(
-      (pose) => stripStartPosePrefix(pose.name) === stripStartPosePrefix(startPoseName)
-    );
-    if (!savedPose) return;
-
-    const { nx, ny } = toNormalizedCoords(savedPose.x, savedPose.y);
-    const nextPoints = pointsRef.current.map((point, index) =>
-      index === 0 ? { ...point, nx, ny, heading: savedPose.heading ?? 0 } : point
-    );
-    if (!arePointSnapshotsEqual(pointsRef.current, nextPoints)) {
-      setPlannerPoints(nextPoints);
-    }
-  };
+  useEffect(() => {
+    syncSavedPoses(savedPoses);
+  }, [savedPoses]);
 
   const handleImportConstantsClick = () => {
     if (sidebarPage !== "constants") {
@@ -1444,13 +1442,12 @@ export default function PathPlannerPage() {
       const contents = await file.text();
       const importedSavedPoses = parseSavedPosesKotlin(contents, robotConstants);
       if (importedSavedPoses.length === 0) {
-        window.alert("This poses file does not contain any startPose declarations.");
+        window.alert("This poses file does not contain any supported pose declarations.");
         return;
       }
 
       setSavedPoses(importedSavedPoses);
       window.localStorage.setItem(SAVED_POSES_STORAGE_KEY, JSON.stringify(importedSavedPoses));
-      syncStartPoseFromSavedPoses(importedSavedPoses);
       setSidebarPage("poses");
     } catch {
       window.alert("Unable to import this poses file.");
@@ -1765,6 +1762,7 @@ export default function PathPlannerPage() {
           onSequenceCardPointerCancel={handleSequenceCardPointerCancel}
           onCoordChange={handleCoordChange}
           onStartPoseSelect={handleStartPoseSelect}
+          onPoseChange={handlePoseChange}
           onPositionEditStart={beginPositionEdit}
           onPositionEditCommit={commitPositionEdit}
           onNameEditStart={beginNameEdit}
@@ -1857,6 +1855,7 @@ export default function PathPlannerPage() {
 
       {kotlinExport && (
         <KotlinExportModal
+          title={sidebarPage === "poses" ? "Export Saved Poses" : "Exported Path"}
           isVisible={isKotlinExportVisible}
           kotlinExport={kotlinExport}
           textAreaRef={exportTextAreaRef}

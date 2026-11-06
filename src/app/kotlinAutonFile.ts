@@ -41,7 +41,38 @@ export type SavedPose = {
   x: number;
   y: number;
   heading: number;
+  source?: string;
+  start?: {
+    horizontal: { value: number; offset: -1 | 0 | 1; reference?: string };
+    vertical: { value: number; offset: -1 | 0 | 1; reference?: string };
+    facing: "NORTH" | "EAST" | "SOUTH" | "WEST";
+  };
 };
+
+export const savedPoseVariable = (pose: SavedPose) => pose.kotlinName ?? (pose.name.startsWith("START_") ? pose.name : `START_${pose.name}`);
+export const findSavedPose = (poses: SavedPose[], name: string) => poses.find(pose => savedPoseVariable(pose) === name)
+  ?? poses.find(pose => pose.name === name)
+  ?? poses.find(pose => !pose.kotlinName && stripStartPosePrefix(pose.name) === stripStartPosePrefix(name));
+
+export function resolveSavedPose(pose: SavedPose, dimensions: { width: number; length: number }): SavedPose {
+  if (!pose.start) return pose;
+  const sideways = pose.start.facing === "EAST" || pose.start.facing === "WEST";
+  return { ...pose,
+    x: pose.start.horizontal.value + pose.start.horizontal.offset * (sideways ? dimensions.length : dimensions.width) / 2,
+    y: pose.start.vertical.value + pose.start.vertical.offset * (sideways ? dimensions.width : dimensions.length) / 2,
+    heading: { NORTH: 0, EAST: 90, SOUTH: 180, WEST: -90 }[pose.start.facing],
+  };
+}
+
+export function serializeSavedPosesKotlin(poses: SavedPose[]): string {
+  const coordinate = (value: { value: number; offset: number; reference?: string }, axis: "Horizontal" | "Vertical") => {
+    if (value.reference && /^(EAST|WEST|NORTH|SOUTH)_WALL$/.test(value.reference)) return value.reference;
+    return `${axis}(${formatKotlinNumber(value.value)}, Offset.${value.offset < 0 ? "NEG" : value.offset > 0 ? "POS" : "NONE"})`;
+  };
+  return poses.map(pose => `val ${savedPoseVariable(pose)} = ${pose.start
+    ? `startPose(${coordinate(pose.start.horizontal, "Horizontal")}, ${coordinate(pose.start.vertical, "Vertical")}, Heading.${pose.start.facing})`
+    : pose.source ?? `Pose(${formatKotlinNumber(pose.x)}, ${formatKotlinNumber(pose.y)}, ${formatKotlinNumber(pose.heading)})`}`).join("\n");
+}
 
 export type RobotConstants = {
   width: number;
@@ -87,9 +118,6 @@ type ParsedPoseReference = {
 export const stripStartPosePrefix = (name: string) =>
   name.startsWith(START_POSE_PREFIX) ? name.slice(START_POSE_PREFIX.length) : name;
 
-const withStartPosePrefix = (name: string) =>
-  name.startsWith(START_POSE_PREFIX) ? name : `${START_POSE_PREFIX}${name}`;
-
 // Stand-ins for a typical FTC drivetrain, used until the team imports their own
 // tuned constants. Zeroes would be read as "no limit" by the motion profile and
 // silently fall back to 1 in/s, which makes every playback estimate nonsense.
@@ -133,7 +161,7 @@ const findMatchingSavedPose = (point: { nx: number; ny: number; poseName?: strin
   const poseNameMatch = pointPoseName
     ? savedPoses.find(
         (pose) =>
-          stripStartPosePrefix(pose.name) === stripStartPosePrefix(pointPoseName) &&
+          pose === findSavedPose(savedPoses, pointPoseName) &&
           Math.abs(pose.x - coords.x) <= POSE_MATCH_EPSILON &&
           Math.abs(pose.y - coords.y) <= POSE_MATCH_EPSILON
       )
@@ -153,7 +181,7 @@ const formatKotlinPose = (
 ) => {
   const savedPose = findMatchingSavedPose(point, savedPoses);
   if (savedPose && (heading === undefined || Math.abs(normalizeHeading(heading - (savedPose.heading ?? 0))) <= POSE_MATCH_EPSILON)) {
-    return `Poses.${savedPose.kotlinName ?? withStartPosePrefix(savedPose.name)}`;
+    return `Poses.${savedPoseVariable(savedPose)}`;
   }
 
   const coords = toFieldCoords(point.nx, point.ny);
@@ -327,7 +355,7 @@ export const parseSavedPosesKotlin = (
   const length = dimensions.length ?? DEFAULT_ROBOT_LENGTH;
   const savedPoses: SavedPose[] = [];
 
-  type FieldCoordinate = { value: number; offset: -1 | 0 | 1 };
+  type FieldCoordinate = { value: number; offset: -1 | 0 | 1; reference?: string };
   const halfFieldSize = FIELD_SIZE_INCHES / 2;
   const horizontalCoordinates = new Map<string, FieldCoordinate>([
     ["EAST_WALL", { value: halfFieldSize, offset: -1 }],
@@ -348,7 +376,8 @@ export const parseSavedPosesKotlin = (
     const trimmedExpression = stripLineComment(expression).trim();
     const referenceMatch = trimmedExpression.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
     if (referenceMatch) {
-      return (axis === "Horizontal" ? horizontalCoordinates : verticalCoordinates).get(referenceMatch[1]) ?? null;
+      const coordinate = (axis === "Horizontal" ? horizontalCoordinates : verticalCoordinates).get(referenceMatch[1]);
+      return coordinate ? { ...coordinate, reference: referenceMatch[1] } : null;
     }
 
     const constructorMatch = trimmedExpression.match(new RegExp(`^(?:[A-Za-z_][A-Za-z0-9_]*\\.)*${axis}\\s*\\(`));
@@ -407,10 +436,38 @@ export const parseSavedPosesKotlin = (
       x: horizontal.value + horizontal.offset * reachX,
       y: vertical.value + vertical.offset * reachY,
       heading,
+      start: { horizontal, vertical, facing: headingMatch[1] as NonNullable<SavedPose["start"]>["facing"] },
     });
     startPoseRegex.lastIndex = closeParenIndex + 1;
   }
 
+  const directPoseRegex = /\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*Pose\s*\(/g;
+  let direct: RegExpExecArray | null;
+  while ((direct = directPoseRegex.exec(contents)) !== null) {
+    const open = contents.indexOf("(", direct.index);
+    const close = findMatchingParen(contents, open);
+    if (close < 0) continue;
+    const args = splitTopLevelArgs(contents.slice(open + 1, close)).map(stripLineComment);
+    const x = evaluatePoseExpression(args[0] ?? "", width, length);
+    const y = evaluatePoseExpression(args[1] ?? "", width, length);
+    const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
+    if (x !== null && y !== null && heading !== null) savedPoses.push({ name: direct[1], kotlinName: direct[1], x, y, heading,
+      source: `Pose(${contents.slice(open + 1, close)})` });
+    directPoseRegex.lastIndex = close + 1;
+  }
+  const aliases = [...contents.matchAll(/\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*((?:Poses\.)?([A-Za-z_][A-Za-z0-9_]*)(\.invert\(\))?)\s*(?=\r?$|\/\/|;)/gm)];
+  for (let pass = 0; pass < aliases.length; pass++) {
+    let added = false;
+    for (const alias of aliases) {
+      if (savedPoses.some(pose => savedPoseVariable(pose) === alias[1])) continue;
+      const base = savedPoses.find(pose => savedPoseVariable(pose) === alias[3]);
+      if (!base) continue;
+      savedPoses.push({ name: alias[1], kotlinName: alias[1], x: alias[4] ? -base.x : base.x,
+        y: alias[4] ? -base.y : base.y, heading: alias[4] ? normalizeHeading(base.heading + 180) : base.heading, source: alias[2] });
+      added = true;
+    }
+    if (!added) break;
+  }
   return savedPoses;
 };
 
@@ -583,14 +640,13 @@ const splitTopLevelArgs = (contents: string) => {
 const parseKotlinPose = (arg: string, savedPoses: SavedPose[]): ParsedPoseReference | null => {
   const poseReferenceMatch = arg.match(/\bPoses\.([A-Za-z_][A-Za-z0-9_]*)\b/);
   if (poseReferenceMatch) {
-    const poseName = stripStartPosePrefix(poseReferenceMatch[1]);
-    const savedPose = savedPoses.find((pose) => stripStartPosePrefix(pose.name) === poseName);
+    const savedPose = findSavedPose(savedPoses, poseReferenceMatch[1]);
     if (savedPose) {
       const normalizedCoords = toNormalizedCoords(savedPose.x, savedPose.y);
       return {
         ...normalizedCoords,
         heading: savedPose.heading ?? 0,
-        poseName: stripStartPosePrefix(savedPose.name),
+        poseName: savedPoseVariable(savedPose),
       };
     }
   }

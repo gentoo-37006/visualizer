@@ -1,5 +1,7 @@
 "use client";
 
+import { Select } from "./Select";
+
 import type {
   ChangeEvent,
   MouseEvent as ReactMouseEvent,
@@ -23,6 +25,8 @@ import { getPathSegments, targetPathIndex, toFieldCoords } from "../plannerUtils
 import styles from "../page.module.css";
 import { RefreshIcon } from "./RefreshIcon";
 import { ActionCard } from "./ActionCard";
+import { PoseDetails, type PoseSelection } from "./PosePicker";
+import { savedPoseVariable } from "../kotlinAutonFile";
 import { PointCard } from "./PointCard";
 
 export type SidebarPage = "auton" | "poses" | "constants";
@@ -85,6 +89,7 @@ type PlannerSidebarProps = {
   onSequenceCardPointerCancel: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onCoordChange: (index: number, axis: "x" | "y", value: string) => void;
   onStartPoseSelect: (name: string) => void;
+  onPoseChange: (index: number, segmentIndex: number | null, pose: PoseSelection) => void;
   onPositionEditStart: () => void;
   onPositionEditCommit: () => void;
   onNameEditStart: () => void;
@@ -171,6 +176,7 @@ export function PlannerSidebar({
   onSequenceCardPointerCancel,
   onCoordChange,
   onStartPoseSelect,
+  onPoseChange,
   onPositionEditStart,
   onPositionEditCommit,
   onNameEditStart,
@@ -231,7 +237,7 @@ export function PlannerSidebar({
           {sidebarPage === "auton" ? (
             <h2 className={styles.sidebarTitle}>Path Editor</h2>
           ) : sidebarPage === "poses" ? (
-            <h2 className={styles.sidebarTitle}>Start Poses</h2>
+            <h2 className={styles.sidebarTitle}>Saved Poses</h2>
           ) : (
             <h2 className={styles.sidebarTitle}>Constants</h2>
           )}
@@ -305,7 +311,7 @@ export function PlannerSidebar({
               className={`${styles.secondaryIconButton} ${sidebarPage === "poses" ? styles.activeIconButton : ""}`}
               onClick={onImportPosesClick}
               aria-label="Import Poses"
-              title={sidebarPage === "poses" ? "Import Start Poses" : "Start Poses"}
+              title={sidebarPage === "poses" ? "Import Saved Poses" : "Saved Poses"}
             >
               <span className={styles.pageButtonIconSwap}>
                 <svg className={styles.pageButtonDefaultIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -334,9 +340,9 @@ export function PlannerSidebar({
             <button
               className={styles.secondaryIconButton}
               onClick={onExportKotlin}
-              disabled={sidebarPage !== "auton"}
+              disabled={sidebarPage === "constants"}
               aria-label="Export Kotlin"
-              title={sidebarPage === "auton" ? "Export Kotlin" : "Export is only available for the auton"}
+              title={sidebarPage === "constants" ? "Export unavailable" : "Export Kotlin"}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"></path>
@@ -370,6 +376,7 @@ export function PlannerSidebar({
                 onAutonAllianceChange={onAutonAllianceChange}
                 onCoordChange={onCoordChange}
                 onStartPoseSelect={onStartPoseSelect}
+                onPoseChange={onPoseChange}
                 onPositionEditStart={onPositionEditStart}
                 onPositionEditCommit={onPositionEditCommit}
                 onNameEditStart={onNameEditStart}
@@ -434,6 +441,8 @@ export function PlannerSidebar({
                   onPointerCancel={onSequenceCardPointerCancel}
                 >
                   <PathPointCard
+                    savedPoses={savedPoses}
+                    onPoseChange={onPoseChange}
                     point={point}
                     index={pointIndex}
                     duration={pathDurations.get(point.id)}
@@ -507,7 +516,7 @@ export function PlannerSidebar({
           </div>
         </>
       ) : sidebarPage === "poses" ? (
-        <StartPosesPanel savedPoses={savedPoses} />
+        <SavedPosesPanel savedPoses={savedPoses} />
       ) : (
         <ConstantsPanel
           robotConstants={robotConstants}
@@ -571,6 +580,7 @@ type StartPoseCardProps = {
   onAutonAllianceChange: (alliance: AutonAlliance) => void;
   onCoordChange: (index: number, axis: "x" | "y", value: string) => void;
   onStartPoseSelect: (name: string) => void;
+  onPoseChange: (index: number, segmentIndex: number | null, pose: PoseSelection) => void;
   onPositionEditStart: () => void;
   onPositionEditCommit: () => void;
   onNameEditStart: () => void;
@@ -590,6 +600,7 @@ function StartPoseCard({
   onAutonAllianceChange,
   onCoordChange,
   onStartPoseSelect,
+  onPoseChange,
   onPositionEditStart,
   onPositionEditCommit,
   onNameEditStart,
@@ -625,20 +636,21 @@ function StartPoseCard({
         <div className={styles.startPoseAllianceRow}>
           <div className={styles.selectGroup}>
             <span className={styles.inputLabel}>Alliance</span>
-            <select
+            <Select
               className={`${styles.selectField} ${styles.allianceSelect} ${autonAlliance === "BLUE" ? styles.blueAllianceButton : styles.redAllianceButton}`}
               value={autonAlliance}
-              onChange={(event) => onAutonAllianceChange(event.target.value as AutonAlliance)}
+              onChange={(value) => onAutonAllianceChange(value as AutonAlliance)}
               aria-label="Alliance"
             >
               <option value="BLUE">Blue</option>
               <option value="RED">Red</option>
-            </select>
+            </Select>
           </div>
         </div>
       }
       onChange={(axis, value) => onCoordChange(0, axis, value)}
       startPoseOptions={savedPoses}
+      onPoseChange={(segmentIndex, pose) => onPoseChange(0, segmentIndex, pose)}
       onStartPoseSelect={onStartPoseSelect}
       onPositionEditStart={onPositionEditStart}
       onPositionEditCommit={onPositionEditCommit}
@@ -656,6 +668,8 @@ function StartPoseCard({
 }
 
 type PathPointCardProps = {
+  savedPoses: SavedPose[];
+  onPoseChange: (index: number, segmentIndex: number | null, pose: PoseSelection) => void;
   point: Point;
   index: number;
   duration?: number;
@@ -694,6 +708,8 @@ type PathPointCardProps = {
 };
 
 function PathPointCard({
+  savedPoses,
+  onPoseChange,
   point,
   index,
   duration,
@@ -746,8 +762,11 @@ function PathPointCard({
       linearStartT={point.linearStartT ?? 0}
       linearEndT={point.linearEndT ?? 1}
       tangentReversed={point.tangentReversed ?? false}
+      startPoseOptions={savedPoses}
+      onPoseChange={(segmentIndex, pose) => onPoseChange(index, segmentIndex, pose)}
       controlPoints={getPathSegments(point).map((segment) => ({
         id: segment.id,
+        poseName: segment.poseName,
         pathGeometry: segment.pathGeometry,
         ...toFieldCoords(segment.nx, segment.ny),
       }))}
@@ -788,31 +807,19 @@ function PathPointCard({
   );
 }
 
-function StartPosesPanel({ savedPoses }: { savedPoses: SavedPose[] }) {
+function SavedPosesPanel({ savedPoses }: { savedPoses: SavedPose[] }) {
   return (
     <div className={styles.pointsList}>
       {savedPoses.length > 0 ? (
         savedPoses.map((pose) => (
-          <div className={`${styles.poseCard} ${styles.startPoseListCard}`} key={pose.name}>
-            <div className={styles.poseName}>{pose.name}</div>
-            <div className={styles.poseCoordRow}>
-              <div className={styles.inputGroup}>
-                <label className={styles.inputLabel}>X (in)</label>
-                <input className={styles.inputField} value={pose.x.toFixed(1)} readOnly />
-              </div>
-              <div className={styles.inputGroup}>
-                <label className={styles.inputLabel}>Y (in)</label>
-                <input className={styles.inputField} value={pose.y.toFixed(1)} readOnly />
-              </div>
-              <div className={styles.inputGroup}>
-                <label className={styles.inputLabel}>Heading (deg)</label>
-                <input className={styles.inputField} value={(pose.heading ?? 0).toFixed(1)} readOnly />
-              </div>
-            </div>
+          <div className={`${styles.poseCard} ${styles.startPoseListCard}`} key={savedPoseVariable(pose)}>
+            <div className={styles.poseName}>{savedPoseVariable(pose)}</div>
+            <div className={styles.inputField}>{pose.x.toFixed(1)}, {pose.y.toFixed(1)}, {pose.heading.toFixed(1)}°</div>
+            <PoseDetails pose={pose} />
           </div>
         ))
       ) : (
-        <div className={styles.emptyState}>No start poses saved.</div>
+        <div className={styles.emptyState}>No poses saved.</div>
       )}
     </div>
   );
