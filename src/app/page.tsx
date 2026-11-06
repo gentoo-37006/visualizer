@@ -120,7 +120,7 @@ export default function PathPlannerPage() {
   const [applicationMode, setApplicationMode] = useState<"planner" | "recording">("planner");
   const [showRecordingTrail, setShowRecordingTrail] = useState(true);
   const [showRecordingPaths, setShowRecordingPaths] = useState(true);
-  const replay = useReplay(applicationMode === "recording");
+  const replay = useReplay(applicationMode === "recording", true);
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
   const [isDragging, setIsDragging] = useState(false);

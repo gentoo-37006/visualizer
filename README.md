@@ -19,6 +19,16 @@ Everything is a single client-side page. Your work in progress, imported
 constants and poses all live in the browser's local storage, and the app
 installs as a PWA and keeps working offline once it has loaded.
 
+After the first successful online visit, pages, scripts, styles, and field/robot
+images load cache-first. Each deployment stages a separate complete cache;
+the active version stays unchanged until you accept the Update Available prompt.
+Update checks run every minute while visible, and on focus/reconnection. Choose
+Later to keep working or Refresh to activate the downloaded version and reload.
+The first visit still needs internet, and clearing browser storage removes the
+offline copy. Hub telemetry and recording endpoints are never cached.
+`/onboard-preview` is excluded from the offline cache and always requests the
+latest server version. It does not register a worker or show update prompts.
+
 ## Planning a routine
 
 The sidebar holds the sequence in the order the robot runs it.
@@ -141,6 +151,12 @@ change playback speed, toggle the movement trail, and inspect registered states
 at the current sample. Switching tabs pauses playback and preserves the planner
 and the loaded recording. Recording time is not subject to the planner's
 30-second autonomous warning.
+
+The latest valid local replay upload is stored in IndexedDB and restored paused
+at its beginning after a refresh, including offline and app-update reloads. Large
+recordings do not compete with planner settings for localStorage space. Invalid
+uploads leave the saved replay intact; storage failures are reported while the
+uploaded replay remains usable. Hub-loaded recordings are not persisted this way.
 
 The planner and tracker share the React components in `src/field`: the viewport,
 robot footprint, path curves, and movement trail. These components accept field

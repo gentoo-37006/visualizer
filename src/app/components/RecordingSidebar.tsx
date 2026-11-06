@@ -23,7 +23,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, showPat
     if (!file) return;
     setIsLoading(true);
     try {
-      replay.load(await readRecordingFile(file));
+      await replay.importRecording(await readRecordingFile(file));
     } catch (error) {
       replay.setError(error instanceof Error ? error.message : "Could not read recording");
     } finally {

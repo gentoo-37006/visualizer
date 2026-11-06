@@ -5,7 +5,7 @@ import type { useReplay } from "../../tracker/useReplay";
 
 const replay: ReturnType<typeof useReplay> = {
   recording: null, sample: undefined, pose: null, trail: [], paths: [], pathProgress: null, timeMs: 0,
-  playing: false, speed: 1, error: null, load: vi.fn(), toggle: vi.fn(),
+  playing: false, speed: 1, error: null, load: vi.fn(), importRecording: vi.fn(), toggle: vi.fn(),
   setSpeed: vi.fn(), setError: vi.fn(), pause: vi.fn(), seek: vi.fn(),
 };
 it("keeps local file import on the planner", () => {

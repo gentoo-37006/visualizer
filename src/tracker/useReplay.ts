@@ -1,12 +1,30 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseRecording, replayPose, replayTrail, sampleIndex, type Recording } from "./replay";
 import { parsePathProgress } from "./followedPaths";
+import { readCachedReplay, saveCachedReplay } from "./replayStorage";
 
-export function useReplay(active: boolean) {
+export function useReplay(active: boolean, persistUpload = false) {
   const [recording, setRecording] = useState<Recording | null>(null);
   const [{ timeMs, playing }, setPlayback] = useState({ timeMs: 0, playing: false });
   const [speed, setSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const loadGeneration = useRef(0);
+  useEffect(() => {
+    if (!persistUpload) return;
+    let cancelled = false;
+    const generation = loadGeneration.current;
+    void readCachedReplay().then(text => {
+      if (cancelled || generation !== loadGeneration.current || text === null) return;
+      try {
+        const next = parseRecording(text);
+        setRecording(next);
+        setPlayback({ timeMs: next.samples[0].timeMs, playing: false });
+      } catch {
+        setError("The saved recording could not be restored. Open the file again.");
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [persistUpload]);
   useEffect(() => {
     if (!active || !playing || !recording) return;
     let last = performance.now();
@@ -35,11 +53,21 @@ export function useReplay(active: boolean) {
     return trail;
   }, [recording, index, timeMs]);
   function load(text: string) {
+    loadGeneration.current += 1;
     try {
       const next = parseRecording(text);
       setRecording(next); setPlayback({ timeMs: next.samples[0].timeMs, playing: false }); setError(null);
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : "Could not read recording"); return false; }
+  }
+  async function importRecording(text: string) {
+    if (!load(text) || !persistUpload) return;
+    const generation = loadGeneration.current;
+    try {
+      await saveCachedReplay(text);
+    } catch {
+      if (generation === loadGeneration.current) setError("Recording loaded, but it could not be saved locally. It may not survive a refresh.");
+    }
   }
   function toggle() {
     if (!recording || recording.durationMs <= recording.samples[0].timeMs) return;
@@ -49,7 +77,7 @@ export function useReplay(active: boolean) {
     }));
   }
   return { recording, sample, pose, trail, paths, pathProgress, timeMs, playing, speed, error,
-    load, toggle, setSpeed, setError,
+    load, importRecording, toggle, setSpeed, setError,
     pause: () => setPlayback((state) => ({ ...state, playing: false })),
     seek: (time: number) => setPlayback({ timeMs: Math.max(0, Math.min(recording?.durationMs ?? 0, time)), playing: false }) };
 }
