@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FieldViewport } from "../field/FieldViewport";
 import { RobotLayer } from "../field/RobotLayer";
 import { TrailLayer } from "../field/TrailLayer";
+import { FollowedPathsLayer } from "./FollowedPathsLayer";
 import { PlaybackControls } from "../app/components/PlaybackControls";
 import { RecordingSidebar } from "../app/components/RecordingSidebar";
 import { FieldImageModal } from "../app/components/FieldImageModal";
@@ -19,6 +20,7 @@ import tracker from "./tracker.module.css";
 export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", preview = false }: { assetBase?: string; endpoint?: string; preview?: boolean }) {
   const field = useFieldImage(assetBase);
   const [showTrail, setShowTrail] = useState(true);
+  const [showPaths, setShowPaths] = useState(true);
   const [paused, setPaused] = useState(false);
   const [mode, setMode] = useState<"live" | "replay">("live");
   const lastFieldClick = useRef<number | null>(null);
@@ -39,6 +41,10 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
   const pose = mode === "live" ? live.snapshot?.pose : replay.pose;
   const robot = mode === "live" ? live.snapshot?.robot : replay.recording?.robot;
   const trail = mode === "live" ? live.trail : replay.trail;
+  const livePath = live.snapshot?.active ? live.snapshot.path : null;
+  const paths = mode === "live" ? (livePath ? [livePath] : []) : replay.paths;
+  const activePathId = mode === "live" ? livePath?.id : replay.pathProgress?.id;
+  const stale = mode === "live" && (live.status === "Stale" || live.status === "Disconnected" || live.ageMs === null || live.ageMs > 1000);
   const viewport = { ...fieldSize, padding: POINT_RADIUS, border: FIELD_BORDER_WIDTH };
   function changeMode(next: "live" | "replay") {
     if (next === "live") replay.pause();
@@ -69,8 +75,9 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
         },
       }}>
         {fieldSize.width > 0 && <>
+          {showPaths && <FollowedPathsLayer paths={paths} activeId={activePathId} viewport={viewport} />}
           {showTrail && <TrailLayer poses={trail} viewport={viewport} />}
-          {pose && robot && <RobotLayer pose={pose} size={robot} viewport={viewport} image={`${assetBase}/robot.png`} />}
+          {pose && robot && <g opacity={stale ? 0.4 : 1}><RobotLayer pose={pose} size={robot} viewport={viewport} image={`${assetBase}/robot.png`} /></g>}
         </>}
       </FieldViewport>
     </div>
@@ -95,6 +102,14 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
           </header>
           <div className={`${styles.pointsList} ${styles.recordingContent}`}>
             <div className={styles.recordingMeta}><strong>{live.snapshot?.opMode ?? "No active opmode"}</strong></div>
+            <section className={styles.recordingSection} aria-label="Live auton path">
+              <h3>Auton Path</h3>
+              <dl className={styles.recordingReadouts}>
+                <div><dt>Active path</dt><dd>{livePath?.id ?? "--"}</dd></div>
+                <div><dt>Path progress</dt><dd>{livePath ? `${((live.snapshot?.pathT ?? 0) * 100).toFixed(1)}%` : "--"}</dd></div>
+                <div><dt>Pose age</dt><dd>{live.ageMs === null ? "--" : `${Math.round(live.ageMs)} ms`}</dd></div>
+              </dl>
+            </section>
             <section className={styles.recordingSection} aria-label="Live robot position">
               <h3>Robot Position</h3>
               <dl className={styles.recordingReadouts}>
@@ -108,11 +123,12 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
             <div className={styles.recordingOptions}>
               <label className={styles.recordingTrailToggle}><input type="checkbox" disabled={preview} checked={!preview && !paused} onChange={(event) => setPaused(!event.target.checked)} />Live updates</label>
               <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showTrail} onChange={(event) => setShowTrail(event.target.checked)} />Movement trail</label>
+              <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showPaths} onChange={(event) => setShowPaths(event.target.checked)} />Followed paths</label>
             </div>
             <button className={styles.recordingRestartButton} onClick={live.clearTrail} disabled={trail.length === 0}>Clear Trail</button>
           </div>
         </aside> : <>
-          <RecordingSidebar replay={replay} showTrail={showTrail} onShowTrailChange={setShowTrail} sourceControl={sourceControl} />
+          <RecordingSidebar replay={replay} showTrail={showTrail} onShowTrailChange={setShowTrail} showPaths={showPaths} onShowPathsChange={setShowPaths} sourceControl={sourceControl} />
           <PlaybackControls mode="recording" disabled={hub.busy || !replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs} isRunning={replay.playing} currentTime={replay.timeMs / 1000} totalTime={(replay.recording?.durationMs ?? 0) / 1000} accentColor="#2dd4bf" trackBackground="var(--border)" onToggle={replay.toggle} onScrub={(time) => replay.seek(time * 1000)} />
         </>}
       </div>

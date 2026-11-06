@@ -119,6 +119,7 @@ const arePointSnapshotsEqual = (a: Point[], b: Point[]) => JSON.stringify(a) ===
 export default function PathPlannerPage() {
   const [applicationMode, setApplicationMode] = useState<"planner" | "recording">("planner");
   const [showRecordingTrail, setShowRecordingTrail] = useState(true);
+  const [showRecordingPaths, setShowRecordingPaths] = useState(true);
   const replay = useReplay(applicationMode === "recording");
   const [hoverTarget, setHoverTarget] = useState<DragTarget | null>(null);
   const [activeTarget, setActiveTarget] = useState<DragTarget | null>(null);
@@ -1703,6 +1704,9 @@ export default function PathPlannerPage() {
           robot: replay.recording?.robot ?? robotConstants,
           trail: replay.trail,
           showTrail: showRecordingTrail,
+          paths: replay.paths,
+          activePathId: replay.pathProgress?.id,
+          showPaths: showRecordingPaths,
         } : undefined}
       />
 
@@ -1813,7 +1817,7 @@ export default function PathPlannerPage() {
           }}
         />
         </> : <>
-          <RecordingSidebar replay={replay} showTrail={showRecordingTrail} onShowTrailChange={setShowRecordingTrail} />
+          <RecordingSidebar replay={replay} showTrail={showRecordingTrail} onShowTrailChange={setShowRecordingTrail} showPaths={showRecordingPaths} onShowPathsChange={setShowRecordingPaths} />
           <PlaybackControls
             mode="recording"
             disabled={!replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs}

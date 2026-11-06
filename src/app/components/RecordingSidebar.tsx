@@ -9,11 +9,13 @@ type Props = {
   replay: ReturnType<typeof useReplay>;
   showTrail: boolean;
   onShowTrailChange: (show: boolean) => void;
+  showPaths?: boolean;
+  onShowPathsChange?: (show: boolean) => void;
   children?: ReactNode;
   sourceControl?: ReactNode;
 };
 
-export function RecordingSidebar({ replay, showTrail, onShowTrailChange, children, sourceControl }: Props) {
+export function RecordingSidebar({ replay, showTrail, onShowTrailChange, showPaths = true, onShowPathsChange, children, sourceControl }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(false);
   const recording = replay.recording;
@@ -50,6 +52,15 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, childre
           <strong>{recording.opMode}</strong>
           <span>{replay.sample?.phase ?? "--"}</span>
         </div>
+        {recording.startedAt !== undefined && <div className={styles.recordingMeta}><span><time dateTime={new Date(recording.startedAt).toISOString()}>{new Date(recording.startedAt).toLocaleString()}</time></span></div>}
+        <section className={styles.recordingSection} aria-label="Recorded paths">
+          <h3>Auton Paths</h3>
+          <dl className={styles.recordingReadouts}>
+            <div><dt>Followed paths</dt><dd>{replay.paths.length} / {recording.paths.length}</dd></div>
+            <div><dt>Active path</dt><dd>{replay.pathProgress?.id ?? "--"}</dd></div>
+            <div><dt>Path progress</dt><dd>{replay.pathProgress ? `${(replay.pathProgress.t * 100).toFixed(1)}%` : "--"}</dd></div>
+          </dl>
+        </section>
         <section className={styles.recordingSection} aria-label="Recorded robot position">
           <h3>Robot Position</h3>
           <dl className={styles.recordingReadouts}>
@@ -63,6 +74,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, childre
         <div className={styles.recordingOptions}>
           <label>Speed<select aria-label="Recording speed" value={replay.speed} onChange={(event) => replay.setSpeed(Number(event.target.value))}>{[0.25, 0.5, 1, 2, 4].map((speed) => <option key={speed} value={speed}>{speed}x</option>)}</select></label>
           <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showTrail} onChange={(event) => onShowTrailChange(event.target.checked)} />Movement trail</label>
+          {onShowPathsChange && <label className={styles.recordingTrailToggle}><input type="checkbox" checked={showPaths} onChange={(event) => onShowPathsChange(event.target.checked)} />Followed paths</label>}
         </div>
         <button className={styles.recordingRestartButton} onClick={() => replay.seek(recording.samples[0].timeMs)}>Restart Recording</button>
         {recording.incomplete && <p className={styles.recordingWarning}>Incomplete recording</p>}

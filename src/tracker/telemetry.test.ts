@@ -7,6 +7,13 @@ const snapshot: PoseSnapshot = {
 };
 
 describe("live telemetry", () => {
+  it("accepts live path geometry and rejects invalid path data", () => {
+    const path = { id: 1, points: [{ x: 0, y: 0 }, { x: 24, y: 24 }] };
+    expect(parsePoseSnapshot({ ...snapshot, path, pathT: 0.35 })?.path).toEqual(path);
+    expect(parsePoseSnapshot({ ...snapshot, path: null, pathT: 0 })).not.toBeNull();
+    expect(parsePoseSnapshot({ ...snapshot, path: { ...path, points: [] } })).toBeNull();
+    expect(parsePoseSnapshot({ ...snapshot, path, pathT: Infinity })).toBeNull();
+  });
   it("validates coordinates, dimensions, and missing poses at the boundary", () => {
     expect(parsePoseSnapshot(snapshot)).toEqual(snapshot);
     expect(parsePoseSnapshot({ ...snapshot, pose: null })).not.toBeNull();

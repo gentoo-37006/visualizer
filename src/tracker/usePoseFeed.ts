@@ -53,5 +53,6 @@ export function usePoseFeed(endpoint: string, paused: boolean) {
     };
   }, [endpoint, paused]);
 
-  return { snapshot, trail, status: getFeedStatus(snapshot, receivedAt, now, failed, paused), clearTrail: () => setTrail([]) };
+  const ageMs = snapshot?.ageMs == null ? null : snapshot.ageMs + Math.max(0, now - receivedAt);
+  return { snapshot, trail, ageMs, status: getFeedStatus(snapshot, receivedAt, now, failed, paused), clearTrail: () => setTrail([]) };
 }

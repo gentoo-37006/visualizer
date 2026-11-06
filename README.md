@@ -178,6 +178,12 @@ requests. Use it to check Live/Replay layouts, responsive styling, and the field
 image picker on the online site or local development server. It contains no
 sample robot data and does not require rebuilding the Hub asset bundle.
 
+Live telemetry displays the active auton path, endpoint markers, progress, and
+pose age; stale robot poses fade. Replay retains timestamped `path` geometry
+events, including paths followed between pose samples. Seeking shows only paths
+started by that time and highlights the active `motionPath` state. Both replay
+views include recording dates, path counts, and a Followed paths visibility toggle.
+
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
 Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while
 Sloth replaces TeamCode. `BaseRobot` owns feed sessions and `MotionController`

@@ -9,6 +9,8 @@ import { FieldViewport } from "../../field/FieldViewport";
 import { PathLayer } from "../../field/PathLayer";
 import { RobotLayer } from "../../field/RobotLayer";
 import { TrailLayer } from "../../field/TrailLayer";
+import { FollowedPathsLayer } from "../../tracker/FollowedPathsLayer";
+import type { FollowedPath } from "../../tracker/followedPaths";
 import type { FieldPath, FieldPose, RobotSize } from "../../field/geometry";
 import { PlannerHandles } from "./PlannerHandles";
 import styles from "../page.module.css";
@@ -32,7 +34,7 @@ type FieldCanvasProps = {
   onPointerUp: (event: ReactPointerEvent<SVGSVGElement>) => void;
   onPointerLeave: () => void;
   onClick: (event: ReactMouseEvent<SVGSVGElement>) => void;
-  recordingView?: { pose: FieldPose | null; robot: RobotSize; trail: FieldPose[]; showTrail: boolean };
+  recordingView?: { pose: FieldPose | null; robot: RobotSize; trail: FieldPose[]; showTrail: boolean; paths: FollowedPath[]; activePathId?: number; showPaths: boolean };
 };
 
 export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points, hoverTarget, isDragging, hasMeasuredField, robotSize, playbackPose, isRobotOutOfBounds, areControlPointsHidden, isPointVisible, onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onClick, recordingView }: FieldCanvasProps) {
@@ -60,6 +62,7 @@ export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points
       }}>
         <PathLayer paths={paths} viewport={viewport} />
         {recordingView ? <>
+          {recordingView.showPaths && <FollowedPathsLayer paths={recordingView.paths} activeId={recordingView.activePathId} viewport={viewport} />}
           {recordingView.showTrail && <TrailLayer poses={recordingView.trail} viewport={viewport} />}
           {hasMeasuredField && recordingView.pose && <RobotLayer pose={recordingView.pose} size={recordingView.robot} viewport={viewport} image="/robot.png" />}
         </> : <>

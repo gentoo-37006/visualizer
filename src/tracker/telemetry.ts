@@ -1,4 +1,5 @@
 import type { FieldPose, RobotSize } from "../field/geometry";
+import { parseFollowedPath, type FollowedPath } from "./followedPaths";
 
 export type PoseSnapshot = {
   version: 1;
@@ -9,6 +10,8 @@ export type PoseSnapshot = {
   ageMs: number | null;
   pose: FieldPose | null;
   robot: RobotSize | null;
+  path?: FollowedPath | null;
+  pathT?: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
@@ -21,6 +24,8 @@ export function parsePoseSnapshot(value: unknown): PoseSnapshot | null {
   if (value.pose !== null && (!isRecord(value.pose) || !isFiniteNumber(value.pose.x) || !isFiniteNumber(value.pose.y) || !isFiniteNumber(value.pose.heading))) return null;
   if (value.robot !== null && (!isRecord(value.robot) || !isFiniteNumber(value.robot.width) || value.robot.width <= 0 || !isFiniteNumber(value.robot.length) || value.robot.length <= 0)) return null;
   if (value.pose !== null && (value.robot === null || value.ageMs === null)) return null;
+  if (value.path !== undefined && value.path !== null && !parseFollowedPath(value.path)) return null;
+  if (value.pathT !== undefined && (!isFiniteNumber(value.pathT) || value.pathT < 0 || value.pathT > 1)) return null;
   return value as PoseSnapshot;
 }
 

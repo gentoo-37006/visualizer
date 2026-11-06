@@ -7,6 +7,22 @@ const end = { type: "end", droppedSamples: 2, sizeLimitReached: false };
 const encode = (...values: unknown[]) => values.map((v) => JSON.stringify(v)).join("\n") + "\n";
 
 describe("recording replay", () => {
+  it("preserves path events between pose samples and the recording date", () => {
+    const path = { type: "path", timeMs: 10, id: 1, points: [{ x: 0, y: 0 }, { x: 24, y: 24 }] };
+    const log = parseRecording(encode({ ...header, startedAt: 1234 }, sample(0), path, { ...path, id: 2, timeMs: 20 }, sample(50), end));
+    expect(log.paths).toHaveLength(2);
+    expect(log.paths[0]).toEqual({ id: 1, points: path.points, timeMs: 10 });
+    expect(log.startedAt).toBe(1234);
+    expect(log.paths.filter(path => path.timeMs <= 15)).toHaveLength(1);
+    expect(log.paths.filter(path => path.timeMs <= 0)).toHaveLength(0);
+  });
+  it("rejects malformed path geometry and out-of-order path events", () => {
+    const path = { type: "path", timeMs: 10, id: 1, points: [{ x: 0, y: 0 }, { x: 24, y: 24 }] };
+    expect(() => parseRecording(encode(header, sample(0), { ...path, points: [] }))).toThrow("path geometry");
+    expect(() => parseRecording(encode(header, sample(0), path, sample(5)))).toThrow("timestamp");
+    expect(() => parseRecording(encode(header, sample(20), path))).toThrow("timestamp");
+    expect(parseRecording(encode(header, sample(0), path)).durationMs).toBe(10);
+  });
   it("interpolates coordinates and takes the shortest turn across heading wrap", () => {
     const log = parseRecording(encode(header, sample(0, { x: 0, y: 10, heading: 350 }), sample(100, { x: 20, y: -10, heading: 10 }), end));
     expect(replayPose(log.samples, 25)).toEqual({ x: 5, y: 5, heading: 355 });

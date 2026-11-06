@@ -1,9 +1,12 @@
 import type { FieldPose, RobotSize } from "../field/geometry";
+import { parseFollowedPath, type RecordedPath } from "./followedPaths";
 
 export type RecordedSample = { timeMs: number; phase: string; states: Record<string, unknown>; errors: Record<string, string> };
 export type Recording = {
   opMode: string; robot: RobotSize; states: string[]; samples: RecordedSample[];
   durationMs: number; incomplete: boolean; droppedSamples: number; sizeLimitReached: boolean;
+  paths: RecordedPath[];
+  startedAt?: number;
 };
 export const MAX_RECORDING_BYTES = 32 * 1024 * 1024;
 export async function readRecordingFile(file: File): Promise<string> {
@@ -41,6 +44,8 @@ export function parseRecording(text: string): Recording {
       !header.states.every((s) => typeof s === "string" && s.length > 0) || new Set(header.states).size !== header.states.length)
     throw new Error("Unsupported recording header");
   const samples: RecordedSample[] = [];
+  const paths: RecordedPath[] = [];
+  let lastTime = 0;
   let ended = false, droppedSamples = 0, sizeLimitReached = false;
   for (const value of values) {
     if (ended) throw new Error("Data after recording end");
@@ -48,6 +53,15 @@ export function parseRecording(text: string): Recording {
       if (!Number.isSafeInteger(value.droppedSamples) || (value.droppedSamples as number) < 0 || typeof value.sizeLimitReached !== "boolean")
         throw new Error("Invalid recording footer");
       ended = true; droppedSamples = value.droppedSamples as number; sizeLimitReached = value.sizeLimitReached;
+      continue;
+    }
+    if (!finite(value.timeMs) || value.timeMs < lastTime) throw new Error("Invalid recording timestamp");
+    lastTime = value.timeMs;
+    if (value.type === "path") {
+      const path = parseFollowedPath(value);
+      if (!path) throw new Error("Invalid path geometry");
+      paths.push({ ...path, timeMs: value.timeMs });
+      if (paths.length > 100_000) throw new Error("Too many recorded paths");
       continue;
     }
     if (value.type !== "sample" || !finite(value.timeMs) || value.timeMs < 0 ||
@@ -59,7 +73,8 @@ export function parseRecording(text: string): Recording {
   }
   if (!samples.length) throw new Error("Recording has no samples");
   return { opMode: header.opMode, robot: header.robot as RobotSize, states: header.states as string[], samples,
-    durationMs: samples.at(-1)!.timeMs, incomplete: !ended, droppedSamples, sizeLimitReached };
+    paths, startedAt: finite(header.startedAt) && Math.abs(header.startedAt) <= 8.64e15 ? header.startedAt : undefined,
+    durationMs: lastTime, incomplete: !ended, droppedSamples, sizeLimitReached };
 }
 
 export function sampleIndex(samples: RecordedSample[], timeMs: number): number {
