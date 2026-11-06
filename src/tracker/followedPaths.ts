@@ -1,8 +1,18 @@
-import type { FieldPosition } from "../field/geometry";
+import type { FieldPath, FieldPosition } from "../field/geometry";
+import { seededColor } from "../app/plannerColors";
 
 export type FollowedPath = { id: number; points: FieldPosition[] };
 export type RecordedPath = FollowedPath & { timeMs: number };
 export type PathProgress = { id: number; t: number };
+
+export function followedFieldPaths(paths: FollowedPath[], activeId?: number): FieldPath[] {
+  return paths.map(path => ({
+    id: String(path.id),
+    color: seededColor(String(path.id)),
+    opacity: activeId === path.id ? 1 : 0.5,
+    curves: path.points.slice(1).map((end, index) => ({ start: path.points[index], end })),
+  }));
+}
 
 export function parseFollowedPath(value: unknown): FollowedPath | null {
   if (typeof value !== "object" || value === null) return null;

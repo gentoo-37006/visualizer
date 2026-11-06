@@ -9,8 +9,7 @@ import { FieldViewport } from "../../field/FieldViewport";
 import { PathLayer } from "../../field/PathLayer";
 import { RobotLayer } from "../../field/RobotLayer";
 import { TrailLayer } from "../../field/TrailLayer";
-import { FollowedPathsLayer } from "../../tracker/FollowedPathsLayer";
-import type { FollowedPath } from "../../tracker/followedPaths";
+import { followedFieldPaths, type FollowedPath } from "../../tracker/followedPaths";
 import type { FieldPath, FieldPose, RobotSize } from "../../field/geometry";
 import { PlannerHandles } from "./PlannerHandles";
 import styles from "../page.module.css";
@@ -60,9 +59,8 @@ export function FieldCanvas({ fieldRef, svgRef, fieldImageSrc, fieldSize, points
         onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onPointerLeave, onClick,
         style: { cursor: isDragging ? "grabbing" : hoverTarget !== null ? "grab" : "default" },
       }}>
-        <PathLayer paths={paths} viewport={viewport} />
+        <PathLayer paths={recordingView ? (recordingView.showPaths ? followedFieldPaths(recordingView.paths, recordingView.activePathId) : []) : paths} viewport={viewport} showEndpoints={!!recordingView} />
         {recordingView ? <>
-          {recordingView.showPaths && <FollowedPathsLayer paths={recordingView.paths} activeId={recordingView.activePathId} viewport={viewport} />}
           {recordingView.showTrail && <TrailLayer poses={recordingView.trail} viewport={viewport} />}
           {hasMeasuredField && recordingView.pose && <RobotLayer pose={recordingView.pose} size={recordingView.robot} viewport={viewport} image="/robot.png" />}
         </> : <>

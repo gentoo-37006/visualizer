@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { parseFollowedPath, parsePathProgress } from "./followedPaths";
-import { FollowedPathsLayer } from "./FollowedPathsLayer";
+import { followedFieldPaths, parseFollowedPath, parsePathProgress } from "./followedPaths";
+import { PathLayer } from "../field/PathLayer";
 
 const path = { id: 1, points: [{ x: 0, y: 0 }, { x: 24, y: 24 }] };
 describe("followed paths", () => {
@@ -18,7 +18,7 @@ describe("followed paths", () => {
     expect(parsePathProgress(null)).toBeNull();
   });
   it("draws endpoints and emphasizes only the active path", () => {
-    const html = renderToStaticMarkup(<FollowedPathsLayer paths={[path, { ...path, id: 2 }]} activeId={2} viewport={{ width: 144, height: 144, padding: 0, border: 0 }} />);
+    const html = renderToStaticMarkup(<PathLayer paths={followedFieldPaths([path, { ...path, id: 2 }], 2)} showEndpoints viewport={{ width: 144, height: 144, padding: 0, border: 0 }} />);
     expect(html).toContain('data-path-id="1" opacity="0.5"');
     expect(html).toContain('data-path-id="2" opacity="1"');
     const coordinates = html.match(/d="M ([\d.]+) ([\d.]+) L ([\d.]+) ([\d.]+)"/)!;

@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { FieldViewport } from "../field/FieldViewport";
 import { RobotLayer } from "../field/RobotLayer";
 import { TrailLayer } from "../field/TrailLayer";
-import { FollowedPathsLayer } from "./FollowedPathsLayer";
+import { PathLayer } from "../field/PathLayer";
+import { followedFieldPaths } from "./followedPaths";
 import { PlaybackControls } from "../app/components/PlaybackControls";
 import { RecordingSidebar } from "../app/components/RecordingSidebar";
 import { FieldImageModal } from "../app/components/FieldImageModal";
@@ -75,7 +76,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
         },
       }}>
         {fieldSize.width > 0 && <>
-          {showPaths && <FollowedPathsLayer paths={paths} activeId={activePathId} viewport={viewport} />}
+          {showPaths && <PathLayer paths={followedFieldPaths(paths, activePathId)} viewport={viewport} showEndpoints />}
           {showTrail && <TrailLayer poses={trail} viewport={viewport} />}
           {pose && robot && <g opacity={stale ? 0.4 : 1}><RobotLayer pose={pose} size={robot} viewport={viewport} image={`${assetBase}/robot.png`} /></g>}
         </>}
