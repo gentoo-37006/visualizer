@@ -69,9 +69,9 @@ export function serializeSavedPosesKotlin(poses: SavedPose[]): string {
     if (value.reference && /^(EAST|WEST|NORTH|SOUTH)_WALL$/.test(value.reference)) return value.reference;
     return `${axis}(${formatKotlinNumber(value.value)}, Offset.${value.offset < 0 ? "NEG" : value.offset > 0 ? "POS" : "NONE"})`;
   };
-  return poses.map(pose => `val ${savedPoseVariable(pose)} = ${pose.start
+  return poses.map(pose => `val ${savedPoseVariable(pose)} = ${pose.source ?? (pose.start
     ? `startPose(${coordinate(pose.start.horizontal, "Horizontal")}, ${coordinate(pose.start.vertical, "Vertical")}, Heading.${pose.start.facing})`
-    : pose.source ?? `Pose(${formatKotlinNumber(pose.x)}, ${formatKotlinNumber(pose.y)}, ${formatKotlinNumber(pose.heading)})`}`).join("\n");
+    : `Pose(${formatKotlinNumber(pose.x)}, ${formatKotlinNumber(pose.y)}, ${formatKotlinNumber(pose.heading)})`)}`).join("\n");
 }
 
 export type RobotConstants = {
@@ -355,6 +355,30 @@ export const parseSavedPosesKotlin = (
   const length = dimensions.length ?? DEFAULT_ROBOT_LENGTH;
   const savedPoses: SavedPose[] = [];
 
+  const mutationCall = String.raw`\.\s*(mirrorX|mirrorY|invert)\s*\(\s*\)`;
+  const mutationSuffix = new RegExp(`^((?:\\s*${mutationCall})*)[ \\t]*(?=\\r?$|//|;|})`, "m");
+  const applyMutations = (pose: SavedPose, suffix: string): SavedPose => {
+    let result = pose;
+    for (const mutation of suffix.matchAll(new RegExp(mutationCall, "g"))) {
+      const flipX = mutation[1] !== "mirrorX";
+      const flipY = mutation[1] !== "mirrorY";
+      const heading = normalizeHeading(mutation[1] === "mirrorX" ? 180 - result.heading : mutation[1] === "mirrorY" ? -result.heading : result.heading + 180);
+      const mirrorCoordinate = (coordinate: NonNullable<SavedPose["start"]>["horizontal"], flip: boolean) => {
+        if (!flip) return coordinate;
+        const oppositeWall: Record<string, string> = { EAST_WALL: "WEST_WALL", WEST_WALL: "EAST_WALL", NORTH_WALL: "SOUTH_WALL", SOUTH_WALL: "NORTH_WALL" };
+        return { value: -coordinate.value, offset: -coordinate.offset as -1 | 0 | 1,
+          ...(coordinate.reference && oppositeWall[coordinate.reference] ? { reference: oppositeWall[coordinate.reference] } : {}) };
+      };
+      result = { ...result, x: flipX ? -result.x : result.x, y: flipY ? -result.y : result.y, heading,
+        ...(result.start ? { start: {
+          horizontal: mirrorCoordinate(result.start.horizontal, flipX),
+          vertical: mirrorCoordinate(result.start.vertical, flipY),
+          facing: heading === 0 ? "NORTH" : heading === 90 ? "EAST" : heading === -90 ? "WEST" : "SOUTH",
+        } } : {}) };
+    }
+    return result;
+  };
+
   type FieldCoordinate = { value: number; offset: -1 | 0 | 1; reference?: string };
   const halfFieldSize = FIELD_SIZE_INCHES / 2;
   const horizontalCoordinates = new Map<string, FieldCoordinate>([
@@ -419,6 +443,8 @@ export const parseSavedPosesKotlin = (
     if (closeParenIndex < 0) continue;
 
     const args = splitTopLevelArgs(contents.slice(openParenIndex + 1, closeParenIndex)).map(stripLineComment);
+    const suffix = contents.slice(closeParenIndex + 1).match(mutationSuffix);
+    if (!suffix) continue;
     const horizontal = parseCoordinate(args[0] ?? "", "Horizontal");
     const vertical = parseCoordinate(args[1] ?? "", "Vertical");
     const headingMatch = (args[2] ?? "").match(/(?:Heading\s*\.\s*)?(NORTH|EAST|SOUTH|WEST)\b/);
@@ -430,14 +456,15 @@ export const parseSavedPosesKotlin = (
     const reachX = sideways ? length / 2 : width / 2;
     const reachY = sideways ? width / 2 : length / 2;
 
-    savedPoses.push({
+    savedPoses.push(applyMutations({
       name,
       ...(poseMatch[1].startsWith(START_POSE_PREFIX) ? {} : { kotlinName: poseMatch[1] }),
       x: horizontal.value + horizontal.offset * reachX,
       y: vertical.value + vertical.offset * reachY,
       heading,
       start: { horizontal, vertical, facing: headingMatch[1] as NonNullable<SavedPose["start"]>["facing"] },
-    });
+      ...(suffix[1].trim() ? { source: `startPose(${contents.slice(openParenIndex + 1, closeParenIndex)})${suffix[1]}` } : {}),
+    }, suffix[1]));
     startPoseRegex.lastIndex = closeParenIndex + 1;
   }
 
@@ -451,19 +478,19 @@ export const parseSavedPosesKotlin = (
     const x = evaluatePoseExpression(args[0] ?? "", width, length);
     const y = evaluatePoseExpression(args[1] ?? "", width, length);
     const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
-    if (x !== null && y !== null && heading !== null) savedPoses.push({ name: direct[1], kotlinName: direct[1], x, y, heading,
-      source: `Pose(${contents.slice(open + 1, close)})` });
+    const suffix = contents.slice(close + 1).match(mutationSuffix);
+    if (x !== null && y !== null && heading !== null && suffix) savedPoses.push(applyMutations({ name: direct[1], kotlinName: direct[1], x, y, heading,
+      source: `Pose(${contents.slice(open + 1, close)})${suffix[1]}` }, suffix[1]));
     directPoseRegex.lastIndex = close + 1;
   }
-  const aliases = [...contents.matchAll(/\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*((?:Poses\.)?([A-Za-z_][A-Za-z0-9_]*)(\.invert\(\))?)\s*(?=\r?$|\/\/|;)/gm)];
+  const aliases = [...contents.matchAll(new RegExp(String.raw`\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*((?:Poses\s*\.\s*)?([A-Za-z_][A-Za-z0-9_]*)((?:\s*${mutationCall})*))[ \t]*(?=\r?$|//|;|})`, "gm"))];
   for (let pass = 0; pass < aliases.length; pass++) {
     let added = false;
     for (const alias of aliases) {
       if (savedPoses.some(pose => savedPoseVariable(pose) === alias[1])) continue;
       const base = savedPoses.find(pose => savedPoseVariable(pose) === alias[3]);
       if (!base) continue;
-      savedPoses.push({ name: alias[1], kotlinName: alias[1], x: alias[4] ? -base.x : base.x,
-        y: alias[4] ? -base.y : base.y, heading: alias[4] ? normalizeHeading(base.heading + 180) : base.heading, source: alias[2] });
+      savedPoses.push(applyMutations({ ...base, name: alias[1], kotlinName: alias[1], source: alias[2] }, alias[4]));
       added = true;
     }
     if (!added) break;

@@ -477,6 +477,74 @@ autonSequence(Alliance.BLUE)
 });
 
  describe("saved pose definitions", () => {
+  it("imports the mirrored and inverted shooting poses from Biobuzz", () => {
+    const source = `val SHOOT_RED_CLOSE = Pose(-13.8, -59.0)
+val SHOOT_RED_FAR = SHOOT_RED_CLOSE.mirrorX()
+val SHOOT_BLUE_CLOSE = SHOOT_RED_CLOSE.invert()
+val SHOOT_BLUE_FAR = SHOOT_RED_FAR.invert()`;
+    const poses = parseSavedPosesKotlin(source);
+    expect(poses).toMatchObject([
+      { kotlinName: "SHOOT_RED_CLOSE", x: -13.8, y: -59, heading: 0 },
+      { kotlinName: "SHOOT_RED_FAR", x: -13.8, y: 59, heading: 180 },
+      { kotlinName: "SHOOT_BLUE_CLOSE", x: 13.8, y: 59, heading: 180 },
+      { kotlinName: "SHOOT_BLUE_FAR", x: 13.8, y: -59, heading: 0 },
+    ]);
+    expect(serializeSavedPosesKotlin(poses)).toBe(source);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it.each([
+    ["mirrorX()", 10, -20, 150],
+    ["mirrorY()", -10, 20, -30],
+    ["invert()", -10, -20, -150],
+    ["mirrorX().mirrorY()", -10, -20, -150],
+    ["mirrorY().invert()", 10, -20, 150],
+    ["invert().invert()", 10, 20, 30],
+  ])("applies %s to constructors and named poses", (mutation, x, y, heading) => {
+    const source = `val BASE = Pose(10.0, 20.0, 30.0)
+val DIRECT = Pose(10.0, 20.0, 30.0).${mutation}
+val NAMED = Poses.BASE.${mutation}`;
+    const poses = parseSavedPosesKotlin(source);
+    expect(poses.slice(1)).toMatchObject([{ x, y, heading }, { x, y, heading }]);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("resolves multi-line chains and dependent aliases in dependency order", () => {
+    const source = `val LAST: Pose = SECOND.invert()
+val SECOND = BASE
+    .mirrorX ( )
+    .mirrorY()
+val BASE = Pose(10.0, 20.0, 30.0)`;
+    const poses = parseSavedPosesKotlin(source);
+    expect(poses).toMatchObject([
+      { kotlinName: "BASE", x: 10, y: 20, heading: 30 },
+      { kotlinName: "SECOND", x: -10, y: -20, heading: -150 },
+      { kotlinName: "LAST", x: 10, y: 20, heading: 30 },
+    ]);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("preserves transformed start-pose alignment and dimension offsets", () => {
+    const poses = parseSavedPosesKotlin(`val START_BASE = startPose(WEST_WALL, NORTH_WALL, Heading.SOUTH)
+val START_MIRROR = START_BASE.mirrorY()
+val START_DIRECT = startPose(WEST_WALL, NORTH_WALL, Heading.SOUTH).mirrorY()`);
+    for (const pose of poses.slice(1)) {
+      expect(pose).toMatchObject({ x: 64, y: 64, start: { horizontal: { reference: "EAST_WALL", offset: -1 }, facing: "SOUTH" } });
+      expect(resolveSavedPose(pose, { width: 18, length: 20 })).toMatchObject({ x: 63, y: 62 });
+    }
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("skips unsupported mutations, missing references, and cyclic aliases", () => {
+    const poses = parseSavedPosesKotlin(`val BASE = Pose(10.0, 20.0)
+val UNKNOWN = BASE.unsupported()
+val PARTIAL = Pose(1.0, 2.0).mirrorX().unsupported()
+val MISSING = ABSENT.mirrorY()
+val CYCLE_A = CYCLE_B.invert()
+val CYCLE_B = CYCLE_A.invert()`);
+    expect(poses).toMatchObject([{ kotlinName: "BASE", x: 10, y: 20 }]);
+  });
+
   it("imports regular poses and inverted aliases without renaming them", () => {
     const poses = parseSavedPosesKotlin("val SHOOT_RED = Pose(-12.2, -59.0)\nval SHOOT_BLUE = SHOOT_RED.invert()");
     expect(poses).toMatchObject([{ kotlinName: "SHOOT_RED", x: -12.2, y: -59, heading: 0 }, { kotlinName: "SHOOT_BLUE", x: 12.2, y: 59, heading: 180 }]);
