@@ -477,6 +477,72 @@ autonSequence(Alliance.BLUE)
 });
 
  describe("saved pose definitions", () => {
+  it("imports the rotated flower poses and preserves their expressions", () => {
+    const source = `val FLOWER_NORTH = Pose(-24.0, 58.5)
+val FLOWER_EAST = FLOWER_NORTH.rotate(90.0)
+val FLOWER_SOUTH = FLOWER_NORTH.rotate(180.0)
+val FLOWER_WEST = FLOWER_NORTH.rotate(270.0)`;
+    const poses = parseSavedPosesKotlin(source);
+    expect(poses).toMatchObject([
+      { kotlinName: "FLOWER_NORTH", x: -24, y: 58.5, heading: 0 },
+      { kotlinName: "FLOWER_EAST", x: 58.5, y: 24, heading: 0 },
+      { kotlinName: "FLOWER_SOUTH", x: 24, y: -58.5, heading: 0 },
+      { kotlinName: "FLOWER_WEST", x: -58.5, y: -24, heading: 0 },
+    ]);
+    expect(serializeSavedPosesKotlin(poses)).toBe(source);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it.each([
+    ["90.0", 20, -10, 30],
+    ["angle = 90.0", 20, -10, 30],
+    ["90.0, true", 20, -10, 120],
+    ["angle = 90.0, rotateTheta = true", 20, -10, 120],
+    ["rotateTheta = true, angle = -90.0", -20, 10, -60],
+    ["(45.0 + 45.0), rotateTheta = false", 20, -10, 30],
+    ["450.0, true", 20, -10, 120],
+  ])("supports rotate(%s) on constructors and aliases", (args, x, y, heading) => {
+    const source = `val BASE = Pose(10.0, 20.0, 30.0)
+val DIRECT = Pose(10.0, 20.0, 30.0).rotate(${args})
+val NAMED = Poses.BASE.rotate(${args})`;
+    const poses = parseSavedPosesKotlin(source);
+    expect(poses.slice(1)).toMatchObject([{ x, y, heading }, { x, y, heading }]);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("rotates arbitrary angles and composes rotations with reflections", () => {
+    const poses = parseSavedPosesKotlin(`val DIAGONAL = Pose(10.0, 20.0, 30.0).rotate(45.0, true)
+val CHAIN = DIAGONAL.mirrorX().rotate(-45.0).invert()`);
+    expect(poses[0].x).toBeCloseTo(30 / Math.sqrt(2));
+    expect(poses[0].y).toBeCloseTo(10 / Math.sqrt(2));
+    expect(poses[0].heading).toBe(75);
+    expect(poses[1].x).toBeCloseTo(-20);
+    expect(poses[1].y).toBeCloseTo(-10);
+    expect(poses[1].heading).toBe(-75);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("does not retain unrotated start alignment after a rotation", () => {
+    const poses = parseSavedPosesKotlin(`val START_BASE = startPose(WEST_WALL, NORTH_WALL, Heading.SOUTH)
+val TURNED = START_BASE.rotate(90.0, true)`);
+    expect(poses[1]).toMatchObject({ x: 64, y: 64, heading: -90 });
+    expect(poses[1].start).toBeUndefined();
+    expect(resolveSavedPose(poses[1], { width: 18, length: 20 })).toEqual(poses[1]);
+    expect(parseSavedPosesKotlin(serializeSavedPosesKotlin(poses))).toEqual(poses);
+  });
+
+  it("skips invalid rotation arguments instead of importing untransformed values", () => {
+    const source = `val BASE = Pose(10.0, 20.0)
+val EMPTY = BASE.rotate()
+val UNKNOWN = BASE.rotate(unknown)
+val BAD_BOOL = BASE.rotate(90.0, maybe)
+val EXTRA = BASE.rotate(90.0, true, false)
+val DUPLICATE = BASE.rotate(90.0, angle = 45.0)
+val CONSTRUCTOR = Pose(10.0, 20.0).rotate(angle = invalid)
+val MIRROR_ARGS = BASE.mirrorX(90.0)`;
+    expect(parseSavedPosesKotlin(source)).toHaveLength(1);
+  });
+
   it("imports the mirrored and inverted shooting poses from Biobuzz", () => {
     const source = `val SHOOT_RED_CLOSE = Pose(-13.8, -59.0)
 val SHOOT_RED_FAR = SHOOT_RED_CLOSE.mirrorX()

@@ -355,11 +355,33 @@ export const parseSavedPosesKotlin = (
   const length = dimensions.length ?? DEFAULT_ROBOT_LENGTH;
   const savedPoses: SavedPose[] = [];
 
-  const mutationCall = String.raw`\.\s*(mirrorX|mirrorY|invert)\s*\(\s*\)`;
+  const mutationCall = String.raw`\.\s*(mirrorX|mirrorY|invert|rotate)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)`;
   const mutationSuffix = new RegExp(`^((?:\\s*${mutationCall})*)[ \\t]*(?=\\r?$|//|;|})`, "m");
-  const applyMutations = (pose: SavedPose, suffix: string): SavedPose => {
+  const applyMutations = (pose: SavedPose, suffix: string): SavedPose | null => {
     let result = pose;
     for (const mutation of suffix.matchAll(new RegExp(mutationCall, "g"))) {
+      if (mutation[1] === "rotate") {
+        const args = splitTopLevelArgs(mutation[2]);
+        const values = new Map<string, string>();
+        for (const [index, arg] of args.entries()) {
+          const named = arg.trim().match(/^(\w+)\s*=\s*([\s\S]+)$/);
+          const key = named?.[1] ?? ["angle", "rotateTheta"][index];
+          if (!key || !["angle", "rotateTheta"].includes(key) || values.has(key)) return null;
+          values.set(key, named?.[2].trim() ?? arg.trim());
+        }
+        const angle = evaluatePoseExpression(values.get("angle") ?? "", width, length);
+        const rotateTheta = values.get("rotateTheta") ?? "false";
+        if (angle === null || !["true", "false"].includes(rotateTheta)) return null;
+        const radians = -normalizeHeading(angle) * Math.PI / 180;
+        const snap = (value: number) => Math.abs(value) < 1e-12 ? 0 : value;
+        const cos = snap(Math.cos(radians));
+        const sin = snap(Math.sin(radians));
+        result = { ...result, x: result.x * cos - result.y * sin, y: result.x * sin + result.y * cos,
+          heading: rotateTheta === "true" ? normalizeHeading(result.heading + angle) : result.heading,
+          start: undefined };
+        continue;
+      }
+      if (mutation[2].trim()) return null;
       const flipX = mutation[1] !== "mirrorX";
       const flipY = mutation[1] !== "mirrorY";
       const heading = normalizeHeading(mutation[1] === "mirrorX" ? 180 - result.heading : mutation[1] === "mirrorY" ? -result.heading : result.heading + 180);
@@ -377,6 +399,11 @@ export const parseSavedPosesKotlin = (
         } } : {}) };
     }
     return result;
+  };
+  const addMutatedPose = (pose: SavedPose, suffix: string) => {
+    const transformed = applyMutations(pose, suffix);
+    if (transformed) savedPoses.push(transformed);
+    return transformed !== null;
   };
 
   type FieldCoordinate = { value: number; offset: -1 | 0 | 1; reference?: string };
@@ -456,7 +483,7 @@ export const parseSavedPosesKotlin = (
     const reachX = sideways ? length / 2 : width / 2;
     const reachY = sideways ? width / 2 : length / 2;
 
-    savedPoses.push(applyMutations({
+    addMutatedPose({
       name,
       ...(poseMatch[1].startsWith(START_POSE_PREFIX) ? {} : { kotlinName: poseMatch[1] }),
       x: horizontal.value + horizontal.offset * reachX,
@@ -464,7 +491,7 @@ export const parseSavedPosesKotlin = (
       heading,
       start: { horizontal, vertical, facing: headingMatch[1] as NonNullable<SavedPose["start"]>["facing"] },
       ...(suffix[1].trim() ? { source: `startPose(${contents.slice(openParenIndex + 1, closeParenIndex)})${suffix[1]}` } : {}),
-    }, suffix[1]));
+    }, suffix[1]);
     startPoseRegex.lastIndex = closeParenIndex + 1;
   }
 
@@ -479,8 +506,8 @@ export const parseSavedPosesKotlin = (
     const y = evaluatePoseExpression(args[1] ?? "", width, length);
     const heading = evaluatePoseExpression(args[2] ?? "0", width, length);
     const suffix = contents.slice(close + 1).match(mutationSuffix);
-    if (x !== null && y !== null && heading !== null && suffix) savedPoses.push(applyMutations({ name: direct[1], kotlinName: direct[1], x, y, heading,
-      source: `Pose(${contents.slice(open + 1, close)})${suffix[1]}` }, suffix[1]));
+    if (x !== null && y !== null && heading !== null && suffix) addMutatedPose({ name: direct[1], kotlinName: direct[1], x, y, heading,
+      source: `Pose(${contents.slice(open + 1, close)})${suffix[1]}` }, suffix[1]);
     directPoseRegex.lastIndex = close + 1;
   }
   const aliases = [...contents.matchAll(new RegExp(String.raw`\bval\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*Pose\s*)?=\s*((?:Poses\s*\.\s*)?([A-Za-z_][A-Za-z0-9_]*)((?:\s*${mutationCall})*))[ \t]*(?=\r?$|//|;|})`, "gm"))];
@@ -490,8 +517,7 @@ export const parseSavedPosesKotlin = (
       if (savedPoses.some(pose => savedPoseVariable(pose) === alias[1])) continue;
       const base = savedPoses.find(pose => savedPoseVariable(pose) === alias[3]);
       if (!base) continue;
-      savedPoses.push(applyMutations({ ...base, name: alias[1], kotlinName: alias[1], source: alias[2] }, alias[4]));
-      added = true;
+      if (addMutatedPose({ ...base, name: alias[1], kotlinName: alias[1], source: alias[2] }, alias[4])) added = true;
     }
     if (!added) break;
   }
