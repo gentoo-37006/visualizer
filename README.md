@@ -152,6 +152,15 @@ at the current sample. Switching tabs pauses playback and preserves the planner
 and the loaded recording. Recording time is not subject to the planner's
 30-second autonomous warning.
 
+Playback occupies its own full-width bottom bar beneath the square field and
+sidebar, with the same spacing as the workspace. Live mode uses that bar for
+robot connection status, opmode, and pose age instead of playback controls.
+Empty playback is disabled and gray. Space exclusively toggles playback once
+per press, including when controls have focus; it does nothing in Live mode.
+Replay uses a white position marker and white elapsed-time fill on the track.
+The Pathing thumb is lightly tinted white; time beyond the 30-second auton limit
+is overlaid with red diagonal lines rather than a separate boundary marker.
+
 The latest valid local replay upload is stored in IndexedDB and restored paused
 at its beginning after a refresh, including offline and app-update reloads. Large
 recordings do not compete with planner settings for localStorage space. Invalid
@@ -188,6 +197,11 @@ full install. The `/visualizer` route renders the same tracker in the developmen
 it expects a same-origin `/visualizer/pose` feed. Both builds use the same sidebar,
 rounded mode tabs, replay controls, and field renderer. The browser titles are
 **Online Visualizer** for the planner and **Onboard Visualizer** for the Hub.
+
+While Hub Replay is visible, recording lists refresh every five seconds and on
+focus/reconnection. A growing selected recording reloads only when its size
+changes, preserving the playhead, speed, and playing/paused state. Background
+connection failures leave the loaded replay usable and are retried automatically.
 
 `/onboard-preview` renders the same onboard UI without telemetry or recording
 requests. Use it to check Live/Replay layouts, responsive styling, and the field

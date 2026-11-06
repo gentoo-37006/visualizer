@@ -15,6 +15,7 @@ import { KotlinExportModal } from "./components/KotlinExportModal";
 import { PlaybackControls } from "./components/PlaybackControls";
 import { RecordingSidebar } from "./components/RecordingSidebar";
 import { useReplay } from "../tracker/useReplay";
+import { usePlaybackShortcut } from "./hooks/usePlaybackShortcut";
 import { PlannerSidebar, type SidebarPage } from "./components/PlannerSidebar";
 import { usePlannerState } from "./hooks/usePlannerState";
 import {
@@ -548,6 +549,7 @@ export default function PathPlannerPage() {
     if (playbackTime >= playbackTimeline.totalTime) setPlaybackTime(0);
     setIsPlaybackRunning((currentValue) => !currentValue);
   };
+  usePlaybackShortcut(applicationMode === "planner" ? handlePlaybackToggle : replay.toggle);
 
   const handleAddPoint = () => {
     pushCurrentSnapshot();
@@ -1680,6 +1682,7 @@ export default function PathPlannerPage() {
 
   return (
     <main className={styles.container}>
+      <div className={styles.workspace}>
       <FieldCanvas
         fieldRef={fieldRef}
         svgRef={svgRef}
@@ -1802,35 +1805,36 @@ export default function PathPlannerPage() {
           onUpdateSimulationParameter={updateSimulationParameter}
           onFormatSimulationParameter={formatSimulationParameter}
         />
-        <PlaybackControls
-          isRunning={isPlaybackRunning}
-          currentTime={clampedPlaybackTime}
-          totalTime={playbackTimeline.totalTime}
-          accentColor={playbackAccentColor}
-          trackBackground={playbackTrackBackground}
-          actionMarkers={playbackActionMarkers}
-          onToggle={handlePlaybackToggle}
-          onScrub={(time) => {
-            setIsPlaybackRunning(false);
-            setPlaybackTime(time);
-          }}
-        />
         </> : <>
           <RecordingSidebar replay={replay} showTrail={showRecordingTrail} onShowTrailChange={setShowRecordingTrail} showPaths={showRecordingPaths} onShowPathsChange={setShowRecordingPaths} />
-          <PlaybackControls
-            mode="recording"
-            disabled={!replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs}
-            isRunning={replay.playing}
-            currentTime={replay.timeMs / 1000}
-            totalTime={(replay.recording?.durationMs ?? 0) / 1000}
-            accentColor="#2dd4bf"
-            trackBackground="var(--border)"
-            onToggle={replay.toggle}
-            onScrub={(time) => replay.seek(time * 1000)}
-          />
         </>}
         </div>
       </div>
+
+      </div>
+      {applicationMode === "planner" ? <PlaybackControls
+        isRunning={isPlaybackRunning}
+        currentTime={clampedPlaybackTime}
+        totalTime={playbackTimeline.totalTime}
+        accentColor={playbackAccentColor}
+        trackBackground={playbackTrackBackground}
+        actionMarkers={playbackActionMarkers}
+        onToggle={handlePlaybackToggle}
+        onScrub={(time) => {
+          setIsPlaybackRunning(false);
+          setPlaybackTime(time);
+        }}
+      /> : <PlaybackControls
+        mode="recording"
+        disabled={!replay.recording || replay.recording.durationMs <= replay.recording.samples[0].timeMs}
+        isRunning={replay.playing}
+        currentTime={replay.timeMs / 1000}
+        totalTime={(replay.recording?.durationMs ?? 0) / 1000}
+        accentColor="#2dd4bf"
+        trackBackground="var(--border)"
+        onToggle={replay.toggle}
+        onScrub={(time) => replay.seek(time * 1000)}
+      />}
 
       {isFieldImageModalOpen && (
         <FieldImageModal

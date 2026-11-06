@@ -52,11 +52,16 @@ export function useReplay(active: boolean, persistUpload = false) {
     if (tip && timeMs > (recording.samples[index]?.timeMs ?? timeMs)) trail.push(tip);
     return trail;
   }, [recording, index, timeMs]);
-  function load(text: string) {
+  function load(text: string, preservePlayback = false) {
     loadGeneration.current += 1;
     try {
       const next = parseRecording(text);
-      setRecording(next); setPlayback({ timeMs: next.samples[0].timeMs, playing: false }); setError(null);
+      setRecording(next);
+      setPlayback(state => preservePlayback ? {
+        timeMs: Math.max(next.samples[0].timeMs, Math.min(next.durationMs, state.timeMs)),
+        playing: state.playing && state.timeMs < next.durationMs,
+      } : { timeMs: next.samples[0].timeMs, playing: false });
+      setError(null);
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : "Could not read recording"); return false; }
   }

@@ -30,31 +30,44 @@ export function PlaybackControls({
   actionMarkers = [],
 }: PlaybackControlsProps) {
   const overtime = getAutonomousOvertime(totalTime);
-  const isOverBudget = mode === "path" && overtime > 0.05;
+  const isOverBudget = mode === "path" && overtime > 0;
   const playbackLabel = mode === "path" ? "Path playback" : "Recording playback";
+  const isDisabled = disabled || !Number.isFinite(totalTime) || totalTime <= 0;
+  const progress = totalTime > 0 ? Math.max(0, Math.min(1, currentTime / totalTime)) : 0;
+  const progressStop = `${progress * 100}%`;
+  const markerColor = isDisabled ? "#707070" : mode === "recording" ? "#ffffff" : `color-mix(in srgb, ${accentColor} 75%, #ffffff 25%)`;
+  const background = isDisabled ? "#4b4b4b" : mode === "recording"
+    ? `linear-gradient(to right, #ffffff 0%, #ffffff ${progressStop}, var(--border) ${progressStop}, var(--border) 100%)`
+    : trackBackground;
 
   return (
-    <section className={styles.playbackSidebar} aria-label={playbackLabel}>
+    <section className={`${styles.bottomBar} ${isDisabled ? styles.playbackDisabled : ""}`} aria-label={playbackLabel}>
       <div className={styles.playbackRow}>
         <button
           className={styles.playButton}
           onClick={onToggle}
           aria-label={`${isRunning ? "Pause" : "Play"} ${playbackLabel.toLowerCase()}`}
-          disabled={disabled}
+          disabled={isDisabled}
           title={isRunning ? "Pause" : "Play"}
         >
           {isRunning ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <rect x="6" y="5" width="4" height="14"></rect>
               <rect x="14" y="5" width="4" height="14"></rect>
             </svg>
           ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <polygon points="8,5 19,12 8,19"></polygon>
             </svg>
           )}
         </button>
-        <div className={styles.playbackTrack}>
+        <div className={styles.playbackTrack} style={{
+          "--playback-color": markerColor,
+          "--playback-track": background,
+        } as CSSProperties}>
+        {isOverBudget && !isDisabled && <div className={styles.playbackTrackOverlay} aria-hidden="true">
+          <span className={styles.playbackOvertimeHatch} style={{ left: `${AUTONOMOUS_PERIOD_SECONDS / totalTime * 100}%` }} />
+        </div>}
         <input
           className={styles.playbackRange}
           type="range"
@@ -62,16 +75,9 @@ export function PlaybackControls({
           max={Math.max(0.001, totalTime || 0)}
           step="0.01"
           value={Math.min(currentTime || 0, Math.max(0.001, totalTime || 0))}
-          style={
-            {
-              "--playback-color": accentColor,
-              "--playback-track": trackBackground,
-              accentColor,
-            } as CSSProperties
-          }
           onChange={(event) => onScrub(Number(event.target.value))}
           aria-label={`${playbackLabel} progress`}
-          disabled={disabled}
+          disabled={isDisabled}
         />
         {mode === "path" && totalTime > 0 && <div className={styles.playbackMarkers}>
           {actionMarkers.map((marker) => <button
@@ -80,7 +86,7 @@ export function PlaybackControls({
             style={{ left: `${Math.max(0, Math.min(100, marker.time / totalTime * 100))}%` }}
             title={`${marker.label} at ${formatPlaybackTime(marker.time)}`}
             aria-label={`Seek to ${marker.label}`}
-            disabled={disabled}
+            disabled={isDisabled}
             onClick={() => onScrub(marker.time)}
           />)}
         </div>}

@@ -512,7 +512,7 @@ describe("autonomous period budget", () => {
     expect(getAutonomousOvertime(AUTONOMOUS_PERIOD_SECONDS + 4.5)).toBeCloseTo(4.5, 6);
   });
 
-  it("marks the deadline on the track only once the auton overruns", () => {
+  it("leaves the deadline overlay out of the segment colors", () => {
     const withinBudget = createPlaybackTrackBackground({
       segments: [],
       totalTime: AUTONOMOUS_PERIOD_SECONDS,
@@ -523,8 +523,9 @@ describe("autonomous period budget", () => {
     });
 
     expect(withinBudget).not.toContain("calc(");
-    // Half the track, because the auton runs twice as long as it is allowed to.
-    expect(overBudget).toContain("calc(50.000% - 1.5px)");
+    expect(overBudget).not.toContain("calc(");
+    expect(overBudget).not.toContain("#ffffff");
+    expect(overBudget).not.toContain("#111827");
   });
 });
 

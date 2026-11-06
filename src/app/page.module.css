@@ -1,6 +1,6 @@
 .container {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   height: 100vh;
   height: 100dvh; /* Mobile URL bars shrink the viewport; 100vh would clip the sidebar. */
   padding: 1rem;
@@ -8,8 +8,20 @@
   overflow: hidden;
 }
 
+.workspace {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: 1rem;
+  container-type: size;
+}
+
 .fieldWrapper {
-  height: 100%;
+  width: min(100cqh, calc(100cqw - 320px - 1rem));
+  height: auto;
+  flex: 0 0 auto;
+  align-self: flex-start;
   aspect-ratio: 1 / 1;
   position: relative;
   display: flex;
@@ -84,13 +96,6 @@
   box-shadow: none;
 }
 
-.sidebarColumn .playbackSidebar {
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-}
-
 .sidebarHeader {
   padding: 1.25rem 1.25rem 0.75rem;
   border-bottom: 1px solid var(--border);
@@ -120,6 +125,7 @@
 
 .modeTabs button[aria-selected="true"] {
   z-index: 1;
+  cursor: default;
   color: var(--text-primary);
   background-color: var(--surface);
 }
@@ -178,6 +184,7 @@
 
 .sidebarTitle {
   font-size: 1.125rem;
+  line-height: 1.5rem;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -189,6 +196,7 @@
    the edge and lose its last button to the sidebar's hidden overflow. */
 .sidebarTitleRow {
   display: flex;
+  min-height: 2rem;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -1399,8 +1407,9 @@
   color: var(--text-primary);
 }
 
-.playbackSidebar {
+.bottomBar {
   flex: 0 0 auto;
+  min-height: 66px;
   background-color: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--border-radius);
@@ -1421,19 +1430,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--primary);
+  background: #ffffff;
   border-radius: 999px;
-  color: white;
+  color: var(--background);
   transition: var(--transition);
 }
 
 .playButton:hover {
-  background: var(--primary-hover);
+  background: #dddddd;
 }
 
-.playButton:disabled { opacity: 0.45; cursor: default; }
+.playbackDisabled .playButton,
+.playbackDisabled .playButton:hover { background: #4b4b4b; color: #a0a0a0; opacity: 1; cursor: default; }
+.playbackDisabled .playbackTime { color: var(--text-secondary); }
+.playbackRange:disabled { cursor: default; }
 
 .playbackTrack {
+  --playback-thumb-size: 1rem;
+  --playback-thumb-radius: 0.5rem;
+  --playback-track-height: 0.5rem;
   position: relative;
   min-width: 0;
   display: flex;
@@ -1441,10 +1456,42 @@
   height: 1.5rem;
 }
 
+.playbackTrack::before {
+  content: "";
+  position: absolute;
+  left: var(--playback-thumb-radius);
+  right: var(--playback-thumb-radius);
+  top: 50%;
+  height: var(--playback-track-height);
+  transform: translateY(-50%);
+  background: var(--playback-track, rgba(148, 163, 184, 0.35));
+  border-radius: 999px;
+  pointer-events: none;
+}
+
 .playbackMarkers {
   position: absolute;
-  inset: 0 0.5rem;
+  inset: 0 var(--playback-thumb-radius);
   pointer-events: none;
+}
+
+.playbackTrackOverlay {
+  position: absolute;
+  left: var(--playback-thumb-radius);
+  right: var(--playback-thumb-radius);
+  top: 50%;
+  height: var(--playback-track-height);
+  transform: translateY(-50%);
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.playbackOvertimeHatch {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  background: repeating-linear-gradient(45deg, #991b1b 0 2px, transparent 2px calc(9.5px / 1.5));
 }
 
 .playbackActionMarker {
@@ -1465,27 +1512,32 @@
 .playbackActionMarker:focus-visible { outline: 2px solid white; outline-offset: 2px; }
 
 .playbackRange {
+  position: relative;
   width: 100%;
   min-width: 0;
-  height: 0.5rem;
+  height: var(--playback-track-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
   appearance: none;
-  background: var(--playback-track, rgba(148, 163, 184, 0.35));
+  background: transparent;
   border-radius: 999px;
   accent-color: var(--playback-color, var(--primary));
   cursor: pointer;
 }
 
 .playbackRange::-webkit-slider-runnable-track {
-  height: 0.5rem;
-  background: var(--playback-track, rgba(148, 163, 184, 0.35));
+  height: var(--playback-track-height);
+  background: transparent;
   border-radius: 999px;
 }
 
 .playbackRange::-webkit-slider-thumb {
   appearance: none;
-  width: 1rem;
-  height: 1rem;
-  margin-top: -0.25rem;
+  box-sizing: border-box;
+  width: var(--playback-thumb-size);
+  height: var(--playback-thumb-size);
+  margin-top: calc((var(--playback-track-height) - var(--playback-thumb-size)) / 2);
   border: 2px solid #ffffff;
   border-radius: 999px;
   background: var(--playback-color, var(--primary));
@@ -1493,8 +1545,8 @@
 }
 
 .playbackRange::-moz-range-track {
-  height: 0.5rem;
-  background: var(--playback-track, rgba(148, 163, 184, 0.35));
+  height: var(--playback-track-height);
+  background: transparent;
   border-radius: 999px;
 }
 
@@ -1504,8 +1556,9 @@
 }
 
 .playbackRange::-moz-range-thumb {
-  width: 0.75rem;
-  height: 0.75rem;
+  box-sizing: border-box;
+  width: var(--playback-thumb-size);
+  height: var(--playback-thumb-size);
   border: 2px solid #ffffff;
   border-radius: 999px;
   background: var(--playback-color, var(--primary));
@@ -1530,22 +1583,19 @@
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-  .container {
+  .workspace {
     flex-direction: column;
   }
 
-  /* Stacked, the field must be sized from its width and capped, or `height: 100%`
-     lets it eat the whole column and collapses the editor to nothing. */
+  /* Reserve workspace height for the sidebar while keeping the field square. */
   .fieldWrapper {
     flex: 0 0 auto;
     width: 100%;
     height: auto;
-    max-width: min(100%, 50dvh);
+    max-width: min(100%, 50cqh);
     margin-inline: auto;
   }
 
-  /* `flex: 1` carries a 0% basis, which beat the old fixed height and left the
-     playback controls outside the container's hidden overflow. */
   .sidebarColumn {
     width: 100%;
     min-width: 0;
@@ -1563,4 +1613,9 @@
   .exportCodeShell {
     min-height: 18rem;
   }
+}
+
+@media (max-width: 768px) and (max-height: 540px) {
+  .workspace { overflow-y: auto; }
+  .sidebarColumn { flex: 1 0 320px; }
 }

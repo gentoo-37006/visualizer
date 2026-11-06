@@ -35,6 +35,7 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, showPat
     <header className={styles.sidebarHeader}>
       <div className={styles.sidebarTitleRow}>
         <h2 className={styles.sidebarTitle}>Replay</h2>
+        {sourceControl}
         {sourceControl === undefined && <button className={`${styles.secondaryIconButton} ${styles.recordingImportButton}`} disabled={isLoading} onClick={() => input.current?.click()}>{isLoading ? "Loading..." : "Open Recording"}</button>}
       </div>
       {sourceControl === undefined && <input ref={input} aria-label="Import recording" type="file" accept=".jsonl,.ndjson" hidden onChange={(event) => {
@@ -42,7 +43,6 @@ export function RecordingSidebar({ replay, showTrail, onShowTrailChange, showPat
         event.target.value = "";
         void importFile(file);
       }} />}
-      {sourceControl}
     </header>
     <div className={`${styles.pointsList} ${styles.recordingContent}`}>
       {children}
