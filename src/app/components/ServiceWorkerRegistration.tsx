@@ -10,7 +10,6 @@ export function ServiceWorkerRegistration() {
   const [refreshing, setRefreshing] = useState(false);
   const dismissed = useRef<ServiceWorker | null>(null);
   const refreshRequested = useRef(false);
-  const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     if (isPreview || process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
@@ -65,10 +64,6 @@ export function ServiceWorkerRegistration() {
     };
   }, [isPreview]);
 
-  useEffect(() => {
-    if (update && !dialog.current?.open) dialog.current?.showModal();
-  }, [update]);
-
   function dismiss() {
     dismissed.current = update;
     setUpdate(null);
@@ -82,15 +77,13 @@ export function ServiceWorkerRegistration() {
     else update.postMessage({ type: "ACTIVATE_UPDATE" });
   }
 
-  return !isPreview && update && <dialog ref={dialog} className={styles.dialog} aria-labelledby="app-update-title" aria-describedby="app-update-description" onCancel={event => {
-    event.preventDefault();
-    if (!refreshing) dismiss();
-  }}>
-    <h2 id="app-update-title">Update Available</h2>
-    <p id="app-update-description">A newer version of Online Visualizer is ready. Refresh to load it.</p>
-    <div className={styles.actions}>
-      <button disabled={refreshing} onClick={dismiss}>Later</button>
-      <button disabled={refreshing} className={styles.refresh} onClick={refresh}>{refreshing ? "Refreshing..." : "Refresh"}</button>
-    </div>
-  </dialog>;
+  return !isPreview && update && <section className={styles.snackbar} aria-label="Application update">
+    <p className={styles.message} role="status">A new version is ready.</p>
+    <button disabled={refreshing} className={styles.refresh} onClick={refresh}>{refreshing ? "Refreshing..." : "Refresh"}</button>
+    <button disabled={refreshing} className={styles.dismiss} onClick={dismiss} aria-label="Dismiss update" title="Dismiss update">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <path d="m18 6-12 12M6 6l12 12" />
+      </svg>
+    </button>
+  </section>;
 }

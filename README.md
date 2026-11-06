@@ -21,9 +21,10 @@ installs as a PWA and keeps working offline once it has loaded.
 
 After the first successful online visit, pages, scripts, styles, and field/robot
 images load cache-first. Each deployment stages a separate complete cache;
-the active version stays unchanged until you accept the Update Available prompt.
-Update checks run every minute while visible, and on focus/reconnection. Choose
-Later to keep working or Refresh to activate the downloaded version and reload.
+the active version stays unchanged until you accept the update snackbar.
+Update checks run every minute while visible, and on focus/reconnection. Dismiss
+the top snackbar with its X to keep working, or choose Refresh to activate the
+downloaded version and reload. The snackbar never blocks the app or takes focus.
 The first visit still needs internet, and clearing browser storage removes the
 offline copy. Hub telemetry and recording endpoints are never cached.
 `/onboard-preview` is excluded from the offline cache and always requests the
