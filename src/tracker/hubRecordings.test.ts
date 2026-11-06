@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hubRecordingTimestamp, listHubRecordings, readHubRecording } from "./hubRecordings";
+import { formatHubRecordingTimestamp, hubRecordingTimestamp, listHubRecordings, readHubRecording } from "./hubRecordings";
 import { MAX_RECORDING_BYTES } from "./replay";
 
 const file = { name: "1234-abcdef.jsonl", bytes: 100 };
 const signal = new AbortController().signal;
 afterEach(() => vi.unstubAllGlobals());
 describe("Hub recording transport", () => {
+  it("formats UTC and legacy timestamps in the browser timezone with a zone label", () => {
+    const name = "2026-11-05T14-30-12.123Z-abcdef.jsonl";
+    const expected = new Date("2026-11-05T14:30:12.123Z").toLocaleString(undefined, { timeZoneName: "short" });
+    expect(formatHubRecordingTimestamp(name)).toBe(expected);
+    expect(formatHubRecordingTimestamp(`${Date.parse("2026-11-05T14:30:12.123Z")}-abcdef.jsonl`)).toBe(expected);
+  });
   it("accepts current UTC recording names alongside legacy epoch names", async () => {
     const current = { name: "2026-11-05T14-30-12.123Z-abcdef.jsonl", bytes: 100 };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([current, file]))));

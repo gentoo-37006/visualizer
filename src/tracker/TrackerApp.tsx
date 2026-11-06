@@ -17,7 +17,7 @@ import { usePoseFeed } from "./usePoseFeed";
 import { useReplay } from "./useReplay";
 import { usePlaybackShortcut } from "../app/hooks/usePlaybackShortcut";
 import { useHubRecordings } from "./useHubRecordings";
-import { hubRecordingTimestamp } from "./hubRecordings";
+import { formatHubRecordingTimestamp } from "./hubRecordings";
 import { useFieldImage } from "./useFieldImage";
 import styles from "../app/page.module.css";
 import tracker from "./tracker.module.css";
@@ -58,7 +58,7 @@ export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", prev
   const sourceControl = <div className={`${styles.importExportActions} ${tracker.sourceControl}`} aria-busy={hub.busy}>
     <Select className={tracker.recordingSelect} aria-label="Hub recording" value={hub.selected} onChange={(value) => hub.select(value)} disabled={hub.files.length === 0}>
       {hub.files.length === 0 && <option value="">{hub.busy ? "Loading..." : "No recordings"}</option>}
-      {hub.files.map((file) => <option key={file.name} value={file.name}>{new Date(hubRecordingTimestamp(file.name)).toLocaleString()} ({Math.ceil(file.bytes / 1024)} KB)</option>)}
+      {hub.files.map((file) => <option key={file.name} value={file.name}>{`${formatHubRecordingTimestamp(file.name)} (${Math.ceil(file.bytes / 1024)} KB)`}</option>)}
     </Select>
     <button className={styles.secondaryIconButton} disabled={preview || hub.busy} onClick={() => void hub.refresh()} aria-label="Refresh Hub recordings" title="Refresh recordings">
       <RefreshIcon />

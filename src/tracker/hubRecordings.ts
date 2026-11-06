@@ -8,6 +8,10 @@ export function hubRecordingTimestamp(name: string): number {
   if (!name.includes("T")) return Number(name.split("-")[0]);
   return Date.parse(name.slice(0, 24).replace(/T(\d{2})-(\d{2})-(\d{2})/, "T$1:$2:$3"));
 }
+
+export function formatHubRecordingTimestamp(name: string): string {
+  return new Date(hubRecordingTimestamp(name)).toLocaleString(undefined, { timeZoneName: "short" });
+}
 export async function listHubRecordings(signal: AbortSignal): Promise<HubRecording[]> {
   const response = await fetch("/visualizer/recordings", { cache: "no-store", signal });
   if (!response.ok) throw new Error("Could not list Hub recordings");
