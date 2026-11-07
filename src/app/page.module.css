@@ -110,6 +110,7 @@
 }
 
 .modeTabs button {
+  --tab-fill: var(--surface);
   position: relative;
   min-width: 0;
   padding: 12px 8px;
@@ -130,8 +131,8 @@
   background-color: var(--surface);
 }
 
-.modeTabs button[aria-selected="true"]::before,
-.modeTabs button[aria-selected="true"]::after {
+.modeTabs button:is([aria-selected="true"], :hover)::before,
+.modeTabs button:is([aria-selected="true"], :hover)::after {
   content: "";
   position: absolute;
   bottom: 0;
@@ -140,17 +141,21 @@
   pointer-events: none;
 }
 
-.modeTabs button[aria-selected="true"]::before {
+.modeTabs button:is([aria-selected="true"], :hover)::before {
   right: 100%;
-  background: radial-gradient(circle at top left, transparent var(--border-radius), var(--surface) var(--border-radius));
+  background: radial-gradient(circle at top left, transparent var(--border-radius), var(--tab-fill) var(--border-radius));
 }
 
-.modeTabs button[aria-selected="true"]::after {
+.modeTabs button:is([aria-selected="true"], :hover)::after {
   left: 100%;
-  background: radial-gradient(circle at top right, transparent var(--border-radius), var(--surface) var(--border-radius));
+  background: radial-gradient(circle at top right, transparent var(--border-radius), var(--tab-fill) var(--border-radius));
 }
 
-.modeTabs button[aria-selected="false"]:hover { background: var(--surface-hover); }
+.modeTabs button[aria-selected="false"]:hover {
+  --tab-fill: var(--surface-hover);
+  z-index: 2;
+  background: var(--tab-fill);
+}
 .modeTabs button:focus-visible {
   outline: none;
   text-decoration: underline;
