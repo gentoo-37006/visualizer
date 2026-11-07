@@ -109,6 +109,13 @@
   background-color: var(--background);
 }
 
+.modeTabs:has(button[aria-selected="false"]:hover) {
+  background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
+  background-size: calc(2 * var(--border-radius)) var(--border-radius);
+  background-position: center top;
+  background-repeat: no-repeat;
+}
+
 .modeTabs button {
   position: relative;
   min-width: 0;
