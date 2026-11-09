@@ -578,16 +578,23 @@ export const buildPlaybackTimeline = (
     const previousPoint = points[pointIndex - 1];
     if (!point || !previousPoint) return;
 
-    const positionSamples = samplePathSegmentsWithParameters(previousPoint, getPathSegments(point), 64);
+    const positionSamples = samplePathSegmentsWithParameters(previousPoint, getPathSegments(point), 64)
+      .map((sample) => ({ ...sample, nx: sample.x, ny: sample.y }));
+    const cumulativeDistances = [0];
+    positionSamples.slice(1).forEach((sample, index) => {
+      cumulativeDistances.push(
+        cumulativeDistances[index] + measureFieldDistance(positionSamples[index], sample)
+      );
+    });
+    const distance = cumulativeDistances.at(-1) ?? 0;
     const headingMode = point.headingMode ?? "constant";
-    const samples: ForesightSample[] = positionSamples.map((sample) => {
-      const t = sample.pathT;
+    const samples: ForesightSample[] = positionSamples.map((sample, index) => {
       let heading = point.constantHeading ?? 0;
       if (headingMode === "linear") {
         heading = interpolateHeadingRange(
           point.startHeading ?? 0,
           point.endHeading ?? 0,
-          t,
+          distance > 0 ? cumulativeDistances[index] / distance : 0,
           point.linearStartT ?? 0,
           point.linearEndT ?? 1
         );
@@ -598,15 +605,8 @@ export const buildPlaybackTimeline = (
         if (point.tangentReversed) heading = normalizeHeading(heading + 180);
       }
 
-      return { ...sample, nx: sample.x, ny: sample.y, heading };
+      return { ...sample, heading };
     });
-    const cumulativeDistances = [0];
-    samples.slice(1).forEach((sample, index) => {
-      cumulativeDistances.push(
-        cumulativeDistances[cumulativeDistances.length - 1] + measureFieldDistance(samples[index], sample)
-      );
-    });
-    const distance = cumulativeDistances[cumulativeDistances.length - 1] ?? 0;
 
     if (distance > 0.001) {
       const simulation = simulateForesightPath(

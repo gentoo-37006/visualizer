@@ -140,7 +140,7 @@ describe("playback timeline", () => {
     expect(pathSegment.samples[64]).toMatchObject({ nx: 0.6, ny: 0.2 });
   });
 
-  it("weights compound-path heading t by segment length like Pedro", () => {
+  it("uses full-path distance for heading at a compound-path join", () => {
     const path: Point = {
       ...straightPath,
       nx: 1,
@@ -156,6 +156,33 @@ describe("playback timeline", () => {
     expect(segment.kind).toBe("path");
     if (segment.kind !== "path") return;
     expect(segment.samples[64].heading).toBeCloseTo(20, 1);
+  });
+
+  it("uses geometric completion across an unequal line and spline for the heading window", () => {
+    const path: Point = {
+      ...straightPath,
+      controlPoints: [{ id: "first", nx: 0.55, ny: 0.5, pathGeometry: "linear" }],
+      pathGeometry: "spline",
+      startControlOffsetNx: 0,
+      startControlOffsetNy: 0,
+      endControlOffsetNx: 0.2,
+      endControlOffsetNy: 0,
+      headingMode: "linear",
+      startHeading: 10,
+      endHeading: 90,
+      linearStartT: 0.25,
+      linearEndT: 0.75,
+    };
+    const [segment] = timelineFor([start, path], [{ id: "s1", kind: "path", pointId: path.id }]).segments;
+    expect(segment.kind).toBe("path");
+    if (segment.kind !== "path") return;
+
+    expect(segment.samples[64].heading).toBe(10);
+    const sample = segment.samples[96];
+    const completion = (sample.nx - start.nx) / (path.nx - start.nx);
+    expect(sample.heading).toBeCloseTo(interpolateHeadingRange(10, 90, completion, 0.25, 0.75), 6);
+    expect(sample.heading).not.toBeCloseTo(interpolateHeadingRange(10, 90, sample.pathT, 0.25, 0.75), 1);
+    expect(segment.samples.at(-1)?.heading).toBe(90);
   });
 
   it("does not add a pre-path rotation when the path starts at a different heading", () => {
