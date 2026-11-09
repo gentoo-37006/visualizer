@@ -506,7 +506,7 @@ export function PointCard({
                   />
                 </div>
                 <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>Start T</label>
+                  <label className={styles.inputLabel}>Start %</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -521,7 +521,7 @@ export function PointCard({
                   />
                 </div>
                 <div className={styles.inputGroup}>
-                  <label className={styles.inputLabel}>End T</label>
+                  <label className={styles.inputLabel}>End %</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -635,7 +635,7 @@ export function PointCard({
                   </div>
                   <div className={styles.pathActionInputs}>
                     <div className={styles.actionTriggerTGroup}>
-                      <label className={styles.inputLabel} htmlFor={`path-action-distance-${index}-${trigger.id}`}>Distance fraction</label>
+                      <label className={styles.inputLabel} htmlFor={`path-action-distance-${index}-${trigger.id}`}>Start %</label>
                       <input
                         id={`path-action-distance-${index}-${trigger.id}`}
                         type="text"
