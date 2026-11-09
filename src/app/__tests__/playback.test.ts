@@ -499,6 +499,25 @@ describe("autonomous period budget", () => {
     expect(markers[2].label).toContain("Remove INTAKE");
   });
 
+  it("places the halfway action at half the full distance of an unequal compound path", () => {
+    const point: Point = {
+      ...straightPath,
+      controlPoints: [{ id: "first", nx: 0.55, ny: 0.5, pathGeometry: "linear" }],
+      pathGeometry: "spline",
+      startControlOffsetNx: 0,
+      startControlOffsetNy: 0,
+      endControlOffsetNx: 0.2,
+      endControlOffsetNy: 0,
+      actionTriggers: [{ id: "middle", mode: "submit", actionName: "SCORE", t: 0.5 }],
+    };
+    const points = [start, point];
+    const timeline = timelineFor(points, [{ id: "path", kind: "path", pointId: point.id }]);
+    const [marker] = getPlaybackActionMarkers(timeline);
+
+    expect(getPlaybackPoseAtTime(timeline, marker.time, points).pose.nx).toBeCloseTo(0.625, 4);
+    expect(marker.label).toContain("50.0% of distance");
+  });
+
   it("does not create markers for paths without triggers or wait segments", () => {
     expect(getPlaybackActionMarkers(timelineFor([start, straightPath], [{ id: "path", kind: "path", pointId: straightPath.id }]))).toEqual([]);
   });

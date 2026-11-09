@@ -635,8 +635,9 @@ export function PointCard({
                   </div>
                   <div className={styles.pathActionInputs}>
                     <div className={styles.actionTriggerTGroup}>
-                      <label className={styles.inputLabel}>T</label>
+                      <label className={styles.inputLabel} htmlFor={`path-action-distance-${index}-${trigger.id}`}>Distance fraction</label>
                       <input
+                        id={`path-action-distance-${index}-${trigger.id}`}
                         type="text"
                         inputMode="decimal"
                         className={styles.inputField}

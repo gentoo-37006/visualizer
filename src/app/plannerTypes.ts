@@ -23,6 +23,7 @@ export type PathActionTriggerMode = "submit" | "remove";
 export type PathActionTrigger = {
   id: string;
   mode: PathActionTriggerMode;
+  /** Full-path distance fraction in [0, 1]; keep the key for saved projects. */
   t: number;
   actionName: string;
 };

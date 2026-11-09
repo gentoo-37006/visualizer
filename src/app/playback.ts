@@ -68,13 +68,8 @@ export const getPlaybackActionMarkers = (timeline: PlaybackTimeline): PlaybackAc
     if (segment.kind !== "path") return [];
     return (segment.point.actionTriggers ?? []).flatMap((trigger) => {
       if (!Number.isFinite(trigger.t)) return [];
-      const t = clamp01(trigger.t);
-      const endIndex = Math.max(1, findFirstIndexAtOrAfter(segment.samples.length, (i) => segment.samples[i].pathT, t));
-      const start = segment.samples[endIndex - 1];
-      const end = segment.samples[endIndex];
-      if (!start || !end) return [];
-      const progress = end.pathT > start.pathT ? clamp01((t - start.pathT) / (end.pathT - start.pathT)) : 0;
-      const distance = interpolateNumber(segment.cumulativeDistances[endIndex - 1], segment.cumulativeDistances[endIndex], progress);
+      const fraction = clamp01(trigger.t);
+      const distance = fraction * segment.profile.distance;
       const frameIndex = findFirstIndexAtOrAfter(segment.simulationFrames.length, (i) => segment.simulationFrames[i].distance, distance);
       if (frameIndex < 0) return [];
       const frameEnd = segment.simulationFrames[frameIndex];
@@ -83,7 +78,7 @@ export const getPlaybackActionMarkers = (timeline: PlaybackTimeline): PlaybackAc
       return [{
         id: `${segmentIndex}-${trigger.id}`,
         time: segment.startTime + interpolateNumber(frameStart.time, frameEnd.time, frameProgress),
-        label: `${trigger.mode === "remove" ? "Remove" : "Submit"} ${trigger.actionName} (${segment.point.name ?? "Path"}, t=${t.toFixed(2)})`,
+        label: `${trigger.mode === "remove" ? "Remove" : "Submit"} ${trigger.actionName} (${segment.point.name ?? "Path"}, ${(fraction * 100).toFixed(1)}% of distance)`,
       }];
     });
   });
