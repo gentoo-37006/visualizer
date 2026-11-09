@@ -12,8 +12,8 @@ npm install
 npm run dev
 ```
 
-`npm test`, `npm run lint` and `npm run build` all have to pass before a push to
-`main` deploys — see [.github/workflows/deploy-gcp.yml](.github/workflows/deploy-gcp.yml).
+On pushes to `main`, [CI](.github/workflows/ci.yml) runs lint, TypeScript checks,
+and tests. The workflow does not deploy the site.
 
 Everything is a single client-side page. Your work in progress, imported
 constants and poses all live in the browser's local storage, and the app
