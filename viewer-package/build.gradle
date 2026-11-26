@@ -1,17 +1,26 @@
+import com.vanniktech.maven.publish.DeploymentValidation
+
 plugins {
-    id 'maven-publish'
+    id 'com.vanniktech.maven.publish.base' version '0.36.0'
 }
 
-def packageVersion = 'rolling-SNAPSHOT'
+group = 'io.github.gentoo-37006'
+def releaseSeries = '0.1'
+version = providers.environmentVariable('VISUALIZER_RELEASE_BUILD')
+    .map { "${releaseSeries}.${it}" }.orElse("${releaseSeries}.0-SNAPSHOT").get()
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    archiveBaseName = project.name
+    archiveVersion = project.version.toString()
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
 
 def trackerAssets = layout.projectDirectory.dir('../dist/tracker')
 def viewerZip = tasks.register('packageViewer', Zip) {
     from(trackerAssets)
-    archiveBaseName = 'field-viewer'
-    archiveVersion = packageVersion
-    destinationDirectory = layout.buildDirectory.dir('distributions')
-    preserveFileTimestamps = false
-    reproducibleFileOrder = true
+    from('../LICENSE')
 
     // Check the inputs before Zip can skip an empty source directory.
     inputs.file(trackerAssets.file('index.html'))
@@ -19,28 +28,62 @@ def viewerZip = tasks.register('packageViewer', Zip) {
     inputs.file(trackerAssets.file('viewer.css'))
 }
 
+def viewerSources = tasks.register('viewerSources', Jar) {
+    archiveClassifier = 'sources'
+    from('..') {
+        include 'src/**', 'public/fields/**', 'public/robot.png', 'scripts/build-tracker.mjs',
+            'package.json', 'package-lock.json', 'tsconfig.json', 'LICENSE*', 'NOTICE*'
+    }
+}
+
+def viewerDocumentation = tasks.register('viewerDocumentation', Jar) {
+    archiveClassifier = 'javadoc'
+    from('../README.md', '../LICENSE')
+}
+
 publishing {
     publications {
         viewer(MavenPublication) {
-            groupId = 'io.github.gentoo-37006'
-            artifactId = 'field-viewer'
-            version = packageVersion
             artifact(viewerZip)
+            artifact(viewerSources)
+            artifact(viewerDocumentation)
             pom {
-                name = 'Onboard Field Viewer'
-                description = 'Static field viewer bundled into myrelib for FTC Control Hubs'
+                packaging = 'zip'
+                name = 'Visualizer'
+                description = 'Onboard field visualizer bundled into myrelib for FTC Control Hubs.'
                 url = 'https://github.com/gentoo-37006/visualizer'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
+                        distribution = 'repo'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'gentoo-37006'
+                        name = 'Gentoo Robotics'
+                        url = 'https://github.com/gentoo-37006'
+                    }
+                }
+                scm {
+                    url = 'https://github.com/gentoo-37006/visualizer'
+                    connection = 'scm:git:https://github.com/gentoo-37006/visualizer.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/gentoo-37006/visualizer.git'
+                }
             }
         }
     }
-    repositories {
-        maven {
-            name = 'GitHubPackages'
-            url = uri('https://maven.pkg.github.com/gentoo-37006/visualizer')
-            credentials {
-                username = providers.environmentVariable('GITHUB_ACTOR').orNull
-                password = providers.environmentVariable('GITHUB_TOKEN').orNull
-            }
-        }
+}
+
+if (providers.gradleProperty('verifyPublication').isPresent()) {
+    publishing.repositories.maven {
+        name = 'verification'
+        url = layout.buildDirectory.dir('publication-test-repo')
+    }
+} else {
+    mavenPublishing {
+        publishToMavenCentral(false, DeploymentValidation.PUBLISHED)
+        signAllPublications()
     }
 }

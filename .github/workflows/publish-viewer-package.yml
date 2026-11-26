@@ -1,27 +1,23 @@
-name: Publish rolling viewer
+name: Publish visualizer to Maven Central
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
-  group: rolling-viewer-package
+  group: maven-central-publication
   cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      VISUALIZER_RELEASE_BUILD: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # A queued or rerun job should always publish current main.
-          ref: refs/heads/main
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -42,7 +38,10 @@ jobs:
       - run: npm test
       - run: npm run build:tracker
 
-      - name: Publish to GitHub Packages
+      - name: Publish the visualizer ZIP to Maven Central
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gradle -p viewer-package publishViewerPublicationToGitHubPackagesRepository
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+        run: gradle -p viewer-package publishAndReleaseToMavenCentral

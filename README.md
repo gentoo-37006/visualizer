@@ -182,16 +182,36 @@ npm ci
 npm run build:tracker
 ```
 
-The output is `dist/tracker`. Pushes to `main` trigger a workflow that builds
-and tests the tracker, then updates `io.github.gentoo-37006:field-viewer:rolling-SNAPSHOT`
-in GitHub Packages. myrelib checks for the latest published viewer on online
-builds. The workflow can also run manually from GitHub Actions.
+The output is `dist/tracker`. The manual **Publish visualizer to Maven Central**
+workflow builds and tests the tracker, then publishes the ZIP as
+`io.github.gentoo-37006:visualizer`. It appends the workflow run number as the
+patch version of the `0.1` release series. myrelib follows the latest `0.x`
+release and downloads it without credentials.
+
+The ZIP includes the project's [MIT license](LICENSE) and the bundled
+third-party code notices. Before the first release, verify
+`io.github.gentoo-37006` in the [Central Portal](https://central.sonatype.com/).
+In **Settings → Secrets and variables → Actions**, add the following secrets,
+which can be shared with myrelib at the organization level.
+
+| Secret | Value |
+| --- | --- |
+| `MAVEN_CENTRAL_USERNAME` | Central Portal token username |
+| `MAVEN_CENTRAL_PASSWORD` | Central Portal token password |
+| `MAVEN_SIGNING_KEY` | ASCII-armored GPG private key |
+| `MAVEN_SIGNING_PASSWORD` | Passphrase for the signing key |
+
+After the workflow is in the default branch, select **Actions → Publish
+visualizer to Maven Central → Run workflow**. Publish the visualizer before
+running myrelib's publish workflow for the first time.
 
 To verify the publishing build locally, run this after building the tracker:
 
 ```sh
-gradle -p viewer-package publishToMavenLocal
+gradle -p viewer-package -PverifyPublication publish
 ```
+
+The verification artifacts are written to `viewer-package/build/publication-test-repo/`.
 
 Rebuild and fully install the consuming Robot Controller APK after updating
 these assets; Sloth does not replace library assets. Connect to the Control Hub's Wi-Fi and open
