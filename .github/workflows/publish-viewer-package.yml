@@ -1,6 +1,9 @@
 name: Publish visualizer to Maven Central
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
