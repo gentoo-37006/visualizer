@@ -1,9 +1,6 @@
 name: Publish visualizer to Maven Central
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -41,10 +38,14 @@ jobs:
       - run: npm test
       - run: npm run build:tracker
 
-      - name: Publish the visualizer ZIP to Maven Central
+      - name: Stage the signed visualizer ZIP
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
-        run: gradle -p viewer-package publishAndReleaseToMavenCentral
+        run: gradle -p viewer-package -PverifyPublication -PsignPublication publish
+
+      - name: Publish the visualizer ZIP to Maven Central
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: python3 .github/scripts/publish-central.py viewer-package/build/publication-test-repo visualizer

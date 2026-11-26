@@ -182,10 +182,10 @@ npm ci
 npm run build:tracker
 ```
 
-The output is `dist/tracker`. On pushes to `main`, **Publish visualizer to Maven
-Central** builds and tests the tracker, then publishes the ZIP as
-`io.github.gentoo-37006:visualizer`. It appends the workflow run number as the
-patch version of the `0.1` release series. myrelib follows the latest `0.x`
+The output is `dist/tracker`. The manual **Publish visualizer to Maven Central**
+workflow builds and tests the tracker, then publishes the ZIP as
+`io.github.gentoo-37006:visualizer` in a deployment named `visualizer-<version>`.
+The workflow run number is the patch version of the `0.1` release series. myrelib follows the latest `0.x`
 release and downloads it without credentials.
 
 The ZIP includes the project's [MIT license](LICENSE) and the bundled
@@ -201,9 +201,9 @@ which can be shared with myrelib at the organization level.
 | `MAVEN_SIGNING_KEY` | ASCII-armored GPG private key |
 | `MAVEN_SIGNING_PASSWORD` | Passphrase for the signing key |
 
-You can also start a run from **Actions → Publish visualizer to Maven Central
-→ Run workflow**. Publish the visualizer before running myrelib's publish
-workflow for the first time.
+Start a release from **Actions → Publish visualizer to Maven Central → Run
+workflow**. Publish the visualizer before running myrelib's publish workflow
+for the first time.
 
 To verify the publishing build locally, run this after building the tracker:
 
