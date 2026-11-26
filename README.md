@@ -182,16 +182,15 @@ npm ci
 npm run build:tracker
 ```
 
-The output is `dist/tracker`. A `viewer-v1.0.0` tag triggers the GitHub
-Actions workflow that builds and publishes `io.github.gentoo-37006:field-viewer:1.0.0@zip`
-to GitHub Packages. The tag suffix supplies the package version. In myrelib,
-set `viewerPackageVersion=1.0.0` after the package is available to bundle its
-assets through Gradle.
+The output is `dist/tracker`. Pushes to `main` trigger a workflow that builds
+and tests the tracker, then updates `io.github.gentoo-37006:field-viewer:rolling-SNAPSHOT`
+in GitHub Packages. myrelib checks for the latest published viewer on online
+builds. The workflow can also run manually from GitHub Actions.
 
 To verify the publishing build locally, run this after building the tracker:
 
 ```sh
-gradle -p viewer-package publishToMavenLocal -PviewerPackageVersion=1.0.0-local
+gradle -p viewer-package publishToMavenLocal
 ```
 
 Rebuild and fully install the consuming Robot Controller APK after updating

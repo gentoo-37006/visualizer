@@ -1,9 +1,14 @@
-name: Publish viewer package
+name: Publish rolling viewer
 
 on:
   push:
-    tags:
-      - 'viewer-v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: rolling-viewer-package
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -15,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # A queued or rerun job should always publish current main.
+          ref: refs/heads/main
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -38,7 +45,4 @@ jobs:
       - name: Publish to GitHub Packages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >
-          gradle -p viewer-package
-          publishViewerPublicationToGitHubPackagesRepository
-          -PviewerPackageVersion="${GITHUB_REF_NAME#viewer-v}"
+        run: gradle -p viewer-package publishViewerPublicationToGitHubPackagesRepository
