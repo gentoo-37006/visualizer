@@ -22,7 +22,7 @@ import { useFieldImage } from "./useFieldImage";
 import styles from "../app/page.module.css";
 import tracker from "./tracker.module.css";
 
-export function TrackerApp({ assetBase = "", endpoint = "/visualizer/pose", preview = false }: { assetBase?: string; endpoint?: string; preview?: boolean }) {
+export function TrackerApp({ assetBase = "", endpoint = "/visualizer/", preview = false }: { assetBase?: string; endpoint?: string; preview?: boolean }) {
   const field = useFieldImage(assetBase);
   const [showTrail, setShowTrail] = useState(true);
   const [showPaths, setShowPaths] = useState(true);

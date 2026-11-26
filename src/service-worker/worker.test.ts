@@ -105,9 +105,10 @@ describe("versioned offline worker", () => {
 
   it("never caches robot APIs or unrelated routes", async () => {
     const app = worker();
-    for (const route of ["/onboard-preview", "/onboard-preview/", "/onboard-preview?test=true", "/visualizer/pose", "/visualizer/recordings", "/visualizer/recording?name=123-a.jsonl", "/not-a-page"]) {
+    for (const route of ["/onboard-preview", "/onboard-preview/", "/onboard-preview?test=true", "/visualizer/recordings", "/visualizer/recording?name=123-a.jsonl", "/not-a-page"]) {
       expect(await app.request(route)).toBeUndefined();
     }
+    expect(await app.request("/visualizer/", "cors")).toBeUndefined();
     expect(await app.request("/?_rsc=123", "cors")).toBeUndefined();
     expect(await app.request("/_next/static/chunks/app/onboard-preview/page-hash.js", "cors")).toBeUndefined();
     expect(app.fetch).not.toHaveBeenCalled();

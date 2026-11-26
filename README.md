@@ -182,11 +182,16 @@ npm ci
 npm run build:tracker
 ```
 
-The output is `dist/tracker`. To update the version packaged in the sibling
-robot project's `myrelib` module:
+The output is `dist/tracker`. A `viewer-v1.0.0` tag triggers the GitHub
+Actions workflow that builds and publishes `io.github.gentoo-37006:field-viewer:1.0.0@zip`
+to GitHub Packages. The tag suffix supplies the package version. In myrelib,
+set `viewerPackageVersion=1.0.0` after the package is available to bundle its
+assets through Gradle.
 
-```bash
-npm run build:tracker -- ../biobuzz-2027/myrelib/src/main/assets/field-viewer
+To verify the publishing build locally, run this after building the tracker:
+
+```sh
+gradle -p viewer-package publishToMavenLocal -PviewerPackageVersion=1.0.0-local
 ```
 
 Rebuild and fully install the consuming Robot Controller APK after updating
@@ -195,7 +200,7 @@ these assets; Sloth does not replace library assets. Connect to the Control Hub'
 does not need internet access, Next.js, or ADB. Robot-code changes can continue
 to use Sloth after that initial installation. Viewer/bridge changes need another
 full install. The `/visualizer` route renders the same tracker in the development app;
-it expects a same-origin `/visualizer/pose` feed. Both builds use the same sidebar,
+on the Hub, its browser code requests live data from `/visualizer/` with `Accept: application/json`. Both builds use the same sidebar,
 rounded mode tabs, replay controls, and field renderer. The browser titles are
 **Online Visualizer** for the planner and **Onboard Visualizer** for the Hub.
 
@@ -221,12 +226,14 @@ the planner; older recordings retain their sampled geometry and final endpoint.
 
 The robot-side implementation, bundled assets, and tests belong to `myrelib`.
 Its web handlers live in `gentoo.myrelib.field`; myrelib stays in the APK while
-Sloth replaces TeamCode. `BaseRobot` owns feed sessions and `MotionController`
-publishes poses.
+Sloth replaces TeamCode. `BaseRobot` samples cached robot state for both the live
+viewer and match recording.
 
-The read-only `/visualizer/pose` endpoint returns version-1 snapshots with a session ID,
-sequence number, active flag, opmode name, sample age in milliseconds, nullable
-`{x, y, heading}` pose, and nullable `{width, length}` robot dimensions. The
+A normal request to `/visualizer/` returns the viewer. With `Accept: application/json`,
+the same URL returns a version-1 snapshot with a session ID, sequence number,
+active flag, opmode name, sample age in milliseconds, nullable `{x, y, heading}`
+pose, nullable `{width, length}` robot dimensions, active path information, and
+all sampled `states` and `errors`. The
 viewer polls without overlapping requests at up to 20 Hz, keeps at most 30
 seconds/600 trail samples, and resets the trail when a new opmode starts.
 It distinguishes idle, unavailable, stale, disconnected, and paused feeds.

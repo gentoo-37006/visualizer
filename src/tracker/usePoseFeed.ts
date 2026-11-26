@@ -19,7 +19,11 @@ export function usePoseFeed(endpoint: string, paused: boolean) {
       controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1500);
       try {
-        const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(endpoint, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error("Pose feed unavailable");
         const next = parsePoseSnapshot(await response.json());
         if (!next) throw new Error("Invalid pose snapshot");
